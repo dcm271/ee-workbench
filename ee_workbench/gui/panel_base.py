@@ -10,6 +10,7 @@ from PyQt6.QtWidgets import (QCheckBox, QComboBox, QHBoxLayout, QLabel, QLineEdi
                              QPlainTextEdit, QPushButton, QVBoxLayout, QWidget)
 
 from ..worker import InstrumentWorker
+from . import touch
 from .widgets import C_WARN, MONO, CsvRecorder
 
 SPANS = {"30 s": 30, "2 min": 120, "10 min": 600, "1 h": 3600, "All": None}
@@ -112,7 +113,7 @@ class PanelBase(QWidget):
         self.worker.poll_enabled = not paused
         self.pause_btn.setText("Resume polling" if paused else "Pause polling")
 
-    def build_trend_bar(self) -> QHBoxLayout:
+    def build_trend_bar(self):
         bar = QHBoxLayout()
         bar.addWidget(QLabel("Span"))
         self.span_combo = QComboBox()
@@ -125,17 +126,29 @@ class PanelBase(QWidget):
         clr = QPushButton("Clear")
         clr.clicked.connect(self.clear_trend)
         bar.addWidget(clr)
-        bar.addStretch(1)
         self.trend_stats = QLabel("")
         self.trend_stats.setFont(QFont(MONO, 9))
-        bar.addWidget(self.trend_stats)
-        bar.addStretch(1)
         self.rate_label = QLabel("")
         self.rate_label.setStyleSheet("color:#8a8f98;")
-        bar.addWidget(self.rate_label)
         self.rec_btn = QPushButton("● Record CSV")
         self.rec_btn.setCheckable(True)
         self.rec_btn.toggled.connect(self._toggle_record)
+        if touch.TOUCH:
+            # Narrow screen: controls on one row, the stats line underneath.
+            bar.addStretch(1)
+            bar.addWidget(self.rec_btn)
+            stats = QHBoxLayout()
+            stats.addWidget(self.trend_stats, 1)
+            stats.addWidget(self.rate_label)
+            col = QVBoxLayout()
+            col.setSpacing(2)
+            col.addLayout(bar)
+            col.addLayout(stats)
+            return col
+        bar.addStretch(1)
+        bar.addWidget(self.trend_stats)
+        bar.addStretch(1)
+        bar.addWidget(self.rate_label)
         bar.addWidget(self.rec_btn)
         return bar
 

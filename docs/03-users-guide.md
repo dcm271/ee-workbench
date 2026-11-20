@@ -172,11 +172,16 @@ Use the 66321D as the input supply, the 6632A as a second rail, and the 3456A on
 
 Open the resources `SIM::66321D`, `SIM::6632A` and `SIM::3456A` to try every feature without hardware. The simulated 66321D drives a phone-like load drawing short current bursts. The 6632A drives a 10 Ω resistor. The 3456A reads a slightly drifting 5 V rail, about 1 kΩ, or 120 mV AC.
 
+## Touch screens
+
+On a touch screen (or any display of 1280×800 or smaller) the app uses a touch layout: larger controls, a numeric keypad for setpoints, two taps to turn an output on, and an **＋ Add instrument** dialog instead of the toolbar. See *Raspberry Pi & Touch Screen* for details.
+
 ## Keyboard and mouse reference
 
 | Action | How |
 |---|---|
 | All outputs off | **Esc** |
+| Full screen on/off | **F11** |
 | Apply a setpoint | **Enter** in the box, or **Set** |
 | Zoom a plot | mouse wheel over the plot |
 | Pan a plot | drag |

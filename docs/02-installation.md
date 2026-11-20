@@ -7,6 +7,8 @@ subtitle: From a fresh Linux machine to a working GPIB bus
 
 These steps take a fresh Ubuntu machine to EE Workbench talking to your instruments. It takes about 15 minutes, mostly compile time.
 
+> **Raspberry Pi?** `scripts/setup-pi.sh` does all of this in one step. See *Raspberry Pi & Touch Screen*.
+
 ## 1. Get the project
 
 The project lives in `~/Dev/ee-workbench`:
@@ -14,9 +16,11 @@ The project lives in `~/Dev/ee-workbench`:
 ```
 ee-workbench/
 ├── run.sh                       launch the GUI
+├── ee-workbench.desktop         launcher for the menu, desktop or autostart
 ├── ee_workbench/                application source
 ├── scripts/
 │   ├── install-gpib-driver.sh   builds and installs linux-gpib
+│   ├── setup-pi.sh              complete Raspberry Pi setup
 │   ├── build-docs.sh            renders these docs to PDF
 │   └── make_screenshots.py      regenerates the user-guide images
 ├── vendor/linux-gpib/           linux-gpib source (fetched from SourceForge)
@@ -111,16 +115,21 @@ You only need to edit it to use a different adapter (`board_type`). You don't ne
 
 ### Desktop launcher (optional)
 
-Save as `~/.local/share/applications/ee-workbench.desktop`:
+The repository includes `ee-workbench.desktop`. It assumes the project is in `~/ee-workbench` and starts full screen, so edit its `Exec=` line to suit, for example:
 
 ```
-[Desktop Entry]
-Type=Application
-Name=EE Workbench
 Exec=/home/ghost/Dev/ee-workbench/run.sh
-Terminal=false
-Categories=Science;Electronics;
 ```
+
+Then copy it to `~/.local/share/applications/` (menu), `~/Desktop/`, or `~/.config/autostart/` (start at login).
+
+### Command-line options
+
+| Option | Effect |
+|---|---|
+| `--fullscreen` | Start full screen. **F11** toggles, and a ✕ quit button appears in the top bar. |
+| `--touch` / `--no-touch` | Force the touch or desktop layout (normally chosen automatically) |
+| `--hide-cursor` | Hide the mouse pointer (touch-only setups) |
 
 ## Alternatives
 

@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=EE Workbench
+Comment=Bench power supply and DMM control over GPIB
+# Assumes the repository was cloned to ~/ee-workbench. If it lives elsewhere,
+# change the path below (or run scripts/setup-pi.sh, which fills it in).
+# Drop --fullscreen to start in a normal window.
+Exec=sh -c "exec ~/ee-workbench/run.sh --fullscreen"
+Icon=utilities-system-monitor
+Terminal=false
+Categories=Electronics;Science;

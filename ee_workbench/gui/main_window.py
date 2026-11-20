@@ -13,6 +13,8 @@ from PyQt6.QtWidgets import (QApplication, QComboBox, QFrame, QHBoxLayout, QLabe
 
 from ..instruments import MODELS, SIM_MODELS
 from ..transport import describe, list_resources
+from . import touch
+from .connect_dialog import ConnectDialog
 from .dmm_panel import DmmPanel
 from .supply_panel import SupplyPanel
 from .widgets import C_MUTED, dark_palette
@@ -28,17 +30,22 @@ class MainWindow(QMainWindow):
         central = QWidget()
         root = QVBoxLayout(central)
         root.setContentsMargins(8, 8, 8, 4)
-        root.addWidget(self._build_bar())
+        root.addWidget(self._build_touch_bar() if touch.TOUCH else self._build_bar())
         self.tabs = QTabWidget()
         self.tabs.setObjectName("instruments")
         self.tabs.setTabsClosable(True)
         self.tabs.setDocumentMode(True)
         self.tabs.tabCloseRequested.connect(self.close_tab)
         root.addWidget(self.tabs, 1)
-        self.empty = QLabel("Pick a resource and model above, then Connect.\n\n"
-                            "Tip: ⌕ scans the GPIB bus. The HP 3456A has no ID query, "
-                            "so select it by model.\nTry SIM::66321D, SIM::6632A or "
-                            "SIM::3456A to explore without hardware.")
+        self.empty = QLabel(
+            "Tap  ＋ Add instrument  to connect.\n\nThe HP 3456A has no ID query, so pick "
+            "its model.\nSIM::… entries let you explore without hardware."
+            if touch.TOUCH else
+            "Pick a resource and model above, then Connect.\n\n"
+            "Tip: ⌕ scans the GPIB bus. The HP 3456A has no ID query, "
+            "so select it by model.\nTry SIM::66321D, SIM::6632A or "
+            "SIM::3456A to explore without hardware.")
+        self.empty.setWordWrap(True)
         self.empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.empty.setStyleSheet(f"color:{C_MUTED}; font-size:14px;")
         root.addWidget(self.empty, 1)
@@ -50,12 +57,62 @@ class MainWindow(QMainWindow):
         sc = QShortcut(QKeySequence(Qt.Key.Key_Escape), self)
         sc.setContext(Qt.ShortcutContext.ApplicationShortcut)
         sc.activated.connect(self.all_outputs_off)
+        fs = QShortcut(QKeySequence(Qt.Key.Key_F11), self)
+        fs.activated.connect(self.toggle_fullscreen)
 
-        self.refresh_resources()
+        if not touch.TOUCH:
+            self.refresh_resources()
         for model, res in initial or []:
             self.open_instrument(res, model)
 
-    # ---------------------------------------------------------------- bar
+    # ---------------------------------------------------------------- bars
+    def _build_touch_bar(self):
+        w = QFrame()
+        w.setObjectName("bar")
+        lay = QHBoxLayout(w)
+        lay.setContentsMargins(6, 4, 6, 4)
+        add = QPushButton("＋ Add instrument")
+        add.clicked.connect(self.add_dialog)
+        lay.addWidget(add)
+        lay.addStretch(1)
+        off = QPushButton("ALL OUTPUTS OFF")
+        off.setMinimumWidth(220)
+        off.setStyleSheet("QPushButton { background:#8e1c1c; color:white; font-weight:bold; "
+                          "font-size:16px; }")
+        off.clicked.connect(self.all_outputs_off)
+        lay.addWidget(off)
+        self.quit_btn = QPushButton("✕")
+        self.quit_btn.setFixedWidth(56)
+        self.quit_btn.setToolTip("Quit EE Workbench")
+        self.quit_btn.clicked.connect(self._confirm_quit)
+        self.quit_btn.setVisible(False)   # shown in full-screen mode (no title bar)
+        lay.addWidget(self.quit_btn)
+        return w
+
+    def add_dialog(self):
+        dlg = ConnectDialog(self, {p.resource for p in self.panels()})
+        if dlg.exec() and dlg.resource:
+            self.open_instrument(dlg.resource, dlg.model)
+
+    def _confirm_quit(self):
+        if QMessageBox.question(self, "Quit", "Quit EE Workbench?\n\nSupply outputs stay "
+                                "as they are.") == QMessageBox.StandardButton.Yes:
+            self.close()
+
+    def set_kiosk(self, on: bool):
+        """Full screen has no title bar, so show our own quit button."""
+        if hasattr(self, "quit_btn"):
+            self.quit_btn.setVisible(on)
+
+    def toggle_fullscreen(self):
+        if self.isFullScreen():
+            self.showNormal()
+            self.showMaximized()
+            self.set_kiosk(False)
+        else:
+            self.set_kiosk(True)
+            self.showFullScreen()
+
     def _build_bar(self):
         w = QFrame()
         w.setObjectName("bar")
@@ -100,9 +157,14 @@ class MainWindow(QMainWindow):
         off.setStyleSheet("QPushButton { color:#ef9a9a; font-weight:bold; }")
         off.clicked.connect(self.all_outputs_off)
         lay.addWidget(off)
+        self.quit_btn = QPushButton("✕")
+        self.quit_btn.setToolTip("Quit EE Workbench")
+        self.quit_btn.clicked.connect(self._confirm_quit)
+        self.quit_btn.setVisible(False)   # shown in full screen (no title bar)
+        lay.addWidget(self.quit_btn)
         return w
 
-    def refresh_resources(self, scan=False):
+    def refresh_resources(self, scan=True):
         cur = self.res_combo.currentText()
         self.res_combo.blockSignals(True)
         self.res_combo.clear()
@@ -145,7 +207,8 @@ class MainWindow(QMainWindow):
         if resource.upper() in SIM_MODELS and model == "auto":
             model = SIM_MODELS[resource.upper()]
         cls = DmmPanel if model == "3456A" else SupplyPanel
-        panel = cls(resource, model, int(self.baud_combo.currentText()))
+        baud = int(self.baud_combo.currentText()) if hasattr(self, "baud_combo") else 9600
+        panel = cls(resource, model, baud)
         where = describe(resource)
         idx = self.tabs.addTab(panel, f"… {where}")
         self.tabs.setCurrentIndex(idx)
@@ -204,10 +267,29 @@ def main(argv=None):
     ap.add_argument("targets", nargs="*",
                     help="resources to open, optionally MODEL@RESOURCE, e.g. "
                          "GPIB0::5::INSTR 3456A@GPIB0::22::INSTR SIM::6632A")
+    mode = ap.add_mutually_exclusive_group()
+    mode.add_argument("--touch", dest="touch", action="store_true", default=None,
+                      help="force the touch-screen layout")
+    mode.add_argument("--no-touch", dest="touch", action="store_false",
+                      help="force the desktop layout")
+    ap.add_argument("--fullscreen", action="store_true",
+                    help="start full screen (F11 toggles; a quit button appears)")
+    ap.add_argument("--hide-cursor", action="store_true",
+                    help="hide the mouse pointer (touch-only kiosks)")
     args = ap.parse_args(argv)
     app = QApplication(sys.argv[:1])
     app.setApplicationName("EE Workbench")
     dark_palette(app)
+    if touch.detect(app, args.touch):
+        app.setStyleSheet(app.styleSheet() + touch.TOUCH_STYLE)
     win = MainWindow([parse_target(t) for t in args.targets])
-    win.show()
+    if args.hide_cursor:
+        app.setOverrideCursor(Qt.CursorShape.BlankCursor)
+    if args.fullscreen:
+        win.set_kiosk(True)
+        win.showFullScreen()
+    elif touch.TOUCH:
+        win.showMaximized()
+    else:
+        win.show()
     return app.exec()

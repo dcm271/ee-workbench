@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Build and install linux-gpib for the NI GPIB-USB-HS on this machine.
+# Build and install linux-gpib for the NI GPIB-USB-HS on this machine
+# (Ubuntu or Raspberry Pi OS).
 #
 # Ubuntu's kernel is built with CONFIG_GPIB disabled, so the ni_usb_gpib driver
 # has to be compiled out-of-tree from vendor/linux-gpib (SourceForge git).
@@ -20,14 +21,24 @@ step() { printf '\n\033[1;36m==> %s\033[0m\n' "$*"; }
 }
 
 step "Installing build dependencies (sudo)"
-sudo apt-get install -y build-essential autoconf automake libtool flex bison \
-  pkg-config "linux-headers-$KVER"
+sudo apt-get install -y build-essential autoconf automake libtool flex bison pkg-config
+# Ubuntu and Raspberry Pi OS Bookworm both ship linux-headers-<uname -r>;
+# older Pi OS releases used raspberrypi-kernel-headers instead.
+if ! sudo apt-get install -y "linux-headers-$KVER"; then
+  sudo apt-get install -y raspberrypi-kernel-headers
+fi
 
-step "Building kernel modules for $KVER"
-make -C "$SRC/linux-gpib-kernel" -j"$(nproc)"
+# Newer kernels can carry the GPIB drivers themselves; only build when the
+# running kernel has no ni_usb_gpib module (rebuild with FORCE_KERNEL_BUILD=1).
+if modinfo ni_usb_gpib >/dev/null 2>&1 && [[ -z "${FORCE_KERNEL_BUILD:-}" ]]; then
+  step "Kernel already provides ni_usb_gpib ($(modinfo -n ni_usb_gpib)); skipping module build"
+else
+  step "Building kernel modules for $KVER"
+  make -C "$SRC/linux-gpib-kernel" -j"$(nproc)"
 
-step "Installing kernel modules (sudo)"
-sudo make -C "$SRC/linux-gpib-kernel" install
+  step "Installing kernel modules (sudo)"
+  sudo make -C "$SRC/linux-gpib-kernel" install
+fi
 
 step "Building libgpib + gpib_config + udev rules"
 cd "$SRC/linux-gpib-user"
@@ -46,7 +57,7 @@ if [[ -f /etc/gpib.conf ]]; then
 fi
 sudo tee /etc/gpib.conf >/dev/null <<'EOF'
 /* Minimal config: one NI GPIB-USB-HS as system controller.
-   The 66321B is addressed by the application (default GPIB address 5). */
+   Instruments are addressed by the application (e.g. GPIB0::5::INSTR). */
 interface {
     minor       = 0
     board_type  = "ni_usb_b"
@@ -80,5 +91,5 @@ cat <<EOF
 Next:
   * Log out and back in (or run 'newgrp gpib') so the new group applies.
   * Quick bus test:   ibtest   (choose d, address 5, then write '*IDN?' and read)
-  * Launch the GUI:   $HERE/run.sh GPIB0::5::INSTR
+  * Launch the GUI:   $HERE/run.sh
 EOF

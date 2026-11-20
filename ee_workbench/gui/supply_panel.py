@@ -14,6 +14,7 @@ from PyQt6.QtWidgets import (QCheckBox, QComboBox, QFileDialog, QFormLayout, QFr
                              QVBoxLayout, QWidget)
 
 from ..instruments.base import SupplyCaps, SupplyPoll, SupplyReading, Setpoints
+from . import touch
 from .panel_base import PanelBase
 from .widgets import (C_CURR, C_DVM, C_MUTED, C_ON, C_POW, C_VOLT, C_WARN, MONO,
                       Readout, SafeSpin, TraceBuffer, fmt_current, fmt_si)
@@ -39,27 +40,36 @@ class SupplyPanel(PanelBase):
         self.buf = TraceBuffer(5)
         self.worker.waveform.connect(self.on_waveform)
 
+        self._armed = False  # touch: first tap on OUTPUT arms, second turns ON
         root = QHBoxLayout(self)
         root.setContentsMargins(0, 4, 0, 0)
+        console = self.build_console_tab(
+            "Command, e.g.  MEAS:CURR:ACDC?   (6632A: VOUT?  STS?)")
+        self.wave_tab = self._build_wave_tab()
         split = QSplitter(Qt.Orientation.Horizontal)
+        split.setChildrenCollapsible(False)
         split.addWidget(self._build_left())
         self.tabs = QTabWidget()
         self.tabs.addTab(self._build_trend_tab(), "Trend")
-        self.wave_tab = self._build_wave_tab()
-        self.tabs.addTab(self.build_console_tab(
-            "Command, e.g.  MEAS:CURR:ACDC?   (6632A: VOUT?  STS?)"), "Console")
+        if touch.TOUCH:
+            # Touch (1280x800): the left column holds only readouts + output
+            # controls so they never need scrolling; setup gets its own tab.
+            setup = QWidget()
+            sv = QVBoxLayout(setup)
+            sv.addLayout(self._build_header())
+            sv.addWidget(self._build_measure_group())
+            sv.addStretch(1)
+            self.tabs.addTab(touch.scroll(setup), "Setup")
+        self.tabs.addTab(console, "Console")
         split.addWidget(self.tabs)
         split.setStretchFactor(1, 1)
-        split.setSizes([420, 1000])
+        split.setSizes([440, 840] if touch.TOUCH else [420, 1000])
         root.addWidget(split)
         self.set_enabled(False)
         self.start()
 
     # ================================================================ build
-    def _build_left(self):
-        inner = QWidget()
-        lay = QVBoxLayout(inner)
-        lay.setContentsMargins(0, 0, 6, 0)
+    def _build_header(self):
         head = QHBoxLayout()
         self.idn_label = QLabel(f"Connecting to {self.resource}…")
         self.idn_label.setWordWrap(True)
@@ -68,17 +78,21 @@ class SupplyPanel(PanelBase):
         self.reset_btn = QPushButton("*RST")
         self.reset_btn.clicked.connect(self.reset_instrument)
         head.addWidget(self.reset_btn)
-        lay.addLayout(head)
+        return head
+
+    def _build_left(self):
+        inner = QWidget()
+        lay = QVBoxLayout(inner)
+        lay.setContentsMargins(0, 0, 6, 0)
+        if not touch.TOUCH:
+            lay.addLayout(self._build_header())
         lay.addWidget(self._build_readouts())
         lay.addWidget(self._build_output_group())
-        lay.addWidget(self._build_measure_group())
+        if not touch.TOUCH:
+            lay.addWidget(self._build_measure_group())
         lay.addStretch(1)
-        sa = QScrollArea()
-        sa.setWidget(inner)
-        sa.setWidgetResizable(True)
-        sa.setFrameShape(QFrame.Shape.NoFrame)
-        sa.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        sa.setMinimumWidth(400)
+        sa = touch.scroll(inner)
+        sa.setMinimumWidth(420 if touch.TOUCH else 400)
         return sa
 
     def _build_readouts(self):
@@ -95,8 +109,8 @@ class SupplyPanel(PanelBase):
         top.addWidget(self.mode_badge)
         top.addWidget(self.flags_label, 1)
         lay.addLayout(top)
-        self.r_volt = Readout("Voltage", C_VOLT, 26)
-        self.r_curr = Readout("Current", C_CURR, 26)
+        self.r_volt = Readout("Voltage", C_VOLT, 30 if touch.TOUCH else 26)
+        self.r_curr = Readout("Current", C_CURR, 30 if touch.TOUCH else 26)
         self.r_pow = Readout("Power", C_POW, 16)
         self.r_dvm = Readout("DVM", C_DVM, 18)
         for r in (self.r_volt, self.r_curr, self.r_pow, self.r_dvm):
@@ -137,6 +151,10 @@ class SupplyPanel(PanelBase):
         b.clicked.connect(apply_fn)
         spin.lineEdit().returnPressed.connect(apply_fn)
         row.addWidget(b)
+        if touch.TOUCH:
+            # The keypad's own Set button sends the value; no separate button needed.
+            touch.attach_keypad(spin, label, apply_fn)
+            b.setVisible(False)
         lab = QLabel(label)
         form.addRow(lab, row)
         return lab, b
@@ -146,7 +164,7 @@ class SupplyPanel(PanelBase):
         v = QVBoxLayout(g)
         self.out_btn = QPushButton("OUTPUT —")
         self.out_btn.setCheckable(True)
-        self.out_btn.setMinimumHeight(44)
+        self.out_btn.setMinimumHeight(60 if touch.TOUCH else 44)
         self.out_btn.setToolTip("Toggle the output. Esc turns every supply's output OFF.")
         self.out_btn.clicked.connect(lambda on: self.set_output(on))
         v.addWidget(self.out_btn)
@@ -236,8 +254,10 @@ class SupplyPanel(PanelBase):
         row.addWidget(QLabel("×"))
         row.addWidget(self.sw_tint, 1)
         b = QPushButton("Set")
-        b.setFixedWidth(48)
+        b.setFixedWidth(64 if touch.TOUCH else 48)
         b.clicked.connect(lambda: self._apply_sweep(self.sw_points.value(), self.sw_tint.value()))
+        touch.attach_keypad(self.sw_points, "Samples per reading")
+        touch.attach_keypad(self.sw_tint, "Sample interval")
         row.addWidget(b)
         add("Samples", samples)
         self.acq_label = QLabel("")
@@ -265,6 +285,7 @@ class SupplyPanel(PanelBase):
         self.poll_ms.setSpecialValueText("none (as fast as possible)")
         self.poll_ms.setToolTip("Extra delay between readings")
         self.poll_ms.valueChanged.connect(self._apply_poll)
+        touch.attach_keypad(self.poll_ms, "Poll delay")
         form.addRow("Poll delay", self.poll_ms)
         form.addRow(self.build_pause_button())
         self._update_acq_label()
@@ -294,6 +315,7 @@ class SupplyPanel(PanelBase):
         self.c_imax = self.p_i.plot(pen=pg.mkPen(C_CURR, width=1, style=Qt.PenStyle.DotLine))
         self.c_d = self.p_d.plot(pen=pg.mkPen(C_DVM, width=1.5))
         self.p_d.setVisible(False)
+        touch.plots(self.p_v, self.p_i, self.p_d)
         v.addWidget(self.glw, 1)
         return w
 
@@ -319,6 +341,12 @@ class SupplyPanel(PanelBase):
         bar.addWidget(self.wf_span)
         self.wf_points.valueChanged.connect(self._update_wf_span)
         self.wf_tint.valueChanged.connect(self._update_wf_span)
+        touch.attach_keypad(self.wf_points, "Waveform points")
+        touch.attach_keypad(self.wf_tint, "Waveform interval")
+        if touch.TOUCH:
+            bar.addStretch(1)
+            v.addLayout(bar)
+            bar = QHBoxLayout()
         self.wf_btn = QPushButton("Capture")
         self.wf_btn.clicked.connect(self.capture)
         bar.addWidget(self.wf_btn)
@@ -333,6 +361,7 @@ class SupplyPanel(PanelBase):
         self.wf_plot.showGrid(x=True, y=True, alpha=0.15)
         self.wf_plot.setLabel("bottom", "Time", units="s")
         self.wf_curve = self.wf_plot.plot(pen=pg.mkPen(C_CURR, width=1.2))
+        touch.plots(self.wf_plot)
         v.addWidget(self.wf_plot, 1)
         self.wf_stats = QLabel("Digitizes the output at up to 64 kS/s (MEAS:ARR). The 663xx "
                                "sends array data slowly (~4 KB/s), so 1024 points takes ~3 s.")
@@ -344,10 +373,26 @@ class SupplyPanel(PanelBase):
 
     # ================================================================ actions
     def set_output(self, on: bool):
+        if on and touch.TOUCH and not self._armed:
+            # A stray touch must never energize a load: ON needs a second tap.
+            self._armed = True
+            self.out_btn.setChecked(False)
+            self.out_btn.setText("Tap again to turn ON")
+            self.out_btn.setStyleSheet("QPushButton { background:#8a6d00; color:white; "
+                                       "font-weight:bold; font-size:17px; }")
+            QTimer.singleShot(3000, self._disarm)
+            return
+        self._armed = False
         self.out_btn.setChecked(bool(self.sp.output))  # revert until confirmed
         self.cmd(lambda d, x: d.set_output(x), on)
 
+    def _disarm(self):
+        if self._armed:
+            self._armed = False
+            self._style_output_button()
+
     def output_off(self):
+        self._armed = False
         if self.connected:
             self.set_output(False)
 
@@ -435,12 +480,7 @@ class SupplyPanel(PanelBase):
         if self.caps.has_resistance:
             self.sp_res.set_from_instrument(sp.resistance)
         self.ocp_chk.setChecked(bool(sp.ocp))
-        self.out_btn.setChecked(bool(sp.output))
-        self.out_btn.setText({True: "OUTPUT ON", False: "OUTPUT OFF",
-                              None: "OUTPUT ?  (state unknown)"}[sp.output])
-        self.out_btn.setStyleSheet(
-            f"QPushButton {{ background:{C_ON}; color:white; font-weight:bold; font-size:15px; }}"
-            if sp.output else "QPushButton { font-weight:bold; font-size:15px; }")
+        self._style_output_button()
         if self.caps.has_meas_setup:
             self.sw_points.blockSignals(True)
             self.sw_points.setValue(sp.sweep_points)
@@ -502,6 +542,16 @@ class SupplyPanel(PanelBase):
         if not self.wf_btn.isEnabled() and self.connected:
             self.wf_btn.setEnabled(True)
             self.wf_btn.setText("Capture")
+
+    def _style_output_button(self):
+        on = self.sp.output
+        size = 18 if touch.TOUCH else 15
+        self.out_btn.setChecked(bool(on))
+        self.out_btn.setText({True: "OUTPUT ON", False: "OUTPUT OFF",
+                              None: "OUTPUT ?  (state unknown)"}[on])
+        self.out_btn.setStyleSheet(
+            f"QPushButton {{ background:{C_ON}; color:white; font-weight:bold; font-size:{size}px; }}"
+            if on else f"QPushButton {{ font-weight:bold; font-size:{size}px; }}")
 
     # ================================================================ trend
     def clear_trend(self):

@@ -14,6 +14,7 @@ from PyQt6.QtWidgets import (QCheckBox, QComboBox, QFormLayout, QFrame, QGridLay
 
 from ..instruments.base import DmmConfig, DmmReading
 from ..instruments.hp3456a import FUNCTIONS, NPLC_CHOICES, ranges_for
+from . import touch
 from .panel_base import PanelBase
 from .widgets import C_DMM, C_MUTED, C_WARN, MONO, Readout, TraceBuffer, fmt_fixed
 
@@ -32,36 +33,59 @@ class DmmPanel(PanelBase):
 
         root = QHBoxLayout(self)
         root.setContentsMargins(0, 4, 0, 0)
+        console = self.build_console_tab(
+            "3456A program codes, e.g.  F1 R4 T3   (Send + read fetches one reading)",
+            read_button=True)
         split = QSplitter(Qt.Orientation.Horizontal)
-        split.addWidget(self._build_left())
+        split.setChildrenCollapsible(False)
+        inner = QWidget()
+        lay = QVBoxLayout(inner)
+        lay.setContentsMargins(0, 0, 6, 0)
         tabs = QTabWidget()
         tabs.addTab(self._build_trend_tab(), "Trend")
-        tabs.addTab(self.build_console_tab(
-            "3456A program codes, e.g.  F1 R4 T3   (Send + read fetches one reading)",
-            read_button=True), "Console")
+        if not touch.TOUCH:
+            lay.addWidget(self._build_idn())
+        g = self._build_reading_group()
+        g.layout().insertWidget(0, self._build_name_edit())
+        lay.addWidget(g)
+        if touch.TOUCH:
+            # Touch: big reading + statistics on the left; configuration in a tab.
+            setup = QWidget()
+            sv = QVBoxLayout(setup)
+            sv.addWidget(self._build_idn())
+            sv.addWidget(self._build_config_group())
+            sv.addStretch(1)
+            tabs.addTab(touch.scroll(setup), "Setup")
+        else:
+            lay.addWidget(self._build_config_group())
+        lay.addStretch(1)
+        sa = touch.scroll(inner)
+        sa.setMinimumWidth(420 if touch.TOUCH else 400)
+        split.addWidget(sa)
+        tabs.addTab(console, "Console")
         split.addWidget(tabs)
         split.setStretchFactor(1, 1)
-        split.setSizes([420, 1000])
+        split.setSizes([440, 840] if touch.TOUCH else [420, 1000])
         root.addWidget(split)
         self.set_enabled(False)
         self.start()
 
-    def _build_left(self):
-        inner = QWidget()
-        lay = QVBoxLayout(inner)
-        lay.setContentsMargins(0, 0, 6, 0)
+    def _build_idn(self):
         self.idn_label = QLabel(f"Connecting to {self.resource}…")
         self.idn_label.setWordWrap(True)
         self.idn_label.setStyleSheet(f"color:{C_MUTED};")
-        lay.addWidget(self.idn_label)
+        return self.idn_label
 
-        g = QGroupBox("Reading")
-        gl = QVBoxLayout(g)
+    def _build_name_edit(self):
         self.name_edit = QLineEdit()
         self.name_edit.setPlaceholderText("Channel name, e.g. “E3610A output”")
         self.name_edit.textChanged.connect(self._name_changed)
-        gl.addWidget(self.name_edit)
-        self.readout = Readout("DCV", C_DMM, 28)
+        return self.name_edit
+
+    def _build_reading_group(self):
+        g = QGroupBox("Reading")
+        gl = QVBoxLayout(g)
+        self.readout = Readout("DCV", C_DMM, 34 if touch.TOUCH else 28)
         gl.addWidget(self.readout)
         self.ovld_label = QLabel("")
         self.ovld_label.setStyleSheet(f"color:{C_WARN}; font-weight:bold;")
@@ -72,19 +96,27 @@ class DmmPanel(PanelBase):
             cap = QLabel(key)
             cap.setStyleSheet(f"color:{C_MUTED};")
             val = QLabel("—")
-            val.setFont(QFont(MONO, 10))
+            val.setFont(QFont(MONO, 12 if touch.TOUCH else 10))
             val.setAlignment(Qt.AlignmentFlag.AlignRight)
             stats.addWidget(cap, n // 2, (n % 2) * 2)
             stats.addWidget(val, n // 2, (n % 2) * 2 + 1)
             self.stat_labels[key] = val
         stats.setColumnStretch(1, 1)
         stats.setColumnStretch(3, 1)
+        stats.setHorizontalSpacing(12)
         gl.addLayout(stats)
         hint = QLabel("Statistics cover the trend span shown.")
         hint.setStyleSheet(f"color:{C_MUTED}; font-size:11px;")
         gl.addWidget(hint)
-        lay.addWidget(g)
+        self.null_btn = QPushButton("Null")
+        self.null_btn.setCheckable(True)
+        self.null_btn.setToolTip("Math NULL (M3): subtract the next reading from all later ones. "
+                                 "E.g. short the leads, then press Null.")
+        self.null_btn.clicked.connect(self._apply)
+        gl.addWidget(self.null_btn)
+        return g
 
+    def _build_config_group(self):
         g = QGroupBox("Configuration")
         form = QFormLayout(g)
         form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
@@ -112,12 +144,6 @@ class DmmPanel(PanelBase):
         row.addWidget(self.az_chk)
         row.addWidget(self.filt_chk)
         form.addRow("", row)
-        self.null_btn = QPushButton("Null")
-        self.null_btn.setCheckable(True)
-        self.null_btn.setToolTip("Math NULL (M3): subtract the next reading from all later ones. "
-                                 "E.g. short the leads, then press Null.")
-        self.null_btn.clicked.connect(self._apply)
-        form.addRow("", self.null_btn)
         self.poll_ms = QSpinBox()
         self.poll_ms.setRange(0, 3_600_000)
         self.poll_ms.setSingleStep(100)
@@ -125,18 +151,10 @@ class DmmPanel(PanelBase):
         self.poll_ms.setSpecialValueText("none (as fast as possible)")
         self.poll_ms.valueChanged.connect(
             lambda v: setattr(self.worker, "interval_s", v / 1000))
+        touch.attach_keypad(self.poll_ms, "Poll delay")
         form.addRow("Poll delay", self.poll_ms)
         form.addRow(self.build_pause_button())
-        lay.addWidget(g)
-        lay.addStretch(1)
-
-        sa = QScrollArea()
-        sa.setWidget(inner)
-        sa.setWidgetResizable(True)
-        sa.setFrameShape(QFrame.Shape.NoFrame)
-        sa.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        sa.setMinimumWidth(400)
-        return sa
+        return g
 
     def _build_trend_tab(self):
         w = QWidget()
@@ -148,6 +166,7 @@ class DmmPanel(PanelBase):
         self.plot.setClipToView(True)
         self.plot.setDownsampling(auto=True, mode="peak")
         self.curve = self.plot.plot(pen=pg.mkPen(C_DMM, width=1.5))
+        touch.plots(self.plot)
         v.addWidget(self.plot, 1)
         return w
 

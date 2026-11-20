@@ -20,6 +20,8 @@ Each instrument opens in its own tab with live readouts, trend plots on a shared
 ./run.sh SIM::66321D                       # no hardware needed
 ```
 
+On a Raspberry Pi with a touch screen, `./scripts/setup-pi.sh` installs everything and sets the app to start full screen at login. `ee-workbench.desktop` is a ready-made launcher. See `docs/05-raspberry-pi.md`.
+
 ## Documentation
 
 The Markdown sources are in [`docs/`](docs/), and the rendered PDFs in `docs/pdf/` (build them with `scripts/build-docs.sh`):
@@ -28,6 +30,7 @@ The Markdown sources are in [`docs/`](docs/), and the rendered PDFs in `docs/pdf
 2. [Installation & Setup](docs/02-installation.md): Python environment, GPIB driver, troubleshooting
 3. [User's Guide](docs/03-users-guide.md): every panel and control, and measurement workflows
 4. [Technical Reference](docs/04-technical-reference.md): command sets, timings, architecture, adding instruments
+5. [Raspberry Pi & Touch Screen](docs/05-raspberry-pi.md): one-step Pi setup, full-screen launcher, touch layout
 
 ## Tests
 

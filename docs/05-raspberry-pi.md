@@ -1,0 +1,116 @@
+---
+title: Raspberry Pi & Touch Screen
+subtitle: Running EE Workbench full screen on a 10-inch 1280×800 panel
+---
+
+# Raspberry Pi & Touch Screen
+
+EE Workbench runs on a Raspberry Pi with a touch screen as a dedicated bench controller. The layout is tuned for a **10-inch 1280×800** panel. A mouse and keyboard work alongside touch.
+
+## What you need
+
+| Item | Notes |
+|---|---|
+| Raspberry Pi 4 or 5 | 2 GB RAM is plenty. A Pi 3 works but plots refresh more slowly. |
+| Raspberry Pi OS (64-bit, desktop), Bookworm or later | The *Lite* image has no desktop and won't run the GUI. |
+| 10-inch 1280×800 touch screen | Other sizes work; see [Other screen sizes](#other-screen-sizes). |
+| NI GPIB-USB-HS | Same adapter as on the PC; see *Hardware & Resources*. |
+| Keyboard and mouse (optional) | Useful for the console and channel names. |
+
+## One-step setup
+
+Clone the project to `~/ee-workbench` and run the setup script:
+
+```bash
+git clone git@github.com:dcm271/ee-workbench.git ~/ee-workbench
+cd ~/ee-workbench
+./scripts/setup-pi.sh
+sudo reboot
+```
+
+The SSH clone needs a GitHub key on the Pi. For read-only use, `https://github.com/dcm271/ee-workbench.git` works too.
+
+The script is safe to re-run. It does the following:
+
+1. Installs the system packages. PyQt6 and numpy come from apt, because building them with pip on a Pi takes hours. It also installs `qt6-wayland` for the Bookworm desktop.
+2. Creates `.venv` and installs pyqtgraph, pyvisa-py and gpib-ctypes into it.
+3. Runs the test suite against the simulators.
+4. Builds the GPIB driver with `scripts/install-gpib-driver.sh`. It uses the Pi's `linux-headers-$(uname -r)` package, and skips the kernel-module build if the running kernel already provides `ni_usb_gpib`.
+5. Adds **EE Workbench** to the application menu and to `~/.config/autostart`, so it starts full screen at every login.
+
+| Option | Effect |
+|---|---|
+| `--no-gpib` | Skip the driver build, e.g. to try the simulators first |
+| `--no-autostart` | Menu entry only; don't launch at login |
+| `--docs` | Also install the PDF tool-chain (Markdown + WeasyPrint) |
+
+> **After a kernel upgrade** (`apt full-upgrade` can bring a new kernel), re-run `scripts/install-gpib-driver.sh`. The module is built for one specific kernel.
+
+## The launcher file
+
+The repository includes **`ee-workbench.desktop`**. Copy it to the place you want the launcher:
+
+| Where | Copy to |
+|---|---|
+| Start at login | `~/.config/autostart/` |
+| Application menu | `~/.local/share/applications/` |
+| Desktop icon | `~/Desktop/` (the file manager may ask you to trust it the first time) |
+
+It assumes the project is in `~/ee-workbench` and starts full screen. If you cloned somewhere else, edit its `Exec=` line. Remove `--fullscreen` to start in a window. `setup-pi.sh` installs the file with the correct path filled in.
+
+## Full screen
+
+| Action | How |
+|---|---|
+| Start full screen | `./run.sh --fullscreen` (the launcher does this) |
+| Leave / re-enter full screen | **F11** |
+| Quit | **✕** at the top right (only shown in full screen), then confirm |
+| Hide the mouse pointer | `./run.sh --fullscreen --hide-cursor` (for touch-only setups) |
+
+Quitting does not change any supply's output. Use **ALL OUTPUTS OFF** first if you want the bench safe.
+
+To stop the screen from blanking during long logging runs, open `sudo raspi-config`, go to **Display Options → Screen Blanking**, and choose **No**.
+
+## Touch mode
+
+The touch layout turns on automatically when the app finds a touch screen, or a display of 1280×800 or smaller. You can also set it yourself:
+
+| Force it | How |
+|---|---|
+| Touch layout | `./run.sh --touch`, or `EEWB_TOUCH=1` |
+| Desktop layout | `./run.sh --no-touch`, or `EEWB_TOUCH=0` |
+
+![Touch layout, 66321D at 1280×800](images/touch-supply.png)
+
+What's different from the desktop layout:
+
+- **Larger controls.** Buttons, boxes, check boxes and tabs are at least 52 px tall (about 9 mm).
+- **The left column holds only readouts and output controls,** so the essentials never need scrolling. The supply's identity, *RST and measurement setup move to a **Setup** tab next to Trend, Waveform and Console. On the 3456A the reading and statistics stay on the left, and function, range and integration move to Setup.
+- **Numeric keypad.** Tapping a voltage, current, OVP, sample count or poll-delay box opens a keypad. It shows the allowed range, and **Set** greys out for values outside it. Pressing **Set** also sends the value to the instrument, so there's no separate Set button. The physical keyboard works on the keypad too: digits, `.`, `-`, Backspace, Delete (clear), **Enter** (set) and **Esc** (cancel).
+
+  ![Keypad](images/touch-keypad.png)
+
+- **Two taps to turn an output ON.** The first tap arms the button (amber, "Tap again to turn ON"). A second tap within 3 seconds turns the output on. Turning an output **off** always takes one tap.
+- **ALL OUTPUTS OFF** is a large red button in the top bar. **Esc** still does the same from the keyboard, except while a keypad is open, where Esc only cancels the keypad.
+- **Plots don't pan or zoom** under a finger. The **Span** selector sets the time window, and Y always autoscales. Scroll areas scroll by dragging.
+- **＋ Add instrument** replaces the connection toolbar. It scans the GPIB bus when it opens and lists what it finds plus the simulators. Pick one (or enter an address with the keypad), choose the model, then tap **Connect**. For the 3456A, tap the **3456A DMM** model button, because the meter can't identify itself.
+
+  ![Add instrument](images/touch-connect.png)
+
+![Touch layout, 3456A](images/touch-dmm.png)
+
+Typing is still available where it makes sense: channel names and the console use the keyboard as usual.
+
+## Other screen sizes
+
+The touch layout needs about 1180×460 pixels. Smaller screens (an 800×480 panel, for example) will clip the right-hand side, so use the desktop layout with a lower resolution, or a larger screen. Larger screens just give the plots more room.
+
+## Troubleshooting on the Pi
+
+| Problem | Fix |
+|---|---|
+| `linux-headers-…` not found | `sudo apt full-upgrade && sudo reboot`, then re-run the setup. The headers must match the running kernel. |
+| Window opens but looks tiny or huge | Check **Screen Configuration** in the Pi menu is at 1280×800. Qt follows the desktop's scale setting. |
+| `qt.qpa.plugin: Could not load the Qt platform plugin "wayland"` | `sudo apt install qt6-wayland`, or run with `QT_QPA_PLATFORM=xcb`. |
+| Touches land in the wrong place | Use the Pi's **Screen Configuration → Touchscreen** to map the touch device to the right display. |
+| App doesn't start at login | Run `~/ee-workbench/run.sh --fullscreen` from a terminal to see the error. Check `~/.config/autostart/ee-workbench.desktop` points at the right folder. |

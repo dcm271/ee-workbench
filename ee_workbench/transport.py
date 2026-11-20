@@ -42,32 +42,21 @@ def scan_gpib(board: int = 0) -> list[int]:
         return []
 
 
-def list_resources(scan: bool = False) -> list[str]:
-    found: list[str] = []
-    try:
-        import pyvisa
+def list_resources(scan: bool = True) -> list[str]:
+    """GPIB listeners plus USB serial ports, then the simulators.
 
-        rm = pyvisa.ResourceManager(_visa_library())
-        found = [r for r in rm.list_resources() if not r.startswith("TCPIP")]
-    except Exception:
-        pass
-    if scan:
-        for pad in scan_gpib():
-            r = f"GPIB0::{pad}::INSTR"
-            if r not in found:
-                found.append(r)
-    if not any(r.startswith("GPIB") for r in found):
+    Uses a passive GPIB scan (~0.2 s) rather than pyvisa's list_resources(),
+    which probes every interface type and took ~8 s on the test machine.
+    Anything else can be typed in by hand.
+    """
+    import glob
+
+    found = [f"GPIB0::{pad}::INSTR" for pad in scan_gpib()] if scan else []
+    if not found:
         found.append("GPIB0::5::INSTR")
-
-    # Hide legacy on-board /dev/ttyS* ports (usually dozens of phantoms);
-    # they can still be typed in by hand.
-    found = [r for r in found if "/dev/ttyS" not in r]
-
-    def rank(r: str):
-        m = re.match(r"GPIB\d*::(\d+)", r)
-        return (0, int(m.group(1)), r) if m else (1, 0, r)
-
-    return sorted(found, key=rank) + SIM_RESOURCES
+    for dev in sorted(glob.glob("/dev/ttyUSB*") + glob.glob("/dev/ttyACM*")):
+        found.append(f"ASRL{dev}::INSTR")
+    return found + SIM_RESOURCES
 
 
 def describe(resource: str) -> str:
