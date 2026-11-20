@@ -118,7 +118,9 @@ Source: 3456A Operating & Service Manual §III and the Hepperle quick-reference 
 
 **Status** comes from a serial poll (octal masks): 004 data ready, 020 illegal state or syntax error, 040 program memory error.
 
-**Still to verify on real hardware:** the exact value the 3456A sends on overload (the app treats |x| ≥ 9×10⁹ as overload), the R2 ohms range (the reference card is ambiguous), and whether ohms readings arrive in Ω or kΩ. Check these with the Console tab (**Send + read**) when the meter is connected.
+**Confirmed on the real 3456A** (address 22, 2026-11-20): readings arrive in `E` notation, e.g. `-1.177060E+0` or `-01.39843E+0` with the overrange digit, followed by CR LF. An open-circuit ohms reading returns about `+2E+15`, which the app shows as OVLD. A single T3 reading at 1 PLC with autozero takes about 56 ms, and the app polls at about 8–11 readings/s.
+
+**Still to verify:** the R2 ohms range (the reference card is ambiguous) and whether ohms readings arrive in Ω or kΩ. Measure a known resistor with **Send + read** in the Console tab to check.
 
 ## Simulators
 

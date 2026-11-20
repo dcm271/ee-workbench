@@ -8,6 +8,8 @@ from ee_workbench.sim.s3456a import Sim3456A
 @pytest.mark.parametrize("raw,val", [
     ("+04.999870+0", 4.99987), ("-0120.3400-3", -0.12034), ("+01.000270+3", 1000.27),
     ("+1.234567E+0", 1.234567), (" +0.5\r", 0.5), ("+05.0,+05.1", 5.0),
+    # captured from the real instrument
+    ("-1.177060E+0\r\n", -1.17706), ("-01.39843E+0", -1.39843), ("+2.000000E+15", 2e15),
 ])
 def test_parse_reading(raw, val):
     assert parse_reading(raw) == pytest.approx(val)

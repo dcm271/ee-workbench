@@ -138,7 +138,8 @@ Categories=Science;Electronics;
 | `/dev/gpib0` missing | Unplug and replug the adapter. Check `dmesg \| tail -30` for `ni_usb_gpib` messages. |
 | "Permission denied" opening GPIB0 | You're not in the `gpib` group yet: log out and back in. |
 | Scan finds nothing, but the driver is loaded | Instruments off, cable loose, or the 3456A in TALK ONLY mode. |
-| Connect times out on one instrument | Wrong address, or two instruments sharing an address. |
+| Connect times out on one instrument | Wrong address, or two instruments sharing an address. Use **⌕ Scan GPIB** to see the real addresses. |
+| "GPIB address 0" warning | Address 0 is the adapter itself. The 3456A defaults to 22, the 66321D to 5. |
 | "Couldn't identify the instrument" | Auto-detect only knows the supplies. Pick the model by hand (the 3456A always needs this). |
 | Readings stop and "Polling paused" appears | A bus error occurred. Fix the cause, then press **Resume polling**. |
 | 66321D waveform capture is slow | Normal: the instrument sends arrays at about 4 KB/s (about 3 s per 1024 points). |

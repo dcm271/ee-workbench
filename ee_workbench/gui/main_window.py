@@ -1,13 +1,14 @@
 """Main window: connection bar + one tab per connected instrument."""
 from __future__ import annotations
 
+import re
 import sys
 
 import pyqtgraph as pg
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QKeySequence, QShortcut
 from PyQt6.QtWidgets import (QApplication, QComboBox, QFrame, QHBoxLayout, QLabel,
-                             QMainWindow, QPushButton, QStatusBar, QTabWidget, QToolButton,
+                             QMainWindow, QMessageBox, QPushButton, QStatusBar, QTabWidget, QToolButton,
                              QVBoxLayout, QWidget)
 
 from ..instruments import MODELS, SIM_MODELS
@@ -128,6 +129,13 @@ class MainWindow(QMainWindow):
 
     def open_instrument(self, resource: str, model: str):
         if not resource:
+            return
+        if re.match(r"GPIB\d*::0(::|$)", resource, re.I):
+            QMessageBox.warning(
+                self, "GPIB address 0",
+                "GPIB address 0 belongs to the controller (the GPIB-USB adapter itself), "
+                "so no instrument can use it.\n\nPress ⌕ Scan GPIB to see which addresses "
+                "your instruments are really on (the HP 3456A defaults to 22).")
             return
         for p in self.panels():
             if p.resource == resource:
