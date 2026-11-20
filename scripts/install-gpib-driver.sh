@@ -8,6 +8,9 @@
 #
 # Re-run after every kernel upgrade (the module is tied to `uname -r`).
 set -euo pipefail
+# modinfo, depmod and ldconfig live in /sbin, which isn't on a normal user's
+# PATH on Raspberry Pi OS.
+export PATH="$PATH:/usr/sbin:/sbin"
 
 HERE="$(cd "$(dirname "$0")/.." && pwd)"
 SRC="$HERE/vendor/linux-gpib"
@@ -38,22 +41,53 @@ fi
 
 step "Installing build dependencies (sudo)"
 sudo apt-get install -y build-essential autoconf automake libtool flex bison pkg-config
-# Ubuntu and Raspberry Pi OS Bookworm both ship linux-headers-<uname -r>;
-# older Pi OS releases used raspberrypi-kernel-headers instead.
-if ! sudo apt-get install -y "linux-headers-$KVER"; then
-  sudo apt-get install -y raspberrypi-kernel-headers
-fi
+
+# ---- kernel modules ---------------------------------------------------------
+# Kernel headers: Ubuntu and Raspberry Pi OS Bookworm ship
+# linux-headers-<uname -r>; older Pi OS used raspberrypi-kernel-headers. Some
+# vendor kernels (e.g. EDATec panel PCs) ship none: then a matching tree is
+# prepared from source by prepare-kernel-tree.sh.
+build_kernel_modules() {
+  local ksrc="/lib/modules/$KVER/build" log missing
+  if [[ ! -f "$ksrc/Makefile" ]]; then
+    sudo apt-get install -y "linux-headers-$KVER" >/dev/null 2>&1 ||
+      sudo apt-get install -y raspberrypi-kernel-headers >/dev/null 2>&1 || true
+  fi
+  if [[ ! -f "$ksrc/Makefile" ]]; then
+    step "No kernel headers for $KVER; preparing a matching kernel tree (takes a few minutes)"
+    ksrc="$("$HERE/scripts/prepare-kernel-tree.sh")" || return 1
+  fi
+
+  step "Building kernel modules for $KVER"
+  log="$(mktemp)"
+  if ! make -C "$SRC/linux-gpib-kernel" -j"$(nproc)" LINUX_SRCDIR="$ksrc" 2>&1 | tee "$log"; then
+    # A prepared tree only knows the CRCs of symbols other modules use; work
+    # out the rest from the source, then try again.
+    missing="$(sed -n 's/.*modpost: "\([^"]*\)" .* undefined!.*/\1/p' "$log" | sort -u)"
+    if [[ -n "$missing" && -f "$ksrc/.harvested-crcs" ]]; then
+      # shellcheck disable=SC2086
+      "$HERE/scripts/prepare-kernel-tree.sh" --add-symbols "$ksrc" $missing || return 1
+      make -C "$SRC/linux-gpib-kernel" -j"$(nproc)" LINUX_SRCDIR="$ksrc" || return 1
+    else
+      return 1
+    fi
+  fi
+
+  step "Installing kernel modules (sudo)"
+  sudo make -C "$SRC/linux-gpib-kernel" install LINUX_SRCDIR="$ksrc"
+  sudo depmod -a "$KVER"
+}
 
 # Newer kernels can carry the GPIB drivers themselves; only build when the
 # running kernel has no ni_usb_gpib module (rebuild with FORCE_KERNEL_BUILD=1).
+KERNEL_OK=1
 if modinfo ni_usb_gpib >/dev/null 2>&1 && [[ -z "${FORCE_KERNEL_BUILD:-}" ]]; then
   step "Kernel already provides ni_usb_gpib ($(modinfo -n ni_usb_gpib)); skipping module build"
-else
-  step "Building kernel modules for $KVER"
-  make -C "$SRC/linux-gpib-kernel" -j"$(nproc)"
-
-  step "Installing kernel modules (sudo)"
-  sudo make -C "$SRC/linux-gpib-kernel" install
+elif ! build_kernel_modules; then
+  KERNEL_OK=0
+  printf '\n\033[1;31m!! The GPIB kernel driver could not be built for %s.\033[0m\n' "$KVER"
+  echo "   Continuing with the library so the app can start; the adapter won't work"
+  echo "   until the driver builds. See the messages above."
 fi
 
 step "Building libgpib + gpib_config + udev rules"
@@ -96,7 +130,9 @@ sudo usermod -aG gpib "$USER"
 
 step "Loading driver and configuring board"
 sudo udevadm control --reload-rules
-sudo modprobe ni_usb_gpib
+if ((KERNEL_OK)); then
+  sudo modprobe ni_usb_gpib
+fi
 sleep 2
 # udev runs gpib_config on hot-plug; do it explicitly too in case the
 # adapter was already plugged in before the rules existed.
@@ -122,3 +158,4 @@ Next:
   * Quick bus test:   ibtest   (choose d, address 5, then write '*IDN?' and read)
   * Launch the GUI:   $HERE/run.sh
 EOF
+((KERNEL_OK)) || exit 1

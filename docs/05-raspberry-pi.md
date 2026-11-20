@@ -118,6 +118,9 @@ The touch layout needs about 1180×460 pixels. Smaller screens (an 800×480 pane
 | Problem | Fix |
 |---|---|
 | `linux-headers-…` not found | `sudo apt full-upgrade && sudo reboot`, then re-run the setup. The headers must match the running kernel. |
+| Panel PC with its maker's own kernel (e.g. EDATec, `uname -r` without `+rpt`) | Nothing to do: when no headers package exists for the running kernel, `install-gpib-driver.sh` prepares a matching kernel tree itself (`scripts/prepare-kernel-tree.sh`). It downloads the kernel source (about 230 MB), configures it with `/boot/config-$(uname -r)`, and takes the symbol checksums from the modules already installed, so the driver loads on that exact kernel. It takes a few minutes and keeps the tree in `~/kbuild` (about 1.5 GB) for re-runs; delete it once the driver works if you need the space. Don't install the stock Raspberry Pi kernel on such a unit: the maker's kernel carries its display and touch drivers. |
+| "the linux-gpib library is not installed" | The install script didn't finish. Run `./scripts/install-gpib-driver.sh` and read its messages: since the library is installed even when the kernel driver can't be built, the app starts either way, but the adapter only works once the driver builds. |
+| Adapter found but "permission denied" on `/dev/gpib0` | Log out and back in (or reboot) after the install, so your account picks up the `gpib` group. |
 | Taskbar or title bar still showing | The app was started without `--fullscreen` (e.g. `./run.sh` from a terminal). Tap **⛶** or press F11. The menu entry and autostart launcher start full screen. |
 | Window opens but looks tiny or huge | Check **Screen Configuration** in the Pi menu is at 1280×800. Qt follows the desktop's scale setting. |
 | `qt.qpa.plugin: Could not load the Qt platform plugin "wayland"` | `sudo apt install qt6-wayland`, or run with `QT_QPA_PLATFORM=xcb`. |
