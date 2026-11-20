@@ -99,7 +99,37 @@ def tests():
 def console():
     w.grab().save(str(OUT / "console.png"))
     w.close()
-    app.quit()
+    ppk_start()
+
+
+def ppk_start():
+    global pw
+    pw = MainWindow([parse_target("SIM::PPK2")])
+    pw.resize(1440, 900)
+    pw.show()
+
+    def power():
+        p = pw.panels()[0]
+        p.name_edit.setText("sensor node")
+        p.span_combo.setCurrentText("30 s")
+        p.set_dut_power(True)
+
+    def trend():
+        p = pw.panels()[0]
+        p.log_chk.setChecked(True)
+        app.processEvents()
+        pw.grab().save(str(OUT / "ppk2-trend.png"))
+        p.tabs.setCurrentIndex(1)
+        p.logic_chk.setChecked(True)
+
+    def live():
+        pw.grab().save(str(OUT / "ppk2-live.png"))
+        pw.close()
+        app.quit()
+
+    at(1500, power)
+    at(6500, trend)
+    at(7200, live)
 
 
 at(1500, setup)

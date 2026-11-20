@@ -191,6 +191,41 @@ It works the same way as the 66321D panel, with these differences:
 - **OVLD** means the input is beyond the selected range.
 - **Console:** send raw 3456A program codes (e.g. `F1 R4 T3`). **Send + read** fetches one reading afterwards.
 
+## Power profiler panel: Nordic PPK2
+
+![PPK2 trend](images/ppk2-trend.png)
+
+The PPK2 measures current 100,000 times a second. The panel keeps every sample of the last 10 seconds, 1 ms averages for the last ~16 minutes, and 100 ms averages for the whole session.
+
+**Power**
+
+- **Source meter:** the PPK2 powers the DUT from VOUT at the **Voltage** you set (800–5000 mV). Switching to source mode asks first, because VOUT is driven as soon as DUT power is on: disconnect any other supply from the DUT.
+- **Ampere meter:** the DUT keeps its own supply and the current runs VIN → VOUT. The voltage box becomes **DUT voltage**. The PPK2 doesn't measure it, but it's used for the calibration's small voltage correction and for the energy figures, so set it to the DUT's supply.
+- **DUT POWER** switches the DUT on and off (two taps on a touch screen). It shows **?** after connecting, because the PPK2 can't report it. **Esc** turns it off along with every supply output.
+
+**Readouts**
+
+- The big number is the average of the last 0.25 s.
+- **Average, Max, Min, Duration, Charge** (C and Ah) and **Energy** (J and Wh, at the voltage shown) cover the trend span, or the region when **Measure region** is on.
+- **Logic** lights show which of D0–D7 were high in the last 0.25 s.
+
+**Trend tab.** Each plotted point is a min/max pair, so a 50 µs spike stays visible even on a 10-minute span. Spans up to 10 min use the 1 ms averages; longer ones use 100 ms. **Log scale** shows sleep µA and radio mA on one plot.
+
+**Measure region:** tick it and drag the shaded band (or its edges) over the stretch you care about, such as one radio event or a whole sleep cycle. The readouts then show that stretch's average current, charge and energy. The trend freezes while you measure; untick **Freeze** to follow live data again.
+
+![PPK2 live](images/ppk2-live.png)
+
+**Live tab.** Every sample of the last 1 ms to 10 s, with optional D0–D7 lanes underneath. **Save…** writes every sample in the window to CSV. **Freeze** (Trend tab) holds this view too.
+
+**Acquisition**
+
+- **Stop / Run** stops and restarts the sample stream.
+- **Spike filter** smooths the 3 samples after each automatic shunt-range switch, as nRF Connect Power Profiler does by default. Turn it off to see raw data.
+- **CSV row every** sets the CSV recording resolution, from 1 ms to 1 s. Each row holds the average, min and max over that interval. Use **Live ▸ Save…** for full-rate data.
+- **Samples lost** counts gaps in the PPK2's sample counter. It should stay at 0.
+
+**Console:** raw command bytes in hex (e.g. `0C 01` turns DUT power on). Nothing is read back. Use this only if you know the PPK2's protocol.
+
 ## Workflows
 
 ### Monitoring an E3610A (or any manual supply)
@@ -207,6 +242,13 @@ It works the same way as the 66321D panel, with these differences:
 3. Choose **Smooth** speed, the **ACDC** detector, and tick **Pulse statistics**.
 4. **Record CSV**, then read the average current and the **charge** total off the trend.
 
+### Measuring a battery-powered device's average current with the PPK2
+
+1. Wire the PPK2 as a **source meter** (VOUT and GND to the DUT's battery terminals, battery removed) and set the voltage to the battery's nominal voltage, e.g. 3000 mV for a coin cell.
+2. Turn **DUT POWER** on. Wait for the device to settle into its normal duty cycle.
+3. Choose a **Span** that covers several cycles (e.g. 2 min), or tick **Measure region** and drag over exactly one or more whole cycles.
+4. Read **Average**. Battery life ≈ capacity ÷ average current, e.g. 220 mAh ÷ 15 µA ≈ 14,700 h. **Charge** per cycle tells you which events dominate.
+
 ### Characterizing a regulator with two supplies and the DMM
 
 Use the 66321D as the input supply, the 6632A as a second rail, and the 3456A on the output. All three trends share one time axis. Record a CSV from each tab and join them on `t_s`.
@@ -217,6 +259,8 @@ Use the 66321D as the input supply, the 6632A as a second rail, and the 3456A on
 
 **3456A tab:** `timestamp, t_s, channel, function, value, unit, overload`
 
+**PPK2 tab:** `timestamp, t_s, current_A, current_min_A, current_max_A, logic` (one row per **CSV row every** interval; `logic` is D0–D7 as a byte, with a bit set if that input was high at any point in the interval). **Live ▸ Save…:** `t_s, current_A, logic`, one row per sample.
+
 **Capture export:** `t_s, segment, current_A` (or `voltage_V`); the last line, starting with `#`, holds the trigger settings.
 
 **Tests:** battery life `t_s, voltage_V, current_A, charge_mAh, energy_mWh`; battery emulator `t_s, soc_pct, ocv_V, voltage_V, current_A`; sequencer `t_s, step, set_V, set_A, voltage_V, current_A`; I-V sweep `set, voltage_V, current_A`.
@@ -225,7 +269,7 @@ Use the 66321D as the input supply, the 6632A as a second rail, and the 3456A on
 
 ## Simulators
 
-Open the resources `SIM::66321D`, `SIM::6632A` and `SIM::3456A` to try every feature without hardware. The simulated 66321D drives a phone-like load drawing short current bursts. The 6632A drives a 10 Ω resistor. The 3456A reads a slightly drifting 5 V rail, about 1 kΩ, or 120 mV AC.
+Open the resources `SIM::66321D`, `SIM::6632A`, `SIM::3456A` and `SIM::PPK2` to try every feature without hardware. The simulated 66321D drives a phone-like load drawing short current bursts. The 6632A drives a 10 Ω resistor. The 3456A reads a slightly drifting 5 V rail, about 1 kΩ, or 120 mV AC. The PPK2 powers a BLE-style sensor: 3 µA asleep, a 400 µA wake-up every 10 ms, and a 6–9 mA radio event every 100 ms (shown on D0).
 
 ## Instruments at start-up
 

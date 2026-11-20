@@ -37,6 +37,11 @@ sudo apt-get install -y git python3-venv python3-pip python3-pyqt6 python3-numpy
 if (( DOCS )); then
   sudo apt-get install -y libpango-1.0-0 libpangoft2-1.0-0 libharfbuzz-subset0
 fi
+# USB serial instruments (Nordic PPK2, RS-232 adapters) need the dialout group.
+if ! id -nG "$USER" | grep -qw dialout; then
+  sudo usermod -aG dialout "$USER"
+  echo "Added $USER to 'dialout' (for the PPK2 / serial ports): log out and back in."
+fi
 
 step "Creating the Python environment (.venv)"
 cd "$HERE"

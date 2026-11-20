@@ -103,15 +103,26 @@ interface {
 
 You only need to edit it to use a different adapter (`board_type`). You don't need `device { }` entries: the app addresses instruments directly.
 
+## Nordic PPK2 (optional)
+
+No driver is needed: the PPK2 is a USB serial device, and the app uses `python3-serial` (installed above). Your user must be in the `dialout` group:
+
+```bash
+groups | grep -q dialout || sudo usermod -aG dialout $USER   # then log out and back in
+```
+
+Plug it in and it appears in the resource list as `PPK2::/dev/serial/by-id/…`.
+
 ## 4. Launching
 
 ```bash
 ./run.sh                                   # empty window; connect from the toolbar
 ./run.sh GPIB0::5::INSTR                   # open the 66321D (auto-detected)
 ./run.sh GPIB0::5::INSTR 6632A@GPIB0::6::INSTR 3456A@GPIB0::22::INSTR
+./run.sh PPK2@/dev/ttyACM0                 # Nordic PPK2
 ```
 
-`MODEL@RESOURCE` forces a driver. Models are `663xx` (or `66321D`), `6632A`, and `3456A`. **The 3456A always has to be named**, because it has no ID query.
+`MODEL@RESOURCE` forces a driver. Models are `663xx` (or `66321D`), `6632A`, `3456A` and `PPK2`. **The 3456A always has to be named**, because it has no ID query.
 
 ### Desktop launcher (optional)
 
@@ -151,6 +162,9 @@ Then copy it to `~/.local/share/applications/` (menu), `~/Desktop/`, or `~/.conf
 | Scan finds nothing, but the driver is loaded | Instruments off, cable loose, or the 3456A in TALK ONLY mode. |
 | Connect times out on one instrument | Wrong address, or two instruments sharing an address. Use **⌕ Scan GPIB** to see the real addresses. |
 | "GPIB address 0" warning | Address 0 is the adapter itself. The 3456A defaults to 22, the 66321D to 5. |
+| PPK2: "Permission denied" | Not in the `dialout` group yet: `sudo usermod -aG dialout $USER`, then log out and back in. |
+| PPK2: "No metadata from the PPK2" | You opened its second serial port, or nRF Connect Power Profiler has it open. Use the `PPK2::…-if01` entry and close the other program. |
+| PPK2: "Samples lost" climbs | The USB link or the computer can't keep up (400 kB/s). Use another USB port and avoid hubs; on a Pi, close other heavy programs. |
 | "Couldn't identify the instrument" | Auto-detect only knows the supplies. Pick the model by hand (the 3456A always needs this). |
 | Readings stop and "Polling paused" appears | A bus error occurred. Fix the cause, then press **Resume polling**. |
 | 66321D waveform capture is slow | Normal: the instrument sends arrays at about 3.7 KB/s (about 1.2 s per 1024 points in binary). |

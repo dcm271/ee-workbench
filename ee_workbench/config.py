@@ -17,9 +17,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 OPEN_MODES = ("last", "list", "scan", "none")
-MODEL_KEYS = ("auto", "663xx", "6632A", "3456A")
+MODEL_KEYS = ("auto", "663xx", "6632A", "3456A", "PPK2")
 MODEL_ALIASES = {"66321D": "663xx", "66321B": "663xx", "66311B": "663xx",
-                 "6633A": "6632A", "6634A": "6632A"}
+                 "6633A": "6632A", "6634A": "6632A", "ppk2": "PPK2"}
 
 
 def config_dir() -> Path:
@@ -45,8 +45,9 @@ open = "last"
 wait_for_gpib = 30
 
 # Instruments for open = "list" (also tells "scan" which model is where).
-# model: "auto" (supplies identify themselves), "663xx", "6632A" or "3456A".
+# model: "auto" (supplies identify themselves), "663xx", "6632A", "3456A" or "PPK2".
 # The 3456A cannot identify itself, so always give its model.
+# A Nordic PPK2 is a serial port: resource = "PPK2::/dev/ttyACM0".
 # Optional for a 3456A: name, function, range, nplc, autozero, filter.
 #
 # [[instrument]]

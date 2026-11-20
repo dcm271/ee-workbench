@@ -15,6 +15,8 @@ MainWindow
                                                        pyvisa-py ─ gpib-ctypes
                                                                     │
                                               libgpib ─ ni_usb_gpib (kernel)
+
+ └─ Ppk2Panel   (PPK2)   ── worker thread ── PPK2 ── SerialStream (pyserial + reader thread)
 ```
 
 - **One I/O thread per instrument** (`worker.py`). The GUI never blocks on the bus. Commands from the GUI go into a queue and run before the next poll.
@@ -30,11 +32,13 @@ MainWindow
 | `instruments/agilent663xx.py` | 66311B/66321B/66321D SCPI driver |
 | `instruments/hp6632a.py` | 6632A/33A/34A driver (HP's pre-SCPI command language) |
 | `instruments/hp3456a.py` | 3456A driver (program codes) |
+| `instruments/ppk2.py` | Nordic PPK2: commands, calibration, vectorised spike filter, sample time base |
 | `instruments/__init__.py` | Model list, auto-detect, driver factory |
 | `analysis.py` | Waveform measurements (numpy only): levels, pulse timing, rise/fall, charge, cursors, histogram, spectrum |
 | `sim/` | One simulator per instrument |
 | `gui/` | Main window, panels, shared widgets |
 | `gui/capture_tab.py`, `tests_tab.py`, `system_tab.py` | The 663xx Capture, Tests and System tabs |
+| `gui/ppk2_panel.py` | PPK2 tab: binning, ring buffer, min/max envelope plots, region statistics |
 
 ## Agilent 66321D (SCPI)
 
@@ -148,6 +152,42 @@ Source: 3456A Operating & Service Manual §III and the Hepperle quick-reference 
 
 **Still to verify:** the R2 ohms range (the reference card is ambiguous) and whether ohms readings arrive in Ω or kΩ. Measure a known resistor with **Send + read** in the Console tab to check.
 
+## Nordic PPK2
+
+The PPK2 is a USB CDC-ACM device (`1915:c00a`). The protocol and calibration follow Nordic's open-source nRF Connect Power Profiler (`pc-nrfconnect-ppk`) and were checked against a real unit (HW 8682).
+
+### Commands used
+
+| Bytes | Meaning |
+|---|---|
+| `06` / `07` | Start / stop the sample stream |
+| `19` | Metadata: calibration as text, `R0: …` … `IA: …`, then `END` |
+| `11 01` / `11 02` | Ampere meter / source meter |
+| `0D hi lo` | Source voltage in mV, big-endian (800–5000) |
+| `0C 01` / `0C 00` | DUT power on / off |
+
+### Sample format
+
+Little-endian 32-bit words at 100 kS/s: bits 0–13 ADC, 14–16 range (shunt 0–4), 18–23 a counter that increases by 1 per sample (mod 64), 24–31 logic D0–D7.
+
+Current per sample, with the unit's metadata for range *r*:
+
+```
+x = (4·adc − O[r]) · (1.8 / 163840) / R[r]
+I = UG[r] · ( x · (GS[r]·x + GI[r]) + S[r]·VDD/1000 + I[r] )
+```
+
+`VDD` is the source voltage (in ampere mode, the DUT voltage typed in).
+
+### Details that matter
+
+- **Continuous reading.** `SerialStream` reads the port on its own thread. Reading only when the worker polls (every 50 ms) let the PPK2's USB buffer overflow. It then dropped whole blocks, about 80% of the data, in multiples of 64 samples, which the counter can't detect.
+- **Connect.** The PPK2 may still be streaming from an earlier session. The driver sends stop, waits for 150 ms of silence, then asks for metadata. Connecting changes nothing on the PPK2's outputs.
+- **Time base.** Samples are timed from the PPK2's own clock, anchored to app time at the start of a run, and re-anchored only if the two drift more than 0.25 s apart. Measured: 100.4 kS/s against the host clock over 10 s, no re-anchoring.
+- **Lost samples:** counter gaps are counted and shown; affected blocks are not re-timed.
+- **Spike filter:** after each range switch, 3 samples are replaced by an exponential average (α = 0.18; 0.06 in range 4, which also skips its first 2 samples). The reference runs the averages sample by sample. Here they're evaluated only where needed, over a 400-sample window (truncation ≈ 2·10⁻¹¹). The tests check it against a direct port of the reference, and with an 800-sample window it matches to rounding error.
+- **Display.** The worker emits each block of raw samples (~5000). The panel bins them (1 ms and 100 ms min/mean/max), keeps 10 s raw in a ring buffer, and draws at most ~3000 min/max pairs per curve.
+
 ## Simulators
 
 | Resource | Model |
@@ -155,6 +195,7 @@ Source: 3456A Operating & Service Manual §III and the Hepperle quick-reference 
 | `SIM::66321D` | 47 Ω load with 4.7 Ω, 577 µs bursts every 4.615 ms. The output is modelled over time (40 µs step response from a history of setpoint changes), so level triggers, pre-trigger data, segments, output steps, external triggers (fires 0.4 s after arming) and `ABOR` behave like the real unit. Binary and ASCII arrays, the WTG bit, latched status events, every System-tab setting with `*RST` defaults, `*SAV/*RCL`, `*TST?`, a DVM at 3.7 V ± 0.15 V, the full SCPI error queue (including +603), and OCP trips |
 | `SIM::6632A` | 10 Ω load; ERR codes; OCP/OVP trips; 30 ms readback delay |
 | `SIM::3456A` | DCV 5 V with slow drift, Ω ~1 kΩ, ACV 120 mV; noise scales with integration time; null; syntax-error status |
+| `SIM::PPK2` | The real byte stream: a BLE-style DUT encoded through its own calibration (with range switching and a spike on each switch), metadata, mode, voltage and DUT power commands, counter, logic D0/D1, and a hook to drop samples. Its clock can be injected, so tests run without waiting |
 
 ## Tests
 
@@ -162,11 +203,11 @@ Source: 3456A Operating & Service Manual §III and the Hepperle quick-reference 
 .venv/bin/python -m pytest tests
 ```
 
-The tests run each driver against its simulator: identification, CV/CC, protection trips and events, error decoding, every 663xx setting, saved setups, immediate/level/segmented/output-step captures with pre-trigger, abort, capture validation, the waveform measurements in `analysis.py`, the config files, and the 3456A reading formats.
+The tests run each driver against its simulator: identification, CV/CC, protection trips and events, error decoding, every 663xx setting, saved setups, immediate/level/segmented/output-step captures with pre-trigger, abort, capture validation, the waveform measurements in `analysis.py`, the config files, and the 3456A reading formats. PPK2 tests cover metadata captured from a real unit, word decoding, the calibration formula, the spike filter against a sample-by-sample reference (across chunk boundaries), and the driver against the simulator: sample count, timing, levels, logic, lost samples, modes, and stop/start.
 
 ## Adding an instrument
 
-1. **Driver:** write a class in `instruments/` with `kind = "supply"` or `"dmm"`, plus `family`, `identify()`, `poll(t, cfg)`, `errors()`, and the setters the panel calls. Return the shared data types from `base.py`.
+1. **Driver:** write a class in `instruments/` with `kind = "supply"` or `"dmm"`, plus `family`, `identify()`, `poll(t, cfg)`, `errors()`, and the setters the panel calls. Return the shared data types from `base.py`. A streaming device brings its own panel and data types instead; see the PPK2 (`kind = "ppk2"`, a `cfg` property for the worker to re-read, and `close()` to stop the stream).
 2. **Capabilities:** fill in `SupplyCaps`. The supply panel hides what's unsupported (DVM, digitizer, waveform, resistance) and handles `setpoint_readback=False`.
 3. **Register it:** add it to `MODELS` and `_CLASSES` in `instruments/__init__.py`, and teach `detect()` its ID string if it has one.
 4. **Simulator:** subclass `sim.base.SimBase`, implement `write()`, and add it to `sim.open_sim` and `SIM_RESOURCES`.
@@ -175,4 +216,5 @@ The tests run each driver against its simulator: identification, CV/CC, protecti
 ## Licences and third-party code
 
 - **linux-gpib** (GPL): built from `vendor/linux-gpib` (not committed; fetched by the install script).
-- **pyvisa, pyvisa-py** (MIT), **pyqtgraph** (MIT), **PyQt6** (GPL v3), **gpib-ctypes** (GPL v2).
+- **pyvisa, pyvisa-py** (MIT), **pyqtgraph** (MIT), **PyQt6** (GPL v3), **gpib-ctypes** (GPL v2), **pyserial** (BSD).
+- **PPK2 protocol and calibration:** our own implementation, following the behaviour of Nordic's open-source nRF Connect Power Profiler (`pc-nrfconnect-ppk`); no code is copied from it.

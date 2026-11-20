@@ -13,11 +13,12 @@ from PyQt6.QtWidgets import (QApplication, QComboBox, QFrame, QHBoxLayout, QLabe
                              QVBoxLayout, QWidget)
 
 from ..config import Config, Entry, Session, load_config, norm_model, startup_entries
-from ..instruments import MODELS, SIM_MODELS
+from ..instruments import MODELS, model_for
 from ..transport import describe, gpib_ready, list_resources, scan_gpib
 from . import touch
 from .connect_dialog import ConnectDialog
 from .dmm_panel import DmmPanel
+from .ppk2_panel import Ppk2Panel
 from .supply_panel import SupplyPanel
 from .widgets import C_MUTED, dark_palette
 
@@ -55,8 +56,8 @@ class MainWindow(QMainWindow):
             if touch.TOUCH else
             "Pick a resource and model above, then Connect.\n\n"
             "Tip: ⌕ scans the GPIB bus. The HP 3456A has no ID query, "
-            "so select it by model.\nTry SIM::66321D, SIM::6632A or "
-            "SIM::3456A to explore without hardware.")
+            "so select it by model.\nA Nordic PPK2 appears as PPK2::… when plugged in.\n"
+            "Try SIM::66321D, SIM::6632A, SIM::3456A or SIM::PPK2 to explore without hardware.")
         self.empty.setWordWrap(True)
         self.empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.empty.setStyleSheet(f"color:{C_MUTED}; font-size:14px;")
@@ -219,8 +220,9 @@ class MainWindow(QMainWindow):
         serial = text.upper().startswith("ASRL")
         self.baud_label.setVisible(serial)
         self.baud_combo.setVisible(serial)
-        if text.upper() in SIM_MODELS:
-            self.model_combo.setCurrentIndex(self.model_combo.findData(SIM_MODELS[text.upper()]))
+        implied = model_for(text.strip())
+        if implied != "auto":
+            self.model_combo.setCurrentIndex(self.model_combo.findData(implied))
 
     # ---------------------------------------------------------------- start-up
     def _restore(self):
@@ -293,9 +295,8 @@ class MainWindow(QMainWindow):
                 self.tabs.setCurrentWidget(p)
                 self.status.showMessage(f"{resource} is already open", 4000)
                 return
-        if resource.upper() in SIM_MODELS and model == "auto":
-            model = SIM_MODELS[resource.upper()]
-        cls = DmmPanel if model == "3456A" else SupplyPanel
+        model = model_for(resource, model)
+        cls = {"3456A": DmmPanel, "PPK2": Ppk2Panel}.get(model, SupplyPanel)
         baud = int(self.baud_combo.currentText()) if hasattr(self, "baud_combo") else 9600
         panel = cls(resource, model, baud)
         if settings:
@@ -351,7 +352,7 @@ class MainWindow(QMainWindow):
     def all_outputs_off(self):
         n = 0
         for p in self.panels():
-            if isinstance(p, SupplyPanel) and p.connected:
+            if isinstance(p, (SupplyPanel, Ppk2Panel)) and p.connected:
                 p.output_off()
                 n += 1
         self.status.showMessage(f"Output OFF sent to {n} supply(s)", 5000)
@@ -369,7 +370,9 @@ def parse_target(s: str) -> tuple[str, str]:
     if "@" in s:
         model, res = s.split("@", 1)
         model = {"66321D": "663xx", "66321B": "663xx", "66311B": "663xx",
-                 "6633A": "6632A", "6634A": "6632A"}.get(model, model)
+                 "6633A": "6632A", "6634A": "6632A", "ppk2": "PPK2"}.get(model, model)
+        if model == "PPK2" and not res.upper().startswith(("PPK2::", "SIM")):
+            res = "PPK2::" + res           # PPK2@/dev/ttyACM0
         return model, res
     return "auto", s
 
@@ -380,7 +383,7 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description="EE Workbench instrument control")
     ap.add_argument("targets", nargs="*",
                     help="resources to open, optionally MODEL@RESOURCE, e.g. "
-                         "GPIB0::5::INSTR 3456A@GPIB0::22::INSTR SIM::6632A")
+                         "GPIB0::5::INSTR 3456A@GPIB0::22::INSTR PPK2@/dev/ttyACM0 SIM::6632A")
     mode = ap.add_mutually_exclusive_group()
     mode.add_argument("--touch", dest="touch", action="store_true", default=None,
                       help="force the touch-screen layout")

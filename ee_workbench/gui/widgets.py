@@ -147,6 +147,24 @@ class TraceBuffer:
         self.data[self.n] = [np.nan if v is None else v for v in row]
         self.n += 1
 
+    def extend(self, rows: np.ndarray):
+        """Append many rows at once (an (n, ncols) array)."""
+        rows = np.asarray(rows, dtype=float)
+        if rows.size == 0:
+            return
+        if len(rows) >= self.max_rows:
+            rows = rows[-(self.max_rows // 2):]
+        while self.n + len(rows) > len(self.data):
+            if len(self.data) >= self.max_rows:
+                keep = max(0, min(self.n, self.max_rows // 2) - len(rows))
+                self.data[:keep] = self.data[self.n - keep:self.n]
+                self.n = keep
+            else:
+                grow = min(len(self.data), self.max_rows - len(self.data))
+                self.data = np.concatenate([self.data, np.full((grow, self.ncols), np.nan)])
+        self.data[self.n:self.n + len(rows)] = rows
+        self.n += len(rows)
+
     def view(self) -> np.ndarray:
         return self.data[: self.n]
 
