@@ -351,6 +351,7 @@ class Ppk2Panel(PanelBase):
         self.region.setZValue(10)
         self.region.sigRegionChanged.connect(lambda *_: self._update_stats())
         touch.plots(self.plot)
+        self.scrolling_trend(self.plot, self.plot)
         v.addWidget(self.plot, 1)
         return w
 
@@ -506,6 +507,7 @@ class Ppk2Panel(PanelBase):
 
     def _log_toggled(self, *_):
         self.plot.setLogMode(y=self.log_chk.isChecked())
+        self.reset_steady()
         self.p_live.setLogMode(y=self.live_log_chk.isChecked())
         self._dirty = True
         self.settings_changed.emit()
@@ -634,10 +636,6 @@ class Ppk2Panel(PanelBase):
             if self.log_chk.isChecked():
                 y = np.maximum(y, 1e-9)
             self.curve.setData(x, y)
-            if span:
-                self.plot.setXRange(max(0, t[-1] - span), t[-1], padding=0)
-            else:
-                self.plot.enableAutoRange(axis="x")
         self._redraw_live()
         self._update_readout()
         self._update_stats()

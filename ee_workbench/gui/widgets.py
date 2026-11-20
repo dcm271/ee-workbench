@@ -226,3 +226,70 @@ def dark_palette(app: QApplication):
         QFrame#bar { background:#262a30; border-radius:6px; }
         QTabWidget#instruments::pane { border-top: 1px solid #33373e; }
     """)
+
+
+class SteadyY:
+    """Y autoscale for a scrolling strip chart that doesn't twitch.
+
+    pyqtgraph's autorange refits on every new point, so the axis jumps each
+    time a peak enters or scrolls out of the window.  This grows the range at
+    once (with some headroom) when data would go off-scale, but only shrinks
+    once the data has used under half of it, and then eases in over about a
+    second.  Zooming Y by hand turns it off; the plot's "A" button (or
+    "View all") turns it back on."""
+
+    HEADROOM = 0.10     # extra room added when growing, as a fraction of the data range
+    PAD = 0.05          # margin kept around the data
+    SHRINK_AT = 0.5     # start shrinking when the data fills less than this ...
+    SHRINK_TO = 0.85    # ... and keep easing in until it fills this much
+    EASE = 0.15         # fraction of the remaining shrink done per update
+
+    def __init__(self, plot):
+        self.vb = plot.getViewBox()
+        self.auto = True
+        self.range: list[float] | None = None
+        self._shrinking = False
+        self.vb.disableAutoRange(axis=self.vb.YAxis)
+        self.vb.sigRangeChangedManually.connect(self._manual)
+
+    def _manual(self, mask):
+        if mask[1]:
+            self.auto = False
+
+    def reset(self):
+        """Forget the current range (after Clear or a log/linear switch)."""
+        self.range = None
+        self._shrinking = False
+
+    def update(self):
+        if self.vb.autoRangeEnabled()[1]:      # "A" button / View all: take over again
+            self.vb.disableAutoRange(axis=self.vb.YAxis)
+            self.auto = True
+            self.reset()
+        if not self.auto or not self.vb.isVisible():
+            return
+        xr = self.vb.viewRange()[0]
+        b = self.vb.childrenBounds(orthoRange=(None, xr))[1]
+        if b is None or b[0] is None or not (math.isfinite(b[0]) and math.isfinite(b[1])):
+            return
+        lo, hi = b
+        size = (hi - lo) or max(abs(hi), 1e-12) * 1e-3
+        want = [lo - size * self.PAD, hi + size * self.PAD]
+        r = self.range
+        if r is None:
+            r = want
+        elif want[0] < r[0] or want[1] > r[1]:
+            # Data off-scale: grow straight away, only on the side that needs it.
+            r = [min(r[0], want[0] - size * self.HEADROOM), max(r[1], want[1] + size * self.HEADROOM)]
+            self._shrinking = False
+        else:
+            fill = (want[1] - want[0]) / (r[1] - r[0])
+            if fill < self.SHRINK_AT:
+                self._shrinking = True
+            elif fill > self.SHRINK_TO:
+                self._shrinking = False
+            if self._shrinking:
+                # Moving each end toward `want` never cuts off data inside it.
+                r = [r[0] + (want[0] - r[0]) * self.EASE, r[1] + (want[1] - r[1]) * self.EASE]
+        self.range = r
+        self.vb.setYRange(r[0], r[1], padding=0)

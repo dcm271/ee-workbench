@@ -85,9 +85,10 @@ The 66321D digitizes the output and averages each reading over *samples × inter
 
 Strip charts of voltage, current (with the per-reading **max** as a dotted line when pulse statistics are on) and the DVM.
 
-- **Span:** 30 s, 2 min, 10 min, 1 h, or All. **Freeze** pauses the display (data keeps arriving). **Clear** empties the plots.
+- **Span:** 10 s, 30 s, 2 min, 10 min, 1 h, or All. **Freeze** pauses the display (data keeps arriving). **Clear** empties the plots.
 - The stats line above the plot shows average, minimum and maximum current, average voltage, and the **charge** delivered (mAh/Ah) over the span. Use it for battery-life estimates.
 - Drag a plot to pan, use the mouse wheel to zoom, and right-click for export and autoscale options.
+- The trend scrolls smoothly with the clock rather than jumping at each reading. The vertical scale grows as soon as a reading would go off-scale but shrinks only gradually, once the data uses less than half of it. Zooming vertically by hand turns this off; the plot's **A** button turns it back on.
 - **● Record CSV** writes every reading to a file until you press it again.
 
 ### Capture tab

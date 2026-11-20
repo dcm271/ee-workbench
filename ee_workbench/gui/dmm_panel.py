@@ -176,6 +176,7 @@ class DmmPanel(PanelBase):
         self.plot.setDownsampling(auto=True, mode="peak")
         self.curve = self.plot.plot(pen=pg.mkPen(C_DMM, width=1.5))
         touch.plots(self.plot)
+        self.scrolling_trend(self.plot, self.plot)
         v.addWidget(self.plot, 1)
         return w
 
@@ -293,12 +294,10 @@ class DmmPanel(PanelBase):
         t = d[:, 0]
         span = self.span()
         start = int(np.searchsorted(t, t[-1] - span)) if span else 0
-        t, y = d[start:].T
-        self.curve.setData(t, y, connect="finite")
-        if span:
-            self.plot.setXRange(max(0, t[-1] - span), t[-1], padding=0)
-        else:
-            self.plot.enableAutoRange(axis="x")
+        # Plot one point past the window so the line runs to the left edge
+        # instead of ending short of it; the statistics stay on the window.
+        self.curve.setData(*d[max(0, start - 1):].T, connect="finite")
+        y = d[start:, 1]
         y = y[np.isfinite(y)]
         if y.size:
             sig = NPLC_DIGITS.get(self.cfg.nplc, 7)

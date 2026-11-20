@@ -11,10 +11,11 @@ from PyQt6.QtWidgets import (QCheckBox, QComboBox, QHBoxLayout, QLabel, QLineEdi
                              QWidget)
 
 from ..worker import InstrumentWorker
+from ..worker import now as app_time
 from . import touch
-from .widgets import C_WARN, MONO, CsvRecorder
+from .widgets import C_WARN, MONO, CsvRecorder, SteadyY
 
-SPANS = {"30 s": 30, "2 min": 120, "10 min": 600, "1 h": 3600, "All": None}
+SPANS = {"10 s": 10, "30 s": 30, "2 min": 120, "10 min": 600, "1 h": 3600, "All": None}
 
 
 class PanelBase(QWidget):
@@ -32,6 +33,15 @@ class PanelBase(QWidget):
         self.recorder = CsvRecorder()
         self._stamps: list[float] = []
         self._dirty = False
+        self._redrawn = 0.0
+        # Scrolling trend: data time of the newest reading, the app time it
+        # arrived, the smoothed delay between the two, and the right edge shown.
+        self._t_last: float | None = None
+        self._t_seen = 0.0
+        self._lag: float | None = None
+        self._edge: float | None = None
+        self._x_plot = None                   # the plot whose X range scrolls (others link to it)
+        self._steady: list[SteadyY] = []
 
         self.worker = InstrumentWorker(resource, model, baud)
         self.worker.connected.connect(self._on_connected)
@@ -45,7 +55,8 @@ class PanelBase(QWidget):
 
         self.plot_timer = QTimer(self)
         self.plot_timer.timeout.connect(self._maybe_redraw)
-        self.plot_timer.start(100)
+        # Small steps make the scroll look smooth; the Pi gets fewer of them.
+        self.plot_timer.start(100 if touch.TOUCH else 40)
 
     def start(self):
         self.worker.start()
@@ -84,6 +95,11 @@ class PanelBase(QWidget):
         while self._stamps and now - self._stamps[0] > 5:
             self._stamps.pop(0)
         self.on_reading(r)
+        t = getattr(r, "t", None)
+        if t is not None:
+            self._t_last, self._t_seen = t, app_time()
+            lag = self._t_seen - t
+            self._lag = lag if self._lag is None else self._lag + 0.1 * (lag - self._lag)
         self._dirty = True
 
     def _on_poll_paused(self):
@@ -96,9 +112,13 @@ class PanelBase(QWidget):
         return (len(self._stamps) - 1) / max(1e-6, self._stamps[-1] - self._stamps[0])
 
     def _maybe_redraw(self):
-        if self._dirty and not self.freeze_chk.isChecked():
-            self._dirty = False
-            self.redraw()
+        if not self.freeze_chk.isChecked():
+            m = time.monotonic()
+            if self._dirty and m - self._redrawn >= 0.09:   # new data: ≤ ~10 redraws/s
+                self._dirty = False
+                self._redrawn = m
+                self.redraw()
+            self._scroll()
         self.rate_label.setText(f"{self.readings_per_s():.1f} readings/s" if self.connected else "")
 
     # ---- shared UI pieces ------------------------------------------------------
@@ -128,7 +148,7 @@ class PanelBase(QWidget):
         bar.addWidget(QLabel("Span"))
         self.span_combo = QComboBox()
         self.span_combo.addItems(list(SPANS))
-        self.span_combo.setCurrentIndex(1)
+        self.span_combo.setCurrentText("2 min")
         self.span_combo.currentIndexChanged.connect(lambda *_: setattr(self, "_dirty", True))
         bar.addWidget(self.span_combo)
         self.freeze_chk = QCheckBox("Freeze")
@@ -166,7 +186,49 @@ class PanelBase(QWidget):
     def span(self):
         return SPANS[self.span_combo.currentText()]
 
+    def scrolling_trend(self, x_plot, *plots):
+        """Let the base class move the trend's X window and steady the Y
+        autoscale.  `x_plot` sets X for any plots X-linked to it; every plot in
+        `plots` gets a SteadyY."""
+        self._x_plot = x_plot
+        self._steady = [SteadyY(p) for p in plots]
+
+    def _view_edge(self) -> float | None:
+        """Right edge of the trend window.  It follows the clock, less the
+        usual delay between a reading being taken and arriving here, so the chart
+        glides instead of stepping once per reading.  It runs at most two
+        reading intervals past the newest reading, so it stops soon after the
+        readings do, and it never moves backwards."""
+        if self._t_last is None:
+            return None
+        rate = self.readings_per_s()
+        limit = self._t_last + (2 / rate if rate > 0 else 0.0)
+        edge = min(app_time() - self._lag, limit)
+        if self._edge is not None and self._edge > edge and self._edge - edge < 5:
+            edge = self._edge                     # hold rather than step back
+        self._edge = edge
+        return edge
+
+    def _scroll(self):
+        if self._x_plot is None:
+            return
+        span = self.span()
+        edge = self._view_edge()
+        if span and edge is not None:
+            self._x_plot.setXRange(max(0.0, edge - span), max(span, edge), padding=0)
+        elif not span:
+            self._x_plot.enableAutoRange(axis="x")
+        for s in self._steady:
+            s.update()
+
+    def reset_steady(self):
+        for s in self._steady:
+            s.reset()
+
     def clear_trend(self):
+        self._edge = None
+        self._lag = None
+        self.reset_steady()
         self._dirty = True
 
     def _toggle_record(self, on: bool):
