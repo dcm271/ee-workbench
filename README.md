@@ -1,2 +1,36 @@
-# ee-workbench
-# ee-workbench
+# EE Workbench
+
+A Linux desktop app (PyQt6) for controlling and logging GPIB bench instruments:
+
+| Instrument | Support |
+|---|---|
+| Agilent 66321D / 66321B / 66311B DC source | Setpoints, OVP/OCP, output resistance, DVM, pulse statistics, waveform capture |
+| HP 6632A / 6633A / 6634A DC supply | Setpoints, OVP/OCP, readback, status |
+| HP 3456A 6½-digit DMM | Function, range, integration time, autozero, filter, null, statistics |
+
+Each instrument opens in its own tab with live readouts, trend plots on a shared time base, and CSV recording. **Esc turns every supply's output off.** Simulators (`SIM::66321D`, `SIM::6632A`, `SIM::3456A`) let you try everything without hardware.
+
+![66321D panel](docs/images/supply-66321d.png)
+
+## Quick start
+
+```bash
+./scripts/install-gpib-driver.sh           # once: builds linux-gpib for the NI GPIB-USB-HS
+./run.sh GPIB0::5::INSTR 3456A@GPIB0::22::INSTR
+./run.sh SIM::66321D                       # no hardware needed
+```
+
+## Documentation
+
+The Markdown sources are in [`docs/`](docs/), and the rendered PDFs in `docs/pdf/` (build them with `scripts/build-docs.sh`):
+
+1. [Hardware & Resources](docs/01-hardware-and-resources.md): supported instruments, GPIB addresses, cabling, manuals
+2. [Installation & Setup](docs/02-installation.md): Python environment, GPIB driver, troubleshooting
+3. [User's Guide](docs/03-users-guide.md): every panel and control, and measurement workflows
+4. [Technical Reference](docs/04-technical-reference.md): command sets, timings, architecture, adding instruments
+
+## Tests
+
+```bash
+.venv/bin/python -m pytest tests
+```

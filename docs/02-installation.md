@@ -1,0 +1,152 @@
+---
+title: Installation & Setup
+subtitle: From a fresh Linux machine to a working GPIB bus
+---
+
+# Installation & Setup
+
+These steps take a fresh Ubuntu machine to EE Workbench talking to your instruments. It takes about 15 minutes, mostly compile time.
+
+## 1. Get the project
+
+The project lives in `~/Dev/ee-workbench`:
+
+```
+ee-workbench/
+├── run.sh                       launch the GUI
+├── ee_workbench/                application source
+├── scripts/
+│   ├── install-gpib-driver.sh   builds and installs linux-gpib
+│   ├── build-docs.sh            renders these docs to PDF
+│   └── make_screenshots.py      regenerates the user-guide images
+├── vendor/linux-gpib/           linux-gpib source (fetched from SourceForge)
+├── docs/                        this documentation (Markdown and PDF)
+└── tests/                       automated tests (run against the simulators)
+```
+
+## 2. Python environment
+
+PyQt6 comes from the distribution; everything else goes into a project virtualenv.
+
+```bash
+sudo apt install python3-pyqt6 python3-venv python3-serial
+cd ~/Dev/ee-workbench
+python3 -m venv --system-site-packages .venv
+.venv/bin/pip install pyqtgraph numpy pyvisa pyvisa-py gpib-ctypes pytest
+```
+
+| Package | Why |
+|---|---|
+| PyQt6 | GUI toolkit |
+| pyqtgraph, numpy | fast real-time plots and data buffers |
+| pyvisa, pyvisa-py | instrument I/O (pure-Python VISA) |
+| gpib-ctypes | lets pyvisa-py reach linux-gpib's `libgpib.so` |
+| pyserial | only needed for instruments on RS-232 |
+
+Check that it works without any hardware:
+
+```bash
+./run.sh SIM::66321D
+.venv/bin/python -m pytest tests      # should report all tests passing
+```
+
+## 3. GPIB driver (linux-gpib)
+
+Ubuntu's kernel is built with **`CONFIG_GPIB` off**, so the NI GPIB-USB-HS has no driver until you build one. The script does it all:
+
+```bash
+cd ~/Dev/ee-workbench
+./scripts/install-gpib-driver.sh
+```
+
+What it does, step by step:
+
+1. Installs the build dependencies and the headers for your running kernel (asks for sudo).
+2. Builds the kernel modules from `vendor/linux-gpib/linux-gpib-kernel` and installs them (`gpib_common`, `ni_usb_gpib`, and others).
+3. Builds and installs the userspace library `libgpib`, `gpib_config`, `ibtest` and the udev rules (into `/usr/local`).
+4. Writes `/etc/gpib.conf` for one NI GPIB-USB-HS as board `gpib0` (the previous file is backed up).
+5. Creates the `gpib` group and adds you to it.
+6. Loads the driver and configures the board.
+
+Afterwards, **log out and back in** so the new group membership applies (or run `newgrp gpib` in a terminal).
+
+> **Re-run the script after every kernel upgrade.** The module is built for one kernel version. If GPIB stops working after an update, this is almost always why.
+
+### Verify the bus
+
+```bash
+lsmod | grep ni_usb_gpib       # driver loaded
+ls -l /dev/gpib0               # crw-rw---- root gpib ...
+```
+
+Then start the app and press **⌕ Scan GPIB**. Every powered instrument should appear as `GPIB0::<address>::INSTR`.
+
+For a low-level test, `ibtest` lets you open a device and send `*IDN?` (66321D), `ID?` (6632A) or `F1 T3` (3456A), then read the reply.
+
+### The resulting `/etc/gpib.conf`
+
+```
+interface {
+    minor       = 0
+    board_type  = "ni_usb_b"
+    name        = "gpib0"
+    pad         = 0
+    timeout     = T3s
+    eos         = 0x0a
+    master      = yes
+}
+```
+
+You only need to edit it to use a different adapter (`board_type`). You don't need `device { }` entries: the app addresses instruments directly.
+
+## 4. Launching
+
+```bash
+./run.sh                                   # empty window; connect from the toolbar
+./run.sh GPIB0::5::INSTR                   # open the 66321D (auto-detected)
+./run.sh GPIB0::5::INSTR 6632A@GPIB0::6::INSTR 3456A@GPIB0::22::INSTR
+```
+
+`MODEL@RESOURCE` forces a driver. Models are `663xx` (or `66321D`), `6632A`, and `3456A`. **The 3456A always has to be named**, because it has no ID query.
+
+### Desktop launcher (optional)
+
+Save as `~/.local/share/applications/ee-workbench.desktop`:
+
+```
+[Desktop Entry]
+Type=Application
+Name=EE Workbench
+Exec=/home/ghost/Dev/ee-workbench/run.sh
+Terminal=false
+Categories=Science;Electronics;
+```
+
+## Alternatives
+
+| Situation | What to do |
+|---|---|
+| 66321D on RS-232 instead of GPIB | Use resource `ASRL/dev/ttyUSB0::INSTR` and pick the baud rate that matches the supply's I/O menu (factory 9600). Hidden `ttyS` ports can be typed in by hand. |
+| NI-VISA or Keysight IO Libraries installed | `EEWB_VISA_LIB=@ivi ./run.sh` uses the vendor VISA instead of pyvisa-py |
+| A different GPIB adapter | Set `board_type` in `/etc/gpib.conf` (e.g. `agilent_82357a`) and run `sudo gpib_config` |
+
+## Troubleshooting
+
+| Symptom | Likely cause and fix |
+|---|---|
+| No GPIB entries, only simulators | Driver not loaded: run `lsmod \| grep gpib`. Re-run the install script (kernel upgraded?). |
+| `/dev/gpib0` missing | Unplug and replug the adapter. Check `dmesg \| tail -30` for `ni_usb_gpib` messages. |
+| "Permission denied" opening GPIB0 | You're not in the `gpib` group yet: log out and back in. |
+| Scan finds nothing, but the driver is loaded | Instruments off, cable loose, or the 3456A in TALK ONLY mode. |
+| Connect times out on one instrument | Wrong address, or two instruments sharing an address. |
+| "Couldn't identify the instrument" | Auto-detect only knows the supplies. Pick the model by hand (the 3456A always needs this). |
+| Readings stop and "Polling paused" appears | A bus error occurred. Fix the cause, then press **Resume polling**. |
+| 66321D waveform capture is slow | Normal: the instrument sends arrays at about 4 KB/s (about 3 s per 1024 points). |
+| Module build fails after a kernel update | Run `git -C vendor/linux-gpib pull`, then run the script again. |
+
+## Building these documents
+
+```bash
+.venv/bin/pip install markdown weasyprint     # once
+./scripts/build-docs.sh                       # writes docs/pdf/*.pdf
+```
