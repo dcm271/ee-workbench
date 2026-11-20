@@ -20,9 +20,9 @@ from .widgets import (C_CURR, C_DVM, C_MUTED, C_ON, C_POW, C_VOLT, C_WARN, MONO,
 
 # Digitizer presets for the 663xx: (label, points, tooltip)
 SPEED_PRESETS = [
-    ("Fast", 256, "256 samples = 4 ms window. ~20 readings/s (V+I) or ~30/s current only."),
-    ("Normal", 1024, "1024 samples = 16 ms window. ~9 readings/s."),
-    ("Smooth", 2048, "2048 samples = 32 ms window (instrument default). ~6 readings/s. "
+    ("Fast", 256, "256 samples = 4 ms window. ~21 readings/s (V+I) or ~32/s current only."),
+    ("Normal", 1024, "1024 samples = 16 ms window. ~13 readings/s (V+I)."),
+    ("Smooth", 2048, "2048 samples = 32 ms window (instrument default). ~9 readings/s (V+I). "
                      "Best averaging for pulsed loads."),
 ]
 

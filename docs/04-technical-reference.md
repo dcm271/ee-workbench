@@ -1,0 +1,150 @@
+---
+title: Technical Reference
+subtitle: Command sets, measured timings, architecture and extending the app
+---
+
+# Technical Reference
+
+## Architecture
+
+```
+MainWindow
+ ├─ SupplyPanel (66321D) ── worker thread ── Agilent663xx ──┐
+ ├─ SupplyPanel (6632A)  ── worker thread ── HP6632A ───────┼─ VisaTransport
+ └─ DmmPanel    (3456A)  ── worker thread ── HP3456A ───────┘       │
+                                                       pyvisa-py ─ gpib-ctypes
+                                                                    │
+                                              libgpib ─ ni_usb_gpib (kernel)
+```
+
+- **One I/O thread per instrument** (`worker.py`). The GUI never blocks on the bus. Commands from the GUI go into a queue and run before the next poll.
+- After each command the worker drains the instrument's error queue and re-reads the instrument's state, so the GUI always shows what the instrument actually has.
+- If a poll fails, polling pauses (no flood of errors) until you press **Resume polling**.
+- Each poll uses a **snapshot** of the poll settings, so changing a checkbox mid-poll can't make the query and its parsing disagree.
+- **Shared clock:** every reading is stamped with seconds since the app started (`worker.now()`).
+- **Transports** (`transport.py`) all provide `write / read / query / read_stb / clear / temp_timeout`. A real session (`VisaTransport`) and the simulators (`sim/`) are interchangeable.
+
+| Module | Contents |
+|---|---|
+| `instruments/base.py` | Data types: `SupplyCaps`, `Setpoints`, `SupplyReading`, `DmmConfig`, `DmmReading` |
+| `instruments/agilent663xx.py` | 66311B/66321B/66321D SCPI driver |
+| `instruments/hp6632a.py` | 6632A/33A/34A driver (HP's pre-SCPI command language) |
+| `instruments/hp3456a.py` | 3456A driver (program codes) |
+| `instruments/__init__.py` | Model list, auto-detect, driver factory |
+| `sim/` | One simulator per instrument |
+| `gui/` | Main window, panels, shared widgets |
+
+## Agilent 66321D (SCPI)
+
+### Measured performance (66321D fw A.03.01, NI GPIB-USB-HS, pyvisa-py)
+
+| Operation | Time |
+|---|---|
+| Simple query round trip (`*IDN?`, `STAT:OPER:COND?`) | 10–12 ms |
+| `MEAS:VOLT?` or `MEAS:CURR?`, 2048 points | ~50 ms |
+| `MEAS:CURR?`, 256 points | ~20 ms |
+| One combined poll (`MEAS:VOLT?;:MEAS:CURR?;:STAT…;:OUTP?`), 2048 points | 107 ms |
+| Same, 256 points | 47 ms |
+| Current-only poll, 256 points | 31 ms |
+| `MEAS:ARR:CURR?` transfer | ~3.8 KB/s (same with raw `ibrd`, so the instrument is the limit) |
+
+Voltage and current are **digitized separately**: `FETC:VOLT?` after `MEAS:CURR?` returns error +603. That's why a V+I reading costs two acquisitions.
+
+### Commands used
+
+| Purpose | Command |
+|---|---|
+| Setpoints | `VOLT`, `CURR`, `OUTP ON/OFF`, `VOLT:PROT`, `CURR:PROT:STAT`, `RES` |
+| Protection reset | `OUTP:PROT:CLE` |
+| Measurement setup | `SENS:SWE:POIN`, `SENS:SWE:TINT`, `SENS:CURR:RANG MIN/MAX`, `SENS:CURR:RANG:AUTO`, `SENS:CURR:DET ACDC/DC` |
+| Poll (one message) | `MEAS:VOLT?;:MEAS:CURR?;[:FETC:CURR:MAX?;…MIN?;…HIGH?;…LOW?;…ACDC?];[:MEAS:DVM?];:STAT:OPER:COND?;:STAT:QUES:COND?;:OUTP?` |
+| Waveform | `MEAS:ARR:CURR?` / `MEAS:ARR:VOLT?` |
+| Capability probes at connect | `VOLT? MAX`, `CURR? MAX`, `VOLT:PROT? MAX`, `MEAS:DVM?`, `RES?`, `SENS:CURR:RANG:AUTO?` |
+
+The pulse-statistics `FETC` queries have to come before `MEAS:DVM?`, because the DVM acquisition replaces the current data (error +603 otherwise).
+
+### Status bits decoded
+
+| Register | Bit | Shown as |
+|---|---|---|
+| `STAT:OPER:COND?` | 8 | CV |
+| | 10 | CC |
+| | 11 | CC- |
+| `STAT:QUES:COND?` | 0 | OV |
+| | 1 | OCP |
+| | 4 | OT |
+| | 9 | RI |
+| | 10 | UNREG |
+| | 14 | OVLD |
+
+## HP 6632A / 6633A / 6634A
+
+Source: Operating Manual 5957-6360, Section VI (Tables 6-1, 6-2, 6-4, 6-6). The commands are terminated with LF.
+
+| Purpose | Command | Notes |
+|---|---|---|
+| Identify | `ID?` | returns `HP6632A` (or 6633A/6634A) |
+| Voltage / current | `VSET <v>`, `ISET <a>` | no matching queries exist |
+| Output | `OUT 1` / `OUT 0` | power-on default is ON |
+| OVP | `OVSET <v>` | trips the SCR crowbar |
+| OCP | `OCP 1` / `OCP 0` | trips only while in CC |
+| Reset a trip | `RST` | clear the cause first |
+| Power-on defaults | `CLR` | 0 V, minimum current, output ON |
+| Readback | `VOUT?`, `IOUT?` | plain numbers |
+| Status | `STS?` | decimal, bits below |
+| Error | `ERR?` | reading it clears the ERR bit |
+
+`STS?` bits (Table 6-4): CV=1, +CC=2, UNR=4, OV=8, OT=16, OC=64, ERR=128, INH=256, −CC=512, FAST=1024, NORM=2048.
+
+Error codes (Table 6-6), main ones: 10 header expected, 11 unrecognized header, 20 number expected, 21 number syntax, 41 parameter out of range, 42 voltage, 43 current, 44 overvoltage programming error.
+
+Auto-detect sends `*IDN?` first. The 6632A answers that with ERR 10 and no reply; the app then sends `ID?` and reads `ERR?` to clear the error.
+
+## HP 3456A
+
+Source: 3456A Operating & Service Manual §III and the Hepperle quick-reference card.
+
+| Purpose | Codes |
+|---|---|
+| Function | `S0F1` DCV, `S0F2` ACV, `S0F3` ACV+DCV, `S0F4` 2W Ω, `S0F5` 4W Ω, `S1F4`/`S1F5` offset-compensated Ω, `S1F1` DCV/DCV ratio |
+| Range | `R1` auto, `R2` 100 mV / 100 Ω, `R3` 1 V / 1 kΩ, `R4` 10 V / 10 kΩ, `R5` 100 V / 100 kΩ, `R6` 1000 V / 1 MΩ, `R7` 10 MΩ, `R8` 100 MΩ, `R9` 1 GΩ |
+| Trigger | `T1` internal, `T2` external, `T3` single, `T4` hold |
+| Integration | `<n>STI`, n = 0.01 … 100 PLC |
+| Autozero / filter | `Z0`/`Z1`, `FL0`/`FL1` |
+| Math | `M0` off, `M3` null |
+| Reset | `H` (home), or a device clear |
+
+**Read cycle:** the app sends `T3`, waits the expected conversion time *without holding the bus* (so other instruments keep polling), then reads. The reply is ASCII `+RDDDDDDD+D` (sign, overrange digit, digits with a floating decimal point, signed exponent) followed by CR LF. The parser also accepts an `E`-exponent form.
+
+**Status** comes from a serial poll (octal masks): 004 data ready, 020 illegal state or syntax error, 040 program memory error.
+
+**Still to verify on real hardware:** the exact value the 3456A sends on overload (the app treats |x| ≥ 9×10⁹ as overload), the R2 ohms range (the reference card is ambiguous), and whether ohms readings arrive in Ω or kΩ. Check these with the Console tab (**Send + read**) when the meter is connected.
+
+## Simulators
+
+| Resource | Model |
+|---|---|
+| `SIM::66321D` | 47 Ω load with 4.7 Ω, 577 µs bursts every 4.615 ms; DVM at 3.7 V ± 0.15 V; full SCPI error queue; OVP/OCP trips |
+| `SIM::6632A` | 10 Ω load; ERR codes; OCP/OVP trips; 30 ms readback delay |
+| `SIM::3456A` | DCV 5 V with slow drift, Ω ~1 kΩ, ACV 120 mV; noise scales with integration time; null; syntax-error status |
+
+## Tests
+
+```bash
+.venv/bin/python -m pytest tests
+```
+
+The tests run each driver against its simulator: identification, CV/CC, protection trips, error decoding, waveform capture, and the 3456A reading formats.
+
+## Adding an instrument
+
+1. **Driver:** write a class in `instruments/` with `kind = "supply"` or `"dmm"`, plus `family`, `identify()`, `poll(t, cfg)`, `errors()`, and the setters the panel calls. Return the shared data types from `base.py`.
+2. **Capabilities:** fill in `SupplyCaps`. The supply panel hides what's unsupported (DVM, digitizer, waveform, resistance) and handles `setpoint_readback=False`.
+3. **Register it:** add it to `MODELS` and `_CLASSES` in `instruments/__init__.py`, and teach `detect()` its ID string if it has one.
+4. **Simulator:** subclass `sim.base.SimBase`, implement `write()`, and add it to `sim.open_sim` and `SIM_RESOURCES`.
+5. **Tests:** add `tests/test_<model>.py`.
+
+## Licences and third-party code
+
+- **linux-gpib** (GPL): built from `vendor/linux-gpib` (not committed; fetched by the install script).
+- **pyvisa, pyvisa-py** (MIT), **pyqtgraph** (MIT), **PyQt6** (GPL v3), **gpib-ctypes** (GPL v2).
