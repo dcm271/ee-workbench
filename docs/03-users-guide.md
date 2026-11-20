@@ -38,9 +38,11 @@ Each instrument gets its own **tab**. Closing a tab disconnects that instrument 
 
 | Flag | Meaning | What to do |
 |---|---|---|
-| OV | Over-voltage protection tripped | Lower the voltage or raise OVP, then **Clear trip** |
+| OV | Over-voltage trip (output went ~2 V above the setting) | Find what back-drove the output, then **Clear trip** |
 | OCP | Over-current protection tripped | Remove the overload or raise the limit, then **Clear trip** |
 | OT | Over-temperature | Let it cool; check the airflow |
+| SENSE-OPEN | A remote-sense lead is disconnected (when open-sense detection is on) | Check the sense leads, then **Clear trip** |
+| FP-LOCAL | The front panel has taken local control | Press the supply's Local key again or send any command |
 | RI / INH | Remote inhibit input active | Check the rear INH input |
 | UNREG | Output can't regulate | Check the load, sense leads and AC line |
 | OVLD | Measurement overload | Use a higher current range |
@@ -52,9 +54,11 @@ Each instrument gets its own **tab**. Closing a tab disconnects that instrument 
 ### Output
 
 - **OUTPUT ON/OFF** toggles the output. It turns green while the output is on.
-- **Voltage, Current limit, OVP, Output resistance:** type a value and press **Enter** or **Set**. A box turns **amber** when its value differs from what the instrument has, meaning "not applied yet". Turning the mouse wheel over a box does nothing unless you've clicked into it first, so scrolling the panel can't change a live setpoint.
+- **Voltage, Current limit, Voltage limit, Output resistance:** type a value and press **Enter** or **Set**. A box turns **amber** when its value differs from what the instrument has, meaning "not applied yet". Turning the mouse wheel over a box does nothing unless you've clicked into it first, so scrolling the panel can't change a live setpoint.
 - **Output resistance** (−40 mΩ to 1 Ω) makes the supply behave like a battery with internal resistance. Use it to test how a device handles supply droop.
-- **Over-current protection (OCP):** when ticked, the supply turns its output *off* instead of limiting the current.
+- **Voltage limit** (the 66321D's `VOLT:PROT`) is the highest voltage the supply will *accept as a setting*, from 0 to 22 V. Use it to make sure nobody can program more than your device can take. It doesn't trip anything.
+- **OCP** (over-current protection): when ticked, the supply turns its output *off* instead of limiting the current. The **OCP delay** on the System tab sets how long current limit has to last first.
+- **OV trip** (over-voltage protection): turns the output off if the output rises about 2 V above the voltage setting, e.g. when a charger or another supply drives it. On by default.
 - **Clear trip** resets a latched OV or OCP trip. Remove the cause first.
 - **\*RST** returns the supply to its power-on defaults (output off). The app asks you to confirm first.
 
@@ -70,11 +74,12 @@ The 66321D digitizes the output and averages each reading over *samples × inter
 
 - **Measure voltage:** untick it for faster current-only logging. The supply measures voltage and current one after the other, so voltage costs a second acquisition.
 - **Pulse statistics** add no extra acquisition. **Read DVM input** adds one.
-- **Current range:** **HIGH (3 A)**, **LOW (20 mA)** for sleep and standby currents, or **AUTO**.
+- **Current range:** **3 A**, **1 A**, or **20 mA** for sleep and standby currents. Pick the lowest range that still covers the *peak* current: a range that's too low clips the bursts and shows **OVLD**. The 66321D has no auto-ranging.
+- **Window:** **Hanning** (the default) reduces the error from ripple when an acquisition isn't a whole number of cycles. **Rectangular** gives the plain average of exactly what was sampled.
 - **Detector:** **ACDC** measures the whole waveform (use it for pulsed loads); **DC** gives the DC component only.
 - **Poll delay:** extra time between readings. Leave it at *none* for maximum speed, or raise it for long logs.
 
-> **Pulsed loads with short windows:** with a bursty load (e.g. 577 µs bursts every 4.6 ms), a 4 ms window catches a different part of each burst every time, so the trend jumps around. Use **Smooth** for a stable average, or the **Waveform** tab to see the bursts themselves.
+> **Pulsed loads with short windows:** with a bursty load (e.g. 577 µs bursts every 4.6 ms), a 4 ms window catches a different part of each burst every time, so the trend jumps around. Use **Smooth** for a stable average, or the **Capture** tab to see the bursts themselves.
 
 ### Trend tab
 
@@ -85,16 +90,64 @@ Strip charts of voltage, current (with the per-reading **max** as a dotted line 
 - Drag a plot to pan, use the mouse wheel to zoom, and right-click for export and autoscale options.
 - **● Record CSV** writes every reading to a file until you press it again.
 
-### Waveform tab
+### Capture tab
 
-![Waveform capture](images/waveform.png)
+![Capture tab](images/capture.png)
 
-This captures up to 4096 points at intervals down to 15.6 µs (a 64 ms window). Use it to look at transmit bursts, inrush current or load steps.
+A storage-scope view of the output: up to 4096 points at intervals down to 15.6 µs (a 64 ms window), triggered on the signal itself, with data from *before* the trigger. Use it for transmit bursts, inrush current, wake-ups and load steps.
 
-- Choose **Current** or **Voltage**, the number of **Points** and the **Interval**. The label shows the time window and the expected transfer time.
-- **Capture** takes one shot; **Continuous** repeats it. **Export CSV…** saves `t_s` and the value for each point.
-- The statistics line shows mean, min, max, peak-to-peak and RMS.
-- **It's slow by design:** the 66321D sends array data at about 4 KB/s, so 1024 points take about 3 s and 4096 take about 13 s. Normal polling pauses during a capture.
+**Setting up a capture (left side):**
+
+- **Signal:** current or voltage. **Points** and **Interval** set the record; the line under them shows the time covered and how long the transfer takes.
+- **Trigger:**
+
+| Trigger | What starts the capture |
+|---|---|
+| **Immediate** | Pressing **Single** or **Run**. |
+| **Signal level** | The signal crossing **Level** on the chosen **Edge** (rising, falling or either). **Hysteresis** is a band around the level the signal must cross completely, so noise doesn't trigger it. **50 %** sets the level halfway between the high and low of the last capture. |
+| **External input** | A falling edge on pin 3 of the rear control port. The port must be set to *External trigger*; the tab offers to do it. |
+| **Output step** | The supply changes its output to the ticked **Voltage**, **Current limit** and/or **Resistance** values and captures the response at the same instant. **Put the levels back afterwards** restores them when the capture is done. **Step now** changes the levels the same way without capturing. |
+
+- **Pre-trigger:** how much of the record comes before the trigger. 25 % shows what led up to the event; 0 % starts at the trigger.
+- **Segments:** capture several triggers in a row (points × segments ≤ 4096). **Overlay** draws them on top of each other, like a scope's persistence.
+- **Single** captures once; **Run** repeats until **Stop**. While a level or external trigger waits, the status turns amber. **Stop**, **ALL OFF** and **Esc** abort it.
+
+> Readings on the left pause while a capture is armed: the supply has one digitizer. The 66321D sends array data at about 3.7 KB/s, so 1024 points take about 1.2 s to transfer.
+
+**Reading the result (right side):**
+
+- Time is shown relative to the trigger (dashed line). The red dashed line is the trigger level.
+- **Measurements** are worked out automatically from the first segment: mean, RMS, min/max, high/low levels, peak-to-peak, and for pulse trains the period, frequency, pulse width, duty cycle and 10–90 % rise and fall times. For current, the **charge** in the record (in Ah) and the **energy** (Wh, at the present output voltage) are shown too; hover for coulombs and joules. *Supply's own* is the 663xx's own DC and RMS figure for comparison.
+- **Cursors** adds two draggable markers. The line under the plot shows each cursor's time and value, Δt, 1/Δt, Δ, and the mean, RMS, min, max, charge and energy *between* them. Use it to measure one burst.
+- **View:** **Time**, **Histogram** (share of time spent at each level, useful for sleep/active ratios) or **Spectrum** (FFT with a Hann window, to find ripple and switching frequencies).
+- **Reference** keeps the current capture in grey behind the following ones, for before/after comparisons. Press it again to clear it.
+- **Save…** writes CSV (`t_s, segment, current_A` or `voltage_V`, with the settings on the last line) or a PNG of the plot. **Open…** loads a saved CSV back for measuring.
+
+### Tests tab
+
+![Tests tab](images/tests.png)
+
+Ready-made procedures. Choose one along the top, set it up on the left, then press **Start**. **Stop**, **ALL OFF** and **Esc** end any test. A test that turns the output on asks you to confirm first. **Save CSV…** writes the test's data.
+
+- **Battery life:** power your device from the supply and log what it uses. It shows elapsed time, average current, **charge** (mAh) and **energy** (mWh), and projects how long a battery of the **Capacity** you enter would last. It stops after the **Duration**, when the **Charge used** limit is reached, or if the voltage falls **below** the cutoff.
+- **Battery emulator:** the output behaves like a battery running down. Choose the **Chemistry** (Li-ion/LiPo, LiFePO4, NiMH or alkaline), the number of **Cells** in series, the **Capacity** and the **Start charge**. As the load draws current the charge goes down and the voltage follows that chemistry's discharge curve. The **Internal R** is set as the supply's output resistance, so the voltage also sags under load like a real cell. Negative current (charging) raises the charge. Use a small capacity to run through a whole discharge in minutes. It stops when the battery is empty and puts the output resistance back to 0 Ω.
+- **Sequencer:** a table of steps, each with **Volts**, **Amps** (current limit), **Hold s** and **Ramp s**. A non-zero ramp moves smoothly from the previous step's values. **Repeat** runs the whole table several times. **Open…** and **Save…** store sequences as JSON files. The plot shows the set voltage and the measured voltage.
+- **I-V sweep:** steps the voltage (with a fixed current limit) or the current limit (with a fixed voltage) through **Points** values from **From** to **To**, waits the **Settle** time at each, and measures. It plots current against voltage and fits a slope (dV/dI). **Sweep back down too** shows hysteresis.
+
+### System tab
+
+![System tab](images/system.png)
+
+The rest of the 66321D's features. Each group appears only on models that have it.
+
+- **Protection:** **Over-voltage trip** (same as **OV trip** under Output), **OCP delay** (0.08 s by default: how long current limit must last before OCP turns the output off; raise it if inrush trips OCP), and **Open sense-lead detection**, which turns the output off if a remote-sense lead comes loose.
+- **Software limits:** checked by this app on every reading. They turn the output off if the current stays above, or the voltage stays below, a value for longer than the time you set. They're only as fast as the readings, so use OCP when you need fast protection.
+- **Output response:** low or high load capacitance, local or remote sense. **High capacitance, remote sense** suits a phone with its bypass capacitors on long sense leads, but needs more than 5 µF across the output; the app asks before selecting it.
+- **Protection events:** trips and warnings the supply reports (over-current, over-voltage, over-temperature, open sense lead, remote inhibit, unregulated, measurement overload), with the time. They also appear in the status bar. The software limits log here too.
+- **Rear control port:** choose what pins 1–3 do. With **Remote inhibit / fault**, set the **Remote inhibit** input to latching, live or off, and the **Fault output** and what drives it. With **Digital I/O**, tick **Out 0** and **Out 1** to drive pins 1 and 2, and press **Read** to read the pin 3 input. **External trigger** makes pin 3 the Capture tab's external trigger. The port setting is stored in the supply's non-volatile memory, so the app asks first.
+- **Front-panel display:** switch the display off, show a message of up to 14 characters, or press **Normal** to go back to readings.
+- **Saved setups:** **Recall 0–3** and **Save 1–3** use the supply's own memories (the app asks first, because a recalled setup can turn the output on). **At power-on** chooses between defaults and saved setup 0. **In this app** keeps named presets of voltage, current limit, voltage limit, OCP and output resistance in `~/.config/ee-workbench/presets.json`; applying one never turns the output on.
+- **Instrument:** model, serial number, firmware, options and calibration date. **Self-test** runs the supply's self-test, **Read error queue** shows any errors waiting, and **Reset** sends `*RST`.
 
 ### Console tab
 
@@ -111,7 +164,7 @@ It works the same way as the 66321D panel, with these differences:
 - **Setpoints can't be read back.** The 6632A has no way to report its programmed voltage or current. The boxes start amber ("unknown") and the output shows **OUTPUT ?** until you set them. After that they show what this app sent. Changes made on the front panel aren't seen.
 - To keep a stray **Set** from causing harm, the OVP box starts at its maximum (22 V). Programming OVP below the output voltage fires the 6632A's crowbar, which shorts the output.
 - **Clear trip** sends `RST` (resets a latched OV or OC). The reset button sends **CLR**, which returns the supply to its power-on defaults. **This turns the output ON at 0 V**, and the confirmation dialog says so.
-- It has no measurement setup, waveform capture, DVM or output resistance. **Measure voltage** can still be unticked to speed up current logging.
+- It has no measurement setup, Capture or System tab, DVM or output resistance. The **Tests** tab works, except for the battery emulator's internal resistance. **Measure voltage** can still be unticked to speed up current logging.
 - The minimum current limit is 20 mA. Lower values are raised to 20 mA, as the supply itself does.
 
 ## Multimeter panel: HP 3456A
@@ -164,7 +217,9 @@ Use the 66321D as the input supply, the 6632A as a second rail, and the 3456A on
 
 **3456A tab:** `timestamp, t_s, channel, function, value, unit, overload`
 
-**Waveform export:** `t_s, current_A` (or `voltage_V`)
+**Capture export:** `t_s, segment, current_A` (or `voltage_V`); the last line, starting with `#`, holds the trigger settings.
+
+**Tests:** battery life `t_s, voltage_V, current_A, charge_mAh, energy_mWh`; battery emulator `t_s, soc_pct, ocv_V, voltage_V, current_A`; sequencer `t_s, step, set_V, set_A, voltage_V, current_A`; I-V sweep `set, voltage_V, current_A`.
 
 `t_s` is seconds on the app's shared clock and lines up across all files. Empty cells mean that quantity wasn't measured.
 

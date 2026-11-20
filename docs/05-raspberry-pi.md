@@ -89,13 +89,17 @@ The touch layout turns on automatically when the app finds a touch screen, or a 
 What's different from the desktop layout:
 
 - **Larger controls.** Buttons, boxes, check boxes and tabs are at least 52 px tall (about 9 mm).
-- **The left column holds only readouts and output controls,** so the essentials never need scrolling. The supply's identity, *RST and measurement setup move to a **Setup** tab next to Trend, Waveform and Console. On the 3456A the reading and statistics stay on the left, and function, range and integration move to Setup.
+- **The left column holds only readouts and output controls,** so the essentials never need scrolling. The supply's identity, *RST and measurement setup move to a **Setup** tab next to Trend, Capture, Tests, System and Console. The System tab becomes a single scrolling column. On the 3456A the reading and statistics stay on the left, and function, range and integration move to Setup.
 - **Numeric keypad.** Tapping a voltage, current, OVP, sample count or poll-delay box opens a keypad. It shows the allowed range, and **Set** greys out for values outside it. Pressing **Set** also sends the value to the instrument, so there's no separate Set button. The physical keyboard works on the keypad too: digits, `.`, `-`, Backspace, Delete (clear), **Enter** (set) and **Esc** (cancel).
 
   ![Keypad](images/touch-keypad.png)
 
 - **Two taps to turn an output ON.** The first tap arms the button (amber, "Tap again to turn ON"). A second tap within 3 seconds turns the output on. Turning an output **off** always takes one tap.
 - **ALL OUTPUTS OFF** is a large red button in the top bar. **Esc** still does the same from the keyboard, except while a keypad is open, where Esc only cancels the keypad.
+- **Capture, Tests and System** work the same as on the desktop. Their settings sit in a column that scrolls by dragging, and every number box opens the keypad. The Capture toolbar wraps onto two rows.
+
+  ![Capture tab on the touch screen](images/touch-capture.png)
+
 - **Plots don't pan or zoom** under a finger. The **Span** selector sets the time window, and Y always autoscales. Scroll areas scroll by dragging.
 - **＋ Add instrument** replaces the connection toolbar. It scans the GPIB bus when it opens and lists what it finds plus the simulators. Pick one (or enter an address with the keypad), choose the model, then tap **Connect**. For the 3456A, tap the **3456A DMM** model button, because the meter can't identify itself.
 

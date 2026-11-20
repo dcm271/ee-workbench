@@ -24,7 +24,9 @@ class InstrumentWorker(QThread):
     connect_failed = pyqtSignal(str)
     reading = pyqtSignal(object)
     state = pyqtSignal(object)                       # Setpoints / DmmConfig
-    waveform = pyqtSignal(str, float, object)        # what, dt, list[float]
+    capture_status = pyqtSignal(str)                 # armed | waiting | transferring | idle
+    capture_done = pyqtSignal(object)                # CaptureResult
+    job_result = pyqtSignal(str, object)             # tag, value (submit_result)
     reply = pyqtSignal(str, str)                     # cmd, response
     log = pyqtSignal(str)
     error = pyqtSignal(str)
@@ -41,6 +43,7 @@ class InstrumentWorker(QThread):
         self.interval_s = 0.0
         self._trace = False
         self._last_output = None
+        self._cap = None        # armed capture: {"fire_at": monotonic | None, "check": monotonic}
 
     # ---- called from GUI thread ---------------------------------------
     def submit(self, fn, *args, refresh=False):
@@ -63,7 +66,12 @@ class InstrumentWorker(QThread):
             return
         next_poll = 0.0
         while self._running:
-            timeout = max(0.0, next_poll - time.monotonic()) if self.poll_enabled else 0.5
+            if self._cap:
+                timeout = 0.03          # watch the capture; the queue stays responsive
+            elif self.poll_enabled:
+                timeout = max(0.0, next_poll - time.monotonic())
+            else:
+                timeout = 0.5
             try:
                 item = self._q.get(timeout=timeout)
             except queue.Empty:
@@ -73,7 +81,9 @@ class InstrumentWorker(QThread):
                 continue
             if not self._running:
                 break
-            if self.poll_enabled:
+            if self._cap:
+                self._service_capture()     # the digitizer is busy: no polling
+            elif self.poll_enabled:
                 self._do_poll()
                 next_poll = time.monotonic() + self.interval_s
         try:
@@ -135,12 +145,66 @@ class InstrumentWorker(QThread):
             self.poll_enabled = False
             self.poll_paused.emit()
 
-    # ---- higher-level helpers -------------------------------------------
-    def request_capture(self, what: str, points: int, tint: float):
+    # ---- waveform capture (663xx) ----------------------------------------
+    def request_capture(self, spec):
+        """Arm a capture; the result arrives later via capture_done."""
         def job(drv):
-            data = drv.capture(what, points, tint)
-            self.waveform.emit(what, tint, data)
+            if self._cap:
+                drv.abort()
+            wait = drv.arm(spec)
+            now = time.monotonic()
+            self._cap = {"fire_at": now + wait if wait >= 0 else None, "check": now}
+            self.capture_status.emit("armed" if wait >= 0 else "waiting")
         self.submit(job)
+
+    def abort_capture(self):
+        def job(drv):
+            if self._cap:
+                self._cap = None
+                drv.abort()
+            self.capture_status.emit("idle")
+        self.submit(job)
+
+    @property
+    def capturing(self) -> bool:
+        return self._cap is not None
+
+    def _service_capture(self):
+        cap = self._cap
+        now = time.monotonic()
+        try:
+            if cap["fire_at"] is not None:
+                if now < cap["fire_at"]:
+                    return
+                cap["fire_at"] = None
+                self.drv.fire()
+                self.capture_status.emit("waiting")
+            if now < cap["check"]:
+                return
+            cap["check"] = now + 0.1
+            if not self.drv.capture_done():
+                return
+            self.capture_status.emit("transferring")
+            self._cap = None
+            res = self.drv.fetch()
+            self.capture_status.emit("idle")
+            self.capture_done.emit(res)
+        except Exception as e:
+            self._cap = None
+            try:
+                self.drv.abort()
+            except Exception:
+                pass
+            self.capture_status.emit("idle")
+            self._fail(e)
+
+    # ---- generic jobs ----------------------------------------------------
+    def submit_result(self, tag: str, fn, *args, refresh=False):
+        """Run fn(drv, *args) on the I/O thread; its return value arrives
+        via job_result(tag, value). Exceptions go to `error` as usual."""
+        def job(drv):
+            self.job_result.emit(tag, fn(drv, *args))
+        self.submit(job, refresh=refresh)
 
     def request_raw(self, cmd: str, read: bool):
         def job(drv):

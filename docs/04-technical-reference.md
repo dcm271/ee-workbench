@@ -31,8 +31,10 @@ MainWindow
 | `instruments/hp6632a.py` | 6632A/33A/34A driver (HP's pre-SCPI command language) |
 | `instruments/hp3456a.py` | 3456A driver (program codes) |
 | `instruments/__init__.py` | Model list, auto-detect, driver factory |
+| `analysis.py` | Waveform measurements (numpy only): levels, pulse timing, rise/fall, charge, cursors, histogram, spectrum |
 | `sim/` | One simulator per instrument |
 | `gui/` | Main window, panels, shared widgets |
+| `gui/capture_tab.py`, `tests_tab.py`, `system_tab.py` | The 663xx Capture, Tests and System tabs |
 
 ## Agilent 66321D (SCPI)
 
@@ -46,7 +48,11 @@ MainWindow
 | One combined poll (`MEAS:VOLT?;:MEAS:CURR?;:STAT…;:OUTP?`), 2048 points | 107 ms |
 | Same, 256 points | 47 ms |
 | Current-only poll, 256 points | 31 ms |
-| `MEAS:ARR:CURR?` transfer | ~3.8 KB/s (same with raw `ibrd`, so the instrument is the limit) |
+| Array transfer | ~3.7 KB/s (same with raw `ibrd`, so the instrument is the limit) |
+| 1024-point array, ASCII vs binary (`FORM REAL`) | 2.86 s vs 1.15 s |
+| `identify()` with all capability probes | 0.32 s |
+| `read_setpoints()` (two compound queries + display text) | 0.115 s |
+| `ABOR` until the WTG bit clears | ~70 ms |
 
 Voltage and current are **digitized separately**: `FETC:VOLT?` after `MEAS:CURR?` returns error +603. That's why a V+I reading costs two acquisitions.
 
@@ -54,14 +60,31 @@ Voltage and current are **digitized separately**: `FETC:VOLT?` after `MEAS:CURR?
 
 | Purpose | Command |
 |---|---|
-| Setpoints | `VOLT`, `CURR`, `OUTP ON/OFF`, `VOLT:PROT`, `CURR:PROT:STAT`, `RES` |
-| Protection reset | `OUTP:PROT:CLE` |
-| Measurement setup | `SENS:SWE:POIN`, `SENS:SWE:TINT`, `SENS:CURR:RANG MIN/MAX`, `SENS:CURR:RANG:AUTO`, `SENS:CURR:DET ACDC/DC` |
-| Poll (one message) | `MEAS:VOLT?;:MEAS:CURR?;[:FETC:CURR:MAX?;…MIN?;…HIGH?;…LOW?;…ACDC?];[:MEAS:DVM?];:STAT:OPER:COND?;:STAT:QUES:COND?;:OUTP?` |
-| Waveform | `MEAS:ARR:CURR?` / `MEAS:ARR:VOLT?` |
-| Capability probes at connect | `VOLT? MAX`, `CURR? MAX`, `VOLT:PROT? MAX`, `MEAS:DVM?`, `RES?`, `SENS:CURR:RANG:AUTO?` |
+| Setpoints | `VOLT`, `CURR`, `OUTP ON/OFF`, `VOLT:PROT` (a limit on the setting, not a trip), `RES` |
+| Protection | `CURR:PROT:STAT`, `VOLT:PROT:STAT` (tracking OV trip), `OUTP:PROT:DEL`, `SENS:PROT:STAT` (open sense), `OUTP:PROT:CLE` |
+| Measurement setup | `SENS:SWE:POIN`, `SENS:SWE:TINT`, `SENS:CURR:RANG MAX/1/MIN`, `SENS:WIND HANN/RECT`, `SENS:CURR:DET ACDC/DC` |
+| Poll (one message) | `MEAS:VOLT?;:MEAS:CURR?;[:FETC:CURR:MAX?;…MIN?;…HIGH?;…LOW?;…ACDC?];[:MEAS:DVM?];:STAT:OPER:COND?;:STAT:QUES:COND?;:STAT:QUES?;:OUTP?` |
+| Capture | `ABOR`, `SENS:FUNC`, `SENS:SWE:OFFS:POIN` (negative = pre-trigger), `TRIG:ACQ:SOUR BUS/INT/EXT`, `TRIG:ACQ:LEV/HYST/SLOP/COUN:<CURR\|VOLT>`, `INIT:NAME ACQ`, `TRIG:ACQ`, `FETC:ARR:<CURR\|VOLT>?` (binary), `FETC:<f>?`, `…:ACDC?`, `…:MAX?` etc. |
+| Output transients | `VOLT:TRIG`, `CURR:TRIG`, `RES:TRIG`, `INIT:NAME TRAN`, `TRIG:TRAN`; `*TRG` fires both systems for a step capture |
+| Output response | `OUTP:COMP:MODE LLOC/HLOC/LREM/HREM` (`OUTP:TYPE LOW/HIGH` on older units) |
+| Rear port | `DIG:FUNC RIDF/DIG/TRIG` (non-volatile), `DIG:DATA`, `OUTP:RI:MODE`, `OUTP:DFI`, `OUTP:DFI:SOUR`, `OUTP:PON:STAT` (non-volatile) |
+| Display | `DISP`, `DISP:MODE NORM/TEXT`, `DISP:TEXT` |
+| Saved setups, housekeeping | `*SAV`, `*RCL`, `*TST?`, `*RST`, `*CLS`, `SYST:ERR?`, `*OPT?`, `SYST:VERS?`, `CAL:DATE?` |
+| Data format | `FORM REAL,32;:FORM:BORD SWAP` after connect, `*RST` and `*RCL` (arrays arrive as little-endian floats; scalar replies stay ASCII) |
+| Capability probes at connect | `VOLT? MAX`, `CURR? MAX`, `VOLT:PROT? MAX`, `MEAS:DVM?`, `RES?`, `SENS:CURR:RANG:AUTO?`, plus a query for each optional feature (an "undefined header" reply hides it) |
 
 The pulse-statistics `FETC` queries have to come before `MEAS:DVM?`, because the DVM acquisition replaces the current data (error +603 otherwise).
+
+Not available on fw A.03.01, so not offered: long integration, DVM arrays (`FETC:ARR:DVM?`), and `SENS:LEAD:STAT?`.
+
+### Triggered capture
+
+`Agilent663xx.arm(spec)` configures the digitizer and initiates it, `fire()` sends the software trigger, `capture_done()` checks the WTG bit (operation bit 5), and `fetch()` reads the binary array plus the instrument's own DC/RMS/min/max/high/low, puts back any stepped levels, and restores the reading settings (`SENS:SWE:POIN/TINT`, offset 0, count 1, `TRIG:ACQ:SOUR INT`).
+
+- **Immediate and output-step** captures use `TRIG:ACQ:SOUR BUS`. With a pre-trigger, the instrument ignores triggers until the pre-trigger buffer has filled, so `arm()` returns how long to wait before firing.
+- **Level** captures use `INT` (the instrument watches the signal); **external** captures use `EXT` (rear port pin 3 with `DIG:FUNC TRIG`). Both wait indefinitely; the worker polls WTG every 100 ms and `ABOR` cancels.
+- **Output step:** the trigger levels are set, `INIT:NAME TRAN` arms the transient system, and `*TRG` triggers both the transient and the acquisition at once. The original levels are read first and written back after the fetch (unless *put the levels back* is off).
+- While a capture is armed the worker does no polling (one digitizer), but its command queue stays live, so **ALL OFF** and setpoint changes still go through. `points × segments ≤ 4096`.
 
 ### Status bits decoded
 
@@ -72,10 +95,13 @@ The pulse-statistics `FETC` queries have to come before `MEAS:DVM?`, because the
 | | 11 | CC- |
 | `STAT:QUES:COND?` | 0 | OV |
 | | 1 | OCP |
+| | 3 | FP-LOCAL (front panel in local) |
 | | 4 | OT |
+| | 5 | SENSE-OPEN |
 | | 9 | RI |
 | | 10 | UNREG |
 | | 14 | OVLD |
+| `STAT:QUES?` (event register, cleared on read) | same bits | Protection events log; each event is reported once |
 
 ## HP 6632A / 6633A / 6634A
 
@@ -126,7 +152,7 @@ Source: 3456A Operating & Service Manual §III and the Hepperle quick-reference 
 
 | Resource | Model |
 |---|---|
-| `SIM::66321D` | 47 Ω load with 4.7 Ω, 577 µs bursts every 4.615 ms; DVM at 3.7 V ± 0.15 V; full SCPI error queue; OVP/OCP trips |
+| `SIM::66321D` | 47 Ω load with 4.7 Ω, 577 µs bursts every 4.615 ms. The output is modelled over time (40 µs step response from a history of setpoint changes), so level triggers, pre-trigger data, segments, output steps, external triggers (fires 0.4 s after arming) and `ABOR` behave like the real unit. Binary and ASCII arrays, the WTG bit, latched status events, every System-tab setting with `*RST` defaults, `*SAV/*RCL`, `*TST?`, a DVM at 3.7 V ± 0.15 V, the full SCPI error queue (including +603), and OCP trips |
 | `SIM::6632A` | 10 Ω load; ERR codes; OCP/OVP trips; 30 ms readback delay |
 | `SIM::3456A` | DCV 5 V with slow drift, Ω ~1 kΩ, ACV 120 mV; noise scales with integration time; null; syntax-error status |
 
@@ -136,7 +162,7 @@ Source: 3456A Operating & Service Manual §III and the Hepperle quick-reference 
 .venv/bin/python -m pytest tests
 ```
 
-The tests run each driver against its simulator: identification, CV/CC, protection trips, error decoding, waveform capture, and the 3456A reading formats.
+The tests run each driver against its simulator: identification, CV/CC, protection trips and events, error decoding, every 663xx setting, saved setups, immediate/level/segmented/output-step captures with pre-trigger, abort, capture validation, the waveform measurements in `analysis.py`, the config files, and the 3456A reading formats.
 
 ## Adding an instrument
 

@@ -153,7 +153,7 @@ Then copy it to `~/.local/share/applications/` (menu), `~/Desktop/`, or `~/.conf
 | "GPIB address 0" warning | Address 0 is the adapter itself. The 3456A defaults to 22, the 66321D to 5. |
 | "Couldn't identify the instrument" | Auto-detect only knows the supplies. Pick the model by hand (the 3456A always needs this). |
 | Readings stop and "Polling paused" appears | A bus error occurred. Fix the cause, then press **Resume polling**. |
-| 66321D waveform capture is slow | Normal: the instrument sends arrays at about 4 KB/s (about 3 s per 1024 points). |
+| 66321D waveform capture is slow | Normal: the instrument sends arrays at about 3.7 KB/s (about 1.2 s per 1024 points in binary). |
 | Module build fails after a kernel update | Run `git -C vendor/linux-gpib pull`, then run the script again. |
 
 ## Building these documents

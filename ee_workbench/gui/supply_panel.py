@@ -15,6 +15,10 @@ from PyQt6.QtWidgets import (QCheckBox, QComboBox, QFileDialog, QFormLayout, QFr
 
 from ..instruments.base import SupplyCaps, SupplyPoll, SupplyReading, Setpoints
 from . import touch
+from .capture_tab import CaptureTab
+from .forms import select
+from .system_tab import SystemTab
+from .tests_tab import TestsTab
 from .panel_base import PanelBase
 from .widgets import (C_CURR, C_DVM, C_MUTED, C_ON, C_POW, C_VOLT, C_WARN, MONO,
                       Readout, SafeSpin, TraceBuffer, fmt_current, fmt_si)
@@ -35,22 +39,27 @@ class SupplyPanel(PanelBase):
         self.sp = Setpoints()
         self.poll = SupplyPoll()
         self.worker.poll_cfg = self.poll
-        self.wave = None
+        self.last_voltage = None
         # columns: t, V, I, Imax, DVM
         self.buf = TraceBuffer(5)
-        self.worker.waveform.connect(self.on_waveform)
 
         self._armed = False  # touch: first tap on OUTPUT arms, second turns ON
         root = QHBoxLayout(self)
         root.setContentsMargins(0, 4, 0, 0)
         console = self.build_console_tab(
             "Command, e.g.  MEAS:CURR:ACDC?   (6632A: VOUT?  STS?)")
-        self.wave_tab = self._build_wave_tab()
+        self.capture_tab = CaptureTab(self)
+        self.tests_tab = TestsTab(self)
+        self.system_tab = SystemTab(self)
+        self.worker.capture_status.connect(self.capture_tab.on_status)
+        self.worker.capture_done.connect(self.capture_tab.on_capture)
+        self.worker.job_result.connect(self.system_tab.on_result)
         split = QSplitter(Qt.Orientation.Horizontal)
         split.setChildrenCollapsible(False)
         split.addWidget(self._build_left())
         self.tabs = QTabWidget()
         self.tabs.addTab(self._build_trend_tab(), "Trend")
+        self.tabs.addTab(self.tests_tab, "Tests")
         if touch.TOUCH:
             # Touch (1280x800): the left column holds only readouts + output
             # controls so they never need scrolling; setup gets its own tab.
@@ -60,6 +69,9 @@ class SupplyPanel(PanelBase):
             sv.addWidget(self._build_measure_group())
             sv.addStretch(1)
             self.tabs.addTab(touch.scroll(setup), "Setup")
+        self.system_scroll = touch.scroll(self.system_tab)
+        self.tabs.addTab(self.system_scroll, "System")
+        self.tabs.setTabVisible(self.tabs.indexOf(self.system_scroll), False)
         self.tabs.addTab(console, "Console")
         split.addWidget(self.tabs)
         split.setStretchFactor(1, 1)
@@ -181,18 +193,27 @@ class SupplyPanel(PanelBase):
                       lambda: self.cmd(lambda d, x: d.set_voltage(x), self.sp_volt.value()))
         self._set_row(form, "Current limit", self.sp_curr,
                       lambda: self.cmd(lambda d, x: d.set_current(x), self.sp_curr.value()))
-        self._set_row(form, "OVP", self.sp_ovp,
-                      lambda: self.cmd(lambda d, x: d.set_ovp(x), self.sp_ovp.value()))
+        self.ovp_label, _ = self._set_row(
+            form, "OVP", self.sp_ovp,
+            lambda: self.cmd(lambda d, x: d.set_ovp(x), self.sp_ovp.value()))
         self.res_label, self.res_set = self._set_row(
             form, "Output resistance", self.sp_res,
             lambda: self.cmd(lambda d, x: d.set_resistance(x), self.sp_res.value()))
         v.addLayout(form)
 
         row = QHBoxLayout()
-        self.ocp_chk = QCheckBox("Over-current protection (OCP)")
-        self.ocp_chk.setToolTip("Turn the output off if the supply goes into current limit.")
+        self.ocp_chk = QCheckBox("OCP")
+        self.ocp_chk.setToolTip("Over-current protection: turn the output off if the supply "
+                                "goes into current limit.")
         self.ocp_chk.clicked.connect(lambda on: self.cmd(lambda d, x: d.set_ocp(x), on))
-        row.addWidget(self.ocp_chk, 1)
+        row.addWidget(self.ocp_chk)
+        self.ovt_chk = QCheckBox("OV trip")
+        self.ovt_chk.setToolTip("Turn the output off if it goes about 2 V above the voltage "
+                                "setting.")
+        self.ovt_chk.clicked.connect(lambda on: self.cmd(lambda d, x: d.set_ovp_tracking(x), on))
+        self.ovt_chk.setVisible(False)
+        row.addWidget(self.ovt_chk)
+        row.addStretch(1)
         self.clr_btn = QPushButton("Clear trip")
         self.clr_btn.setToolTip("Reset a latched OV/OCP trip (remove the cause first)")
         self.clr_btn.clicked.connect(lambda: self.cmd(lambda d: d.clear_protection()))
@@ -220,9 +241,20 @@ class SupplyPanel(PanelBase):
             self.meas_widgets += [x for x in (lab, w) if x is not None]
 
         self.range_combo = QComboBox()
-        self.range_combo.addItems(["HIGH (3 A)", "LOW (20 mA)", "AUTO"])
+        self.range_combo.setToolTip("Current measurement range. Use the lowest range that "
+                                    "covers the peak current for the best resolution.")
         self.range_combo.activated.connect(self._apply_range)
         add("Current range", self.range_combo)
+        self.win_combo = QComboBox()
+        self.win_combo.addItem("Hanning", "HANN")
+        self.win_combo.addItem("Rectangular", "RECT")
+        self.win_combo.setToolTip("Measurement window. Hanning reduces ripple errors when the "
+                                  "acquisition isn't a whole number of cycles; Rectangular "
+                                  "gives the true average of exactly what was sampled.")
+        self.win_combo.activated.connect(
+            lambda: self.cmd(lambda d, x: d.set_window(x), self.win_combo.currentData()))
+        self.win_label = QLabel("Window")
+        form.addRow(self.win_label, self.win_combo)
         self.det_combo = QComboBox()
         self.det_combo.addItems(["ACDC", "DC"])
         self.det_combo.setToolTip("ACDC: measure the full waveform (use for pulsed loads).\n"
@@ -319,58 +351,6 @@ class SupplyPanel(PanelBase):
         v.addWidget(self.glw, 1)
         return w
 
-    def _build_wave_tab(self):
-        w = QWidget()
-        v = QVBoxLayout(w)
-        bar = QHBoxLayout()
-        self.wf_what = QComboBox()
-        self.wf_what.addItems(["Current", "Voltage"])
-        bar.addWidget(self.wf_what)
-        self.wf_points = QSpinBox()
-        self.wf_points.setRange(16, 4096)
-        self.wf_points.setValue(1024)
-        bar.addWidget(QLabel("Points"))
-        bar.addWidget(self.wf_points)
-        self.wf_tint = SafeSpin(1, 1.0, " µs", track=False)
-        self.wf_tint.setRange(15.6, 1e6)
-        self.wf_tint.setValue(15.6)
-        bar.addWidget(QLabel("Interval"))
-        bar.addWidget(self.wf_tint)
-        self.wf_span = QLabel("")
-        self.wf_span.setStyleSheet(f"color:{C_MUTED};")
-        bar.addWidget(self.wf_span)
-        self.wf_points.valueChanged.connect(self._update_wf_span)
-        self.wf_tint.valueChanged.connect(self._update_wf_span)
-        touch.attach_keypad(self.wf_points, "Waveform points")
-        touch.attach_keypad(self.wf_tint, "Waveform interval")
-        if touch.TOUCH:
-            bar.addStretch(1)
-            v.addLayout(bar)
-            bar = QHBoxLayout()
-        self.wf_btn = QPushButton("Capture")
-        self.wf_btn.clicked.connect(self.capture)
-        bar.addWidget(self.wf_btn)
-        self.wf_cont = QCheckBox("Continuous")
-        bar.addWidget(self.wf_cont)
-        bar.addStretch(1)
-        exp = QPushButton("Export CSV…")
-        exp.clicked.connect(self._export_wave)
-        bar.addWidget(exp)
-        v.addLayout(bar)
-        self.wf_plot = pg.PlotWidget()
-        self.wf_plot.showGrid(x=True, y=True, alpha=0.15)
-        self.wf_plot.setLabel("bottom", "Time", units="s")
-        self.wf_curve = self.wf_plot.plot(pen=pg.mkPen(C_CURR, width=1.2))
-        touch.plots(self.wf_plot)
-        v.addWidget(self.wf_plot, 1)
-        self.wf_stats = QLabel("Digitizes the output at up to 64 kS/s (MEAS:ARR). The 663xx "
-                               "sends array data slowly (~4 KB/s), so 1024 points takes ~3 s.")
-        self.wf_stats.setFont(QFont(MONO, 10))
-        self.wf_stats.setWordWrap(True)
-        v.addWidget(self.wf_stats)
-        self._update_wf_span()
-        return w
-
     # ================================================================ actions
     def set_output(self, on: bool):
         if on and touch.TOUCH and not self._armed:
@@ -393,6 +373,9 @@ class SupplyPanel(PanelBase):
 
     def output_off(self):
         self._armed = False
+        self.tests_tab.abort()
+        if self.capture_tab.busy or self.capture_tab.running:
+            self.capture_tab.stop()
         if self.connected:
             self.set_output(False)
 
@@ -405,8 +388,7 @@ class SupplyPanel(PanelBase):
             self.cmd(lambda d: d.reset())
 
     def _apply_range(self):
-        rng = self.range_combo.currentText().split()[0]
-        self.cmd(lambda d, x: d.set_current_range(x), rng)
+        self.cmd(lambda d, x: d.set_current_range(x), self.range_combo.currentData())
 
     def _apply_sweep(self, points, tint_us):
         self.cmd(lambda d, p, t: d.set_sweep(p, t), points, tint_us * 1e-6)
@@ -414,11 +396,6 @@ class SupplyPanel(PanelBase):
     def _update_acq_label(self):
         t = self.sw_points.value() * self.sw_tint.value() * 1e-6
         self.acq_label.setText(f"Each reading averages {fmt_si(t, 's')}")
-
-    def _update_wf_span(self):
-        n, dt = self.wf_points.value(), self.wf_tint.value() * 1e-6
-        xfer = n * 11.7 / 3800
-        self.wf_span.setText(f"= {fmt_si(n * dt, 's')} window, ~{xfer:.0f} s transfer")
 
     def _apply_poll(self, *_):
         self.worker.interval_s = self.poll_ms.value() / 1000
@@ -431,15 +408,6 @@ class SupplyPanel(PanelBase):
         self.p_v.setVisible(self.poll.measure_voltage)
         self.r_volt.setVisible(self.poll.measure_voltage)
         self.r_pow.setVisible(self.poll.measure_voltage)
-
-    def capture(self):
-        if not self.connected:
-            return
-        self.wf_btn.setEnabled(False)
-        n, dt = self.wf_points.value(), self.wf_tint.value() * 1e-6
-        self.wf_btn.setText(f"Capturing… ~{n * 11.7 / 3800 + n * dt:.0f} s")
-        what = "CURR" if self.wf_what.currentText() == "Current" else "VOLT"
-        self.worker.request_capture(what, n, dt)
 
     # ================================================================ slots
     def on_connected(self, family, caps: SupplyCaps, sp):
@@ -456,17 +424,31 @@ class SupplyPanel(PanelBase):
             # program OVP to 0 V (which fires the crowbar).
             self.sp_ovp.setValue(caps.ovp_max)
             self.sp_curr.setValue(caps.i_min)
-        for w in (self.res_label, self.sp_res, self.res_set):
+        for w in (self.res_label, self.sp_res):
             w.setVisible(caps.has_resistance)
+        # touch: the keypad sends the value, so the row has no Set button
+        self.res_set.setVisible(caps.has_resistance and not touch.TOUCH)
         for w in self.meas_widgets:
             w.setVisible(caps.has_meas_setup)
         self.pulse_chk.setVisible(caps.has_pulse_stats)
         self.dvm_chk.setVisible(caps.has_dvm)
-        if caps.has_meas_setup:
-            idx = self.range_combo.findText("AUTO")
-            self.range_combo.model().item(idx).setEnabled(caps.has_auto_range)
-        if caps.has_waveform and self.tabs.indexOf(self.wave_tab) < 0:
-            self.tabs.insertTab(1, self.wave_tab, "Waveform")
+        self.range_combo.clear()
+        for label, fs in caps.current_ranges:
+            self.range_combo.addItem(f"{label}", label)
+        if caps.has_auto_range:
+            self.range_combo.addItem("Auto", "AUTO")
+        self.win_combo.setVisible(caps.has_window)
+        self.win_label.setVisible(caps.has_window)
+        self.ovp_label.setText(caps.ovp_label)
+        self.ovp_label.setToolTip(caps.ovp_tip)
+        self.sp_ovp.setToolTip(caps.ovp_tip)
+        self.ovt_chk.setVisible(caps.has_ovp_tracking)
+        if caps.has_waveform and self.tabs.indexOf(self.capture_tab) < 0:
+            self.tabs.insertTab(1, self.capture_tab, "Capture")
+        self.tabs.setTabVisible(self.tabs.indexOf(self.system_scroll), caps.has_system)
+        self.system_tab.on_connected(caps)
+        self.tests_tab.on_connected(caps)
+        self.capture_tab._what_changed()
         self.note_label.setText(caps.note)
         self.note_label.setVisible(bool(caps.note))
         self.buf.clear()
@@ -480,6 +462,10 @@ class SupplyPanel(PanelBase):
         if self.caps.has_resistance:
             self.sp_res.set_from_instrument(sp.resistance)
         self.ocp_chk.setChecked(bool(sp.ocp))
+        if sp.ovp_tracking is not None:
+            self.ovt_chk.setChecked(sp.ovp_tracking)
+        self.system_tab.on_state(sp)
+        self.capture_tab.on_state(sp)
         self._style_output_button()
         if self.caps.has_meas_setup:
             self.sw_points.blockSignals(True)
@@ -487,12 +473,16 @@ class SupplyPanel(PanelBase):
             self.sw_points.blockSignals(False)
             self.sw_tint.set_from_instrument(sp.sweep_tint * 1e6)
             self._update_acq_label()
-            for i in range(self.range_combo.count()):
-                if self.range_combo.itemText(i).startswith(sp.current_range):
-                    self.range_combo.setCurrentIndex(i)
+            select(self.range_combo, sp.current_range)
+            if sp.window:
+                select(self.win_combo, sp.window[:4].upper())
             self.det_combo.setCurrentText(sp.detector if sp.detector in ("ACDC", "DC") else "ACDC")
 
     def on_reading(self, r: SupplyReading):
+        if r.voltage is not None:
+            self.last_voltage = r.voltage
+        self.system_tab.on_reading(r)
+        self.tests_tab.on_reading(r)
         self.r_volt.set("—" if r.voltage is None else f"{r.voltage:+.4f} V")
         self.r_curr.set(fmt_current(r.current))
         self.r_pow.set("—" if r.power is None else f"{r.power:+.4f} W")
@@ -518,30 +508,9 @@ class SupplyPanel(PanelBase):
     def csv_name(self):
         return f"{self.caps.model or 'supply'}_%Y%m%d_%H%M%S.csv"
 
-    def on_waveform(self, what: str, dt: float, data):
-        y = np.asarray(data, dtype=float)
-        x = np.arange(y.size) * dt
-        self.wave = (what, dt, y)
-        color = C_CURR if what == "CURR" else C_VOLT
-        self.wf_curve.setData(x, y, pen=pg.mkPen(color, width=1.2))
-        self.wf_plot.setLabel("left", "Current" if what == "CURR" else "Voltage",
-                              units="A" if what == "CURR" else "V")
-        if y.size:
-            rms = float(np.sqrt(np.mean(y ** 2)))
-            f = fmt_current if what == "CURR" else (lambda v: f"{v:+.4f} V")
-            self.wf_stats.setText(
-                f"mean {f(y.mean())}   min {f(y.min())}   max {f(y.max())}   "
-                f"p-p {f(y.max() - y.min())}   rms {f(rms)}   n={y.size}  dt={fmt_si(dt, 's')}")
-        self.wf_btn.setEnabled(True)
-        self.wf_btn.setText("Capture")
-        if self.wf_cont.isChecked():
-            QTimer.singleShot(50, self.capture)
-
     def on_error(self, text):
         super().on_error(text)
-        if not self.wf_btn.isEnabled() and self.connected:
-            self.wf_btn.setEnabled(True)
-            self.wf_btn.setText("Capture")
+        self.capture_tab.on_error()
 
     def _style_output_button(self):
         on = self.sp.output
@@ -585,21 +554,6 @@ class SupplyPanel(PanelBase):
             f"I avg {fmt_current(i.mean())}  min {fmt_current(i.min())}  "
             f"max {fmt_current(i.max())}{vtxt}   charge {fmt_si(charge, 'Ah')}")
 
-    def _export_wave(self):
-        if not self.wave:
-            return
-        what, dt, y = self.wave
-        path, _ = QFileDialog.getSaveFileName(
-            self, "Export waveform", time.strftime(f"{self.caps.model}_{what.lower()}"
-                                                   f"_%Y%m%d_%H%M%S.csv"), "CSV (*.csv)")
-        if path:
-            with open(path, "w", newline="") as fh:
-                w = csv.writer(fh)
-                w.writerow(["t_s", "current_A" if what == "CURR" else "voltage_V"])
-                for n, val in enumerate(y):
-                    w.writerow([f"{n * dt:.7e}", val])
-            self.message.emit(f"Saved {path}")
-
     # ================================================================ misc
     def _style_badge(self, mode: str):
         bg = {"CV": "#1b5e20", "CC": "#b71c1c", "CC-": "#880e4f", "OFF": "#37474f"}.get(mode, "#263238")
@@ -613,3 +567,8 @@ class SupplyPanel(PanelBase):
         # Trend/console controls stay usable even while disconnected.
         for w in (self.span_combo, self.freeze_chk, self.trace_chk):
             w.setEnabled(True)
+        self.capture_tab._buttons()
+        if on:
+            self.system_tab.set_enabled(on)
+        else:
+            self.tests_tab.abort()

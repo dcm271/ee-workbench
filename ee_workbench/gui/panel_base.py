@@ -7,7 +7,8 @@ import time
 from PyQt6.QtCore import QTimer, pyqtSignal
 from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import (QCheckBox, QComboBox, QHBoxLayout, QLabel, QLineEdit,
-                             QPlainTextEdit, QPushButton, QVBoxLayout, QWidget)
+                             QPlainTextEdit, QPushButton, QSizePolicy, QVBoxLayout,
+                             QWidget)
 
 from ..worker import InstrumentWorker
 from . import touch
@@ -137,6 +138,9 @@ class PanelBase(QWidget):
         bar.addWidget(clr)
         self.trend_stats = QLabel("")
         self.trend_stats.setFont(QFont(MONO, 9))
+        # Long stats must never widen the window: take the free space, wrap if needed.
+        self.trend_stats.setWordWrap(True)
+        self.trend_stats.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         self.rate_label = QLabel("")
         self.rate_label.setStyleSheet("color:#8a8f98;")
         self.rec_btn = QPushButton("● Record CSV")
@@ -154,9 +158,7 @@ class PanelBase(QWidget):
             col.addLayout(bar)
             col.addLayout(stats)
             return col
-        bar.addStretch(1)
-        bar.addWidget(self.trend_stats)
-        bar.addStretch(1)
+        bar.addWidget(self.trend_stats, 1)
         bar.addWidget(self.rate_label)
         bar.addWidget(self.rec_btn)
         return bar

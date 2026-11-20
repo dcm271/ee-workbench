@@ -14,6 +14,7 @@ class SimBase:
     def __init__(self):
         self.timeout_s = 5.0
         self._out: list[str] = []
+        self._bin = None
         self.stb = 0
 
     @contextmanager
@@ -42,6 +43,17 @@ class SimBase:
             return self.read()
         except TransportTimeout:
             raise TransportTimeout(f"No reply to {cmd!r}") from None
+
+    def query_binary(self, cmd: str) -> list[float]:
+        """Simulators put a list of floats in self._bin for array queries."""
+        self._out.clear()
+        self._bin = None
+        self.write(cmd)
+        if self._bin is None:
+            self._out.clear()
+            raise TransportTimeout(f"No reply to {cmd!r}")
+        data, self._bin = self._bin, None
+        return list(data)
 
     def read_stb(self) -> int:
         s, self.stb = self.stb, 0

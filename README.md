@@ -4,7 +4,7 @@ A Linux desktop app (PyQt6) for controlling and logging GPIB bench instruments:
 
 | Instrument | Support |
 |---|---|
-| Agilent 66321D / 66321B / 66311B DC source | Setpoints, OVP/OCP, output resistance, DVM, pulse statistics, waveform capture |
+| Agilent 66321D / 66321B / 66311B DC source | Setpoints, protection, output resistance, DVM, pulse statistics; triggered waveform capture with cursors and automatic measurements; battery-life, battery-emulator, sequencer and I-V tests; rear port, display, saved setups, self-test |
 | HP 6632A / 6633A / 6634A DC supply | Setpoints, OVP/OCP, readback, status |
 | HP 3456A 6½-digit DMM | Function, range, integration time, autozero, filter, null, statistics |
 

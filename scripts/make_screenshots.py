@@ -11,8 +11,9 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from PyQt6.QtCore import QTimer  # noqa: E402
-from PyQt6.QtWidgets import QApplication  # noqa: E402
+from PyQt6.QtWidgets import QApplication, QMessageBox  # noqa: E402
 
+from ee_workbench.gui.forms import select  # noqa: E402
 from ee_workbench.gui.main_window import MainWindow, parse_target  # noqa: E402
 from ee_workbench.gui.widgets import dark_palette  # noqa: E402
 
@@ -20,6 +21,8 @@ OUT = ROOT / "docs" / "images"
 OUT.mkdir(parents=True, exist_ok=True)
 
 app = QApplication([])
+# the tests ask before turning an output on; answer yes for the screenshots
+QMessageBox.question = staticmethod(lambda *a, **k: QMessageBox.StandardButton.Yes)
 dark_palette(app)
 empty = MainWindow()
 empty.resize(1280, 720)
@@ -56,9 +59,13 @@ def mid():
 
 
 def capture():
-    a = w.panels()[0]
-    a.wf_points.setValue(4096)
-    a.capture()
+    c = w.panels()[0].capture_tab
+    select(c.trigger, "LEVEL")
+    c._trigger_changed()
+    c.points.setValue(1024)
+    c.count.setValue(3)
+    c.cursors_chk.setChecked(True)
+    c.start(False)
 
 
 def shots():
@@ -68,9 +75,21 @@ def shots():
         w.grab().save(str(OUT / f"{name}.png"))
     a = w.panels()[0]
     w.tabs.setCurrentIndex(0)
-    a.tabs.setCurrentIndex(1)
-    app.processEvents()
-    w.grab().save(str(OUT / "waveform.png"))
+    a.tabs.setCurrentWidget(a.capture_tab)
+    w.grab().save(str(OUT / "capture.png"))
+    a.tabs.setCurrentWidget(a.system_scroll)
+    w.grab().save(str(OUT / "system.png"))
+    t = a.tests_tab
+    t.sel_group.button(1).click()
+    t.emu_cap.setValue(2.0)
+    t.start()
+    a.tabs.setCurrentWidget(t)
+
+
+def tests():
+    a = w.panels()[0]
+    w.grab().save(str(OUT / "tests.png"))
+    a.tests_tab.stop("Stopped")
     a.tabs.setCurrentIndex(a.tabs.count() - 1)
     a.trace_chk.setChecked(True)
     a.worker.request_raw("MEAS:CURR:ACDC?", True)
@@ -87,6 +106,7 @@ at(1500, setup)
 at(6000, mid)
 at(6500, capture)
 at(11000, shots)
-at(12000, console)
+at(17000, tests)
+at(18000, console)
 app.exec()
 print("wrote", sorted(p.name for p in OUT.glob("*.png")))

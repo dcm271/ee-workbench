@@ -222,6 +222,14 @@ class VisaTransport:
         except self._pyvisa.errors.VisaIOError as e:
             raise self._wrap(e, cmd) from e
 
+    def query_binary(self, cmd: str) -> list[float]:
+        """IEEE-488.2 definite-length block of little-endian float32 (the
+        instrument must be in FORM REAL,32 + FORM:BORD SWAP)."""
+        try:
+            return list(self.inst.query_binary_values(cmd, datatype="f", is_big_endian=False))
+        except self._pyvisa.errors.VisaIOError as e:
+            raise self._wrap(e, cmd) from e
+
     def read_stb(self) -> int:
         try:
             return int(self.inst.read_stb())

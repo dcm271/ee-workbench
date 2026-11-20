@@ -43,14 +43,14 @@ Other controllers supported by linux-gpib also work, such as the Agilent 82357A/
 |---|---|
 | Output voltage | 0 to 15.356 V |
 | Current limit | 0 to 3.071 A |
-| Over-voltage protection (OVP) | up to 22 V |
+| Voltage limit (`VOLT:PROT`) | 0 to 22 V; plus an over-voltage trip ~2 V above the setting |
 | Output resistance (battery emulation) | −40 mΩ to +1 Ω |
-| Current measurement ranges | 3 A (HIGH) and 20 mA (LOW) |
+| Current measurement ranges | 3 A, 1 A and 20 mA |
 | Digitizer | up to 4096 points at 15.6 µs (64 kS/s) |
 | DVM input (D models only) | rear-panel DVM terminals |
 | Factory GPIB address | 5 |
 
-What the app uses: setpoints, output on/off, OVP, over-current protection (OCP), output resistance, current range, ACDC/DC detector, digitizer settings, pulse statistics (max, min, high, low, RMS), DVM readings and waveform capture.
+What the app uses: essentially everything. Setpoints, output on/off, voltage limit, over-voltage trip, over-current protection (OCP) and its delay, open-sense detection, output resistance, current range, measurement window, ACDC/DC detector, digitizer settings, pulse statistics (max, min, high, low, RMS), DVM readings, triggered and pre-triggered waveform capture (level, external and output-step triggers, multiple segments), output transients, output compensation mode, the rear control port (remote inhibit, fault output, digital I/O, external trigger), the front-panel display, saved setups, power-on state, self-test and instrument information.
 
 ### HP 6632A / 6633A / 6634A
 
