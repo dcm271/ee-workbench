@@ -119,4 +119,5 @@ The touch layout needs about 1180×460 pixels. Smaller screens (an 800×480 pane
 | `qt.qpa.plugin: Could not load the Qt platform plugin "wayland"` | `sudo apt install qt6-wayland`, or run with `QT_QPA_PLATFORM=xcb`. |
 | Touches land in the wrong place | Use the Pi's **Screen Configuration → Touchscreen** to map the touch device to the right display. |
 | `cannot execute binary file: Exec format error` | Something built on a PC (x86) was copied to the Pi. Re-run `./scripts/setup-pi.sh`: it detects and rebuilds a copied `.venv` and GPIB build. Cloning with git instead of copying the folder avoids this. |
+| "gpib_ctypes … could not locate the gpib library", or "GPIB library is installed but can't be loaded" | The linux-gpib library is missing, or is an x86 copy from a PC. Run `rm -rf vendor && ./scripts/install-gpib-driver.sh`; its last step checks that the library loads. |
 | App doesn't start at login | Run `~/ee-workbench/run.sh --fullscreen` from a terminal to see the error. Check `~/.config/autostart/ee-workbench.desktop` points at the right folder. |

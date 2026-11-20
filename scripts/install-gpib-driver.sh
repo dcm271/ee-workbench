@@ -102,6 +102,17 @@ sleep 2
 # adapter was already plugged in before the rules existed.
 sudo /usr/local/sbin/gpib_config --minor 0 || true
 
+step "Checking that Python can load libgpib"
+if [[ -x "$HERE/.venv/bin/python" ]]; then
+  (cd "$HERE" && .venv/bin/python -W ignore -c "
+from ee_workbench.transport import load_gpib_lib
+ok, problem = load_gpib_lib()
+print('libgpib loads OK' if ok else problem)
+raise SystemExit(0 if ok else 1)") || echo "!! See the message above."
+else
+  echo "(no .venv yet; skipped)"
+fi
+
 step "Done"
 ls -l /dev/gpib0 2>/dev/null || echo "!! /dev/gpib0 missing — unplug/replug the adapter, then check: dmesg | tail -30"
 cat <<EOF
