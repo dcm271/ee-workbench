@@ -1,0 +1,565 @@
+"""Tab for a DC source (Agilent 663xx SCPI family or HP 6632A family)."""
+from __future__ import annotations
+
+import csv
+import time
+
+import numpy as np
+import pyqtgraph as pg
+from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtGui import QFont
+from PyQt6.QtWidgets import (QCheckBox, QComboBox, QFileDialog, QFormLayout, QFrame,
+                             QGridLayout, QGroupBox, QHBoxLayout, QLabel, QMessageBox,
+                             QPushButton, QScrollArea, QSpinBox, QSplitter, QTabWidget,
+                             QVBoxLayout, QWidget)
+
+from ..instruments.base import SupplyCaps, SupplyPoll, SupplyReading, Setpoints
+from .panel_base import PanelBase
+from .widgets import (C_CURR, C_DVM, C_MUTED, C_ON, C_POW, C_VOLT, C_WARN, MONO,
+                      Readout, SafeSpin, TraceBuffer, fmt_current, fmt_si)
+
+# Digitizer presets for the 663xx: (label, points, tooltip)
+SPEED_PRESETS = [
+    ("Fast", 256, "256 samples = 4 ms window. ~20 readings/s (V+I) or ~30/s current only."),
+    ("Normal", 1024, "1024 samples = 16 ms window. ~9 readings/s."),
+    ("Smooth", 2048, "2048 samples = 32 ms window (instrument default). ~6 readings/s. "
+                     "Best averaging for pulsed loads."),
+]
+
+
+class SupplyPanel(PanelBase):
+    def __init__(self, resource: str, model: str, baud: int):
+        super().__init__(resource, model, baud)
+        self.caps = SupplyCaps()
+        self.sp = Setpoints()
+        self.poll = SupplyPoll()
+        self.worker.poll_cfg = self.poll
+        self.wave = None
+        # columns: t, V, I, Imax, DVM
+        self.buf = TraceBuffer(5)
+        self.worker.waveform.connect(self.on_waveform)
+
+        root = QHBoxLayout(self)
+        root.setContentsMargins(0, 4, 0, 0)
+        split = QSplitter(Qt.Orientation.Horizontal)
+        split.addWidget(self._build_left())
+        self.tabs = QTabWidget()
+        self.tabs.addTab(self._build_trend_tab(), "Trend")
+        self.wave_tab = self._build_wave_tab()
+        self.tabs.addTab(self.build_console_tab(
+            "Command, e.g.  MEAS:CURR:ACDC?   (6632A: VOUT?  STS?)"), "Console")
+        split.addWidget(self.tabs)
+        split.setStretchFactor(1, 1)
+        split.setSizes([420, 1000])
+        root.addWidget(split)
+        self.set_enabled(False)
+        self.start()
+
+    # ================================================================ build
+    def _build_left(self):
+        inner = QWidget()
+        lay = QVBoxLayout(inner)
+        lay.setContentsMargins(0, 0, 6, 0)
+        head = QHBoxLayout()
+        self.idn_label = QLabel(f"Connecting to {self.resource}…")
+        self.idn_label.setWordWrap(True)
+        self.idn_label.setStyleSheet(f"color:{C_MUTED};")
+        head.addWidget(self.idn_label, 1)
+        self.reset_btn = QPushButton("*RST")
+        self.reset_btn.clicked.connect(self.reset_instrument)
+        head.addWidget(self.reset_btn)
+        lay.addLayout(head)
+        lay.addWidget(self._build_readouts())
+        lay.addWidget(self._build_output_group())
+        lay.addWidget(self._build_measure_group())
+        lay.addStretch(1)
+        sa = QScrollArea()
+        sa.setWidget(inner)
+        sa.setWidgetResizable(True)
+        sa.setFrameShape(QFrame.Shape.NoFrame)
+        sa.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        sa.setMinimumWidth(400)
+        return sa
+
+    def _build_readouts(self):
+        g = QGroupBox("Measurements")
+        lay = QVBoxLayout(g)
+        top = QHBoxLayout()
+        self.mode_badge = QLabel("—")
+        self.mode_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.mode_badge.setFixedSize(64, 26)
+        self._style_badge("—")
+        self.flags_label = QLabel("")
+        self.flags_label.setStyleSheet(f"color:{C_WARN}; font-weight:bold;")
+        self.flags_label.setWordWrap(True)
+        top.addWidget(self.mode_badge)
+        top.addWidget(self.flags_label, 1)
+        lay.addLayout(top)
+        self.r_volt = Readout("Voltage", C_VOLT, 26)
+        self.r_curr = Readout("Current", C_CURR, 26)
+        self.r_pow = Readout("Power", C_POW, 16)
+        self.r_dvm = Readout("DVM", C_DVM, 18)
+        for r in (self.r_volt, self.r_curr, self.r_pow, self.r_dvm):
+            lay.addWidget(r)
+        self.r_dvm.setVisible(False)
+
+        self.pulse_box = QWidget()
+        grid = QGridLayout(self.pulse_box)
+        grid.setContentsMargins(0, 4, 0, 0)
+        grid.setHorizontalSpacing(10)
+        grid.setColumnMinimumWidth(2, 44)
+        grid.setColumnStretch(1, 1)
+        grid.setColumnStretch(3, 1)
+        self.pulse_labels = {}
+        names = {"i_max": "Max", "i_min": "Min", "i_high": "High", "i_low": "Low", "i_rms": "RMS"}
+        for n, (key, name) in enumerate(names.items()):
+            cap = QLabel(name)
+            cap.setStyleSheet(f"color:{C_MUTED};")
+            cap.setAlignment(Qt.AlignmentFlag.AlignRight)
+            val = QLabel("—")
+            val.setFont(QFont(MONO, 11))
+            val.setStyleSheet(f"color:{C_CURR};")
+            val.setAlignment(Qt.AlignmentFlag.AlignRight)
+            grid.addWidget(cap, n // 2, (n % 2) * 2)
+            grid.addWidget(val, n // 2, (n % 2) * 2 + 1)
+            self.pulse_labels[key] = val
+        self.pulse_box.setVisible(False)
+        self.pulse_box.setToolTip("Statistics over one acquisition (samples × interval).\n"
+                                  "High/Low are the two levels of a pulsed waveform.")
+        lay.addWidget(self.pulse_box)
+        return g
+
+    def _set_row(self, form, label, spin, apply_fn):
+        row = QHBoxLayout()
+        row.addWidget(spin, 1)
+        b = QPushButton("Set")
+        b.setFixedWidth(48)
+        b.clicked.connect(apply_fn)
+        spin.lineEdit().returnPressed.connect(apply_fn)
+        row.addWidget(b)
+        lab = QLabel(label)
+        form.addRow(lab, row)
+        return lab, b
+
+    def _build_output_group(self):
+        g = QGroupBox("Output")
+        v = QVBoxLayout(g)
+        self.out_btn = QPushButton("OUTPUT —")
+        self.out_btn.setCheckable(True)
+        self.out_btn.setMinimumHeight(44)
+        self.out_btn.setToolTip("Toggle the output. Esc turns every supply's output OFF.")
+        self.out_btn.clicked.connect(lambda on: self.set_output(on))
+        v.addWidget(self.out_btn)
+
+        form = QFormLayout()
+        form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
+        self.sp_volt = SafeSpin(4, 0.01, " V")
+        self.sp_curr = SafeSpin(4, 0.001, " A")
+        self.sp_ovp = SafeSpin(3, 0.1, " V")
+        self.sp_res = SafeSpin(4, 0.001, " Ω")
+        self.sp_res.setToolTip("Programmable source resistance: emulates a battery's "
+                               "internal resistance.")
+        self._set_row(form, "Voltage", self.sp_volt,
+                      lambda: self.cmd(lambda d, x: d.set_voltage(x), self.sp_volt.value()))
+        self._set_row(form, "Current limit", self.sp_curr,
+                      lambda: self.cmd(lambda d, x: d.set_current(x), self.sp_curr.value()))
+        self._set_row(form, "OVP", self.sp_ovp,
+                      lambda: self.cmd(lambda d, x: d.set_ovp(x), self.sp_ovp.value()))
+        self.res_label, self.res_set = self._set_row(
+            form, "Output resistance", self.sp_res,
+            lambda: self.cmd(lambda d, x: d.set_resistance(x), self.sp_res.value()))
+        v.addLayout(form)
+
+        row = QHBoxLayout()
+        self.ocp_chk = QCheckBox("Over-current protection (OCP)")
+        self.ocp_chk.setToolTip("Turn the output off if the supply goes into current limit.")
+        self.ocp_chk.clicked.connect(lambda on: self.cmd(lambda d, x: d.set_ocp(x), on))
+        row.addWidget(self.ocp_chk, 1)
+        self.clr_btn = QPushButton("Clear trip")
+        self.clr_btn.setToolTip("Reset a latched OV/OCP trip (remove the cause first)")
+        self.clr_btn.clicked.connect(lambda: self.cmd(lambda d: d.clear_protection()))
+        row.addWidget(self.clr_btn)
+        v.addLayout(row)
+        self.note_label = QLabel("")
+        self.note_label.setWordWrap(True)
+        self.note_label.setStyleSheet(f"color:{C_MUTED}; font-size:11px;")
+        self.note_label.setVisible(False)
+        v.addWidget(self.note_label)
+        return g
+
+    def _build_measure_group(self):
+        g = QGroupBox("Measurement setup")
+        form = QFormLayout(g)
+        form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
+        self.meas_widgets = []
+
+        def add(label, w):
+            lab = QLabel(label) if label else None
+            if lab:
+                form.addRow(lab, w)
+            else:
+                form.addRow(w)
+            self.meas_widgets += [x for x in (lab, w) if x is not None]
+
+        self.range_combo = QComboBox()
+        self.range_combo.addItems(["HIGH (3 A)", "LOW (20 mA)", "AUTO"])
+        self.range_combo.activated.connect(self._apply_range)
+        add("Current range", self.range_combo)
+        self.det_combo = QComboBox()
+        self.det_combo.addItems(["ACDC", "DC"])
+        self.det_combo.setToolTip("ACDC: measure the full waveform (use for pulsed loads).\n"
+                                  "DC: DC component only.")
+        self.det_combo.activated.connect(
+            lambda: self.cmd(lambda d, x: d.set_detector(x), self.det_combo.currentText()))
+        add("Detector", self.det_combo)
+
+        presets = QWidget()
+        pr = QHBoxLayout(presets)
+        pr.setContentsMargins(0, 0, 0, 0)
+        for label, pts, tip in SPEED_PRESETS:
+            b = QPushButton(label)
+            b.setToolTip(tip)
+            b.clicked.connect(lambda _, p=pts: self._apply_sweep(p, 15.6))
+            pr.addWidget(b)
+        add("Speed", presets)
+
+        samples = QWidget()
+        row = QHBoxLayout(samples)
+        row.setContentsMargins(0, 0, 0, 0)
+        self.sw_points = QSpinBox()
+        self.sw_points.setRange(1, 4096)
+        self.sw_points.setValue(2048)
+        self.sw_tint = SafeSpin(1, 1.0, " µs")
+        self.sw_tint.setRange(15.6, 1e6)
+        self.sw_tint.setValue(15.6)
+        row.addWidget(self.sw_points)
+        row.addWidget(QLabel("×"))
+        row.addWidget(self.sw_tint, 1)
+        b = QPushButton("Set")
+        b.setFixedWidth(48)
+        b.clicked.connect(lambda: self._apply_sweep(self.sw_points.value(), self.sw_tint.value()))
+        row.addWidget(b)
+        add("Samples", samples)
+        self.acq_label = QLabel("")
+        self.acq_label.setStyleSheet(f"color:{C_MUTED};")
+        add("", self.acq_label)
+        self.sw_points.valueChanged.connect(self._update_acq_label)
+        self.sw_tint.valueChanged.connect(self._update_acq_label)
+
+        self.volt_chk = QCheckBox("Measure voltage (uncheck for faster current-only)")
+        self.volt_chk.setChecked(True)
+        self.volt_chk.toggled.connect(self._apply_poll)
+        form.addRow(self.volt_chk)
+        self.pulse_chk = QCheckBox("Pulse statistics (max/min/high/low/RMS)")
+        self.pulse_chk.toggled.connect(self._apply_poll)
+        add(None, self.pulse_chk)
+        self.dvm_chk = QCheckBox("Read DVM input")
+        self.dvm_chk.toggled.connect(self._apply_poll)
+        add(None, self.dvm_chk)
+
+        self.poll_ms = QSpinBox()
+        self.poll_ms.setRange(0, 60000)
+        self.poll_ms.setSingleStep(50)
+        self.poll_ms.setValue(0)
+        self.poll_ms.setSuffix(" ms")
+        self.poll_ms.setSpecialValueText("none (as fast as possible)")
+        self.poll_ms.setToolTip("Extra delay between readings")
+        self.poll_ms.valueChanged.connect(self._apply_poll)
+        form.addRow("Poll delay", self.poll_ms)
+        form.addRow(self.build_pause_button())
+        self._update_acq_label()
+        return g
+
+    def _build_trend_tab(self):
+        w = QWidget()
+        v = QVBoxLayout(w)
+        v.addLayout(self.build_trend_bar())
+        self.glw = pg.GraphicsLayoutWidget()
+        self.p_v = self.glw.addPlot(row=0, col=0)
+        self.p_i = self.glw.addPlot(row=1, col=0)
+        self.p_d = self.glw.addPlot(row=2, col=0)
+        for p, name, unit, c in ((self.p_v, "Voltage", "V", C_VOLT),
+                                 (self.p_i, "Current", "A", C_CURR),
+                                 (self.p_d, "DVM", "V", C_DVM)):
+            p.showGrid(x=True, y=True, alpha=0.15)
+            p.setLabel("left", name, units=unit, color=c)
+            p.getAxis("left").setWidth(70)
+            p.setClipToView(True)
+            p.setDownsampling(auto=True, mode="peak")
+        self.p_i.setXLink(self.p_v)
+        self.p_d.setXLink(self.p_v)
+        self.p_d.setLabel("bottom", "Time", units="s")
+        self.c_v = self.p_v.plot(pen=pg.mkPen(C_VOLT, width=1.5))
+        self.c_i = self.p_i.plot(pen=pg.mkPen(C_CURR, width=1.5))
+        self.c_imax = self.p_i.plot(pen=pg.mkPen(C_CURR, width=1, style=Qt.PenStyle.DotLine))
+        self.c_d = self.p_d.plot(pen=pg.mkPen(C_DVM, width=1.5))
+        self.p_d.setVisible(False)
+        v.addWidget(self.glw, 1)
+        return w
+
+    def _build_wave_tab(self):
+        w = QWidget()
+        v = QVBoxLayout(w)
+        bar = QHBoxLayout()
+        self.wf_what = QComboBox()
+        self.wf_what.addItems(["Current", "Voltage"])
+        bar.addWidget(self.wf_what)
+        self.wf_points = QSpinBox()
+        self.wf_points.setRange(16, 4096)
+        self.wf_points.setValue(1024)
+        bar.addWidget(QLabel("Points"))
+        bar.addWidget(self.wf_points)
+        self.wf_tint = SafeSpin(1, 1.0, " µs", track=False)
+        self.wf_tint.setRange(15.6, 1e6)
+        self.wf_tint.setValue(15.6)
+        bar.addWidget(QLabel("Interval"))
+        bar.addWidget(self.wf_tint)
+        self.wf_span = QLabel("")
+        self.wf_span.setStyleSheet(f"color:{C_MUTED};")
+        bar.addWidget(self.wf_span)
+        self.wf_points.valueChanged.connect(self._update_wf_span)
+        self.wf_tint.valueChanged.connect(self._update_wf_span)
+        self.wf_btn = QPushButton("Capture")
+        self.wf_btn.clicked.connect(self.capture)
+        bar.addWidget(self.wf_btn)
+        self.wf_cont = QCheckBox("Continuous")
+        bar.addWidget(self.wf_cont)
+        bar.addStretch(1)
+        exp = QPushButton("Export CSV…")
+        exp.clicked.connect(self._export_wave)
+        bar.addWidget(exp)
+        v.addLayout(bar)
+        self.wf_plot = pg.PlotWidget()
+        self.wf_plot.showGrid(x=True, y=True, alpha=0.15)
+        self.wf_plot.setLabel("bottom", "Time", units="s")
+        self.wf_curve = self.wf_plot.plot(pen=pg.mkPen(C_CURR, width=1.2))
+        v.addWidget(self.wf_plot, 1)
+        self.wf_stats = QLabel("Digitizes the output at up to 64 kS/s (MEAS:ARR). The 663xx "
+                               "sends array data slowly (~4 KB/s), so 1024 points takes ~3 s.")
+        self.wf_stats.setFont(QFont(MONO, 10))
+        self.wf_stats.setWordWrap(True)
+        v.addWidget(self.wf_stats)
+        self._update_wf_span()
+        return w
+
+    # ================================================================ actions
+    def set_output(self, on: bool):
+        self.out_btn.setChecked(bool(self.sp.output))  # revert until confirmed
+        self.cmd(lambda d, x: d.set_output(x), on)
+
+    def output_off(self):
+        if self.connected:
+            self.set_output(False)
+
+    def reset_instrument(self):
+        what = ("CLR returns the 6632A to power-on defaults: 0 V, minimum current, "
+                "OUTPUT ON, OVP max." if self.caps.reset_label == "CLR" else
+                "*RST turns the output off and returns all settings to defaults.")
+        if QMessageBox.question(self, "Reset", what + "\n\nContinue?") == \
+                QMessageBox.StandardButton.Yes:
+            self.cmd(lambda d: d.reset())
+
+    def _apply_range(self):
+        rng = self.range_combo.currentText().split()[0]
+        self.cmd(lambda d, x: d.set_current_range(x), rng)
+
+    def _apply_sweep(self, points, tint_us):
+        self.cmd(lambda d, p, t: d.set_sweep(p, t), points, tint_us * 1e-6)
+
+    def _update_acq_label(self):
+        t = self.sw_points.value() * self.sw_tint.value() * 1e-6
+        self.acq_label.setText(f"Each reading averages {fmt_si(t, 's')}")
+
+    def _update_wf_span(self):
+        n, dt = self.wf_points.value(), self.wf_tint.value() * 1e-6
+        xfer = n * 11.7 / 3800
+        self.wf_span.setText(f"= {fmt_si(n * dt, 's')} window, ~{xfer:.0f} s transfer")
+
+    def _apply_poll(self, *_):
+        self.worker.interval_s = self.poll_ms.value() / 1000
+        self.poll.measure_voltage = self.volt_chk.isChecked()
+        self.poll.pulse_stats = self.pulse_chk.isChecked() and self.caps.has_pulse_stats
+        self.poll.dvm = self.dvm_chk.isChecked() and self.caps.has_dvm
+        self.pulse_box.setVisible(self.poll.pulse_stats)
+        self.r_dvm.setVisible(self.poll.dvm)
+        self.p_d.setVisible(self.poll.dvm)
+        self.p_v.setVisible(self.poll.measure_voltage)
+        self.r_volt.setVisible(self.poll.measure_voltage)
+        self.r_pow.setVisible(self.poll.measure_voltage)
+
+    def capture(self):
+        if not self.connected:
+            return
+        self.wf_btn.setEnabled(False)
+        n, dt = self.wf_points.value(), self.wf_tint.value() * 1e-6
+        self.wf_btn.setText(f"Capturing… ~{n * 11.7 / 3800 + n * dt:.0f} s")
+        what = "CURR" if self.wf_what.currentText() == "Current" else "VOLT"
+        self.worker.request_capture(what, n, dt)
+
+    # ================================================================ slots
+    def on_connected(self, family, caps: SupplyCaps, sp):
+        self.idn_label.setText(caps.idn)
+        self.idn_label.setStyleSheet("color:#c9ccd1;")
+        self.title_changed.emit(caps.model)
+        self.reset_btn.setText(caps.reset_label)
+        self.sp_volt.setRange(0, caps.v_max)
+        self.sp_curr.setRange(caps.i_min, caps.i_max)
+        self.sp_ovp.setRange(0, caps.ovp_max)
+        self.sp_res.setRange(caps.r_min, caps.r_max)
+        if not caps.setpoint_readback:
+            # Unknown setpoints: start from safe values so a stray "Set" can't
+            # program OVP to 0 V (which fires the crowbar).
+            self.sp_ovp.setValue(caps.ovp_max)
+            self.sp_curr.setValue(caps.i_min)
+        for w in (self.res_label, self.sp_res, self.res_set):
+            w.setVisible(caps.has_resistance)
+        for w in self.meas_widgets:
+            w.setVisible(caps.has_meas_setup)
+        self.pulse_chk.setVisible(caps.has_pulse_stats)
+        self.dvm_chk.setVisible(caps.has_dvm)
+        if caps.has_meas_setup:
+            idx = self.range_combo.findText("AUTO")
+            self.range_combo.model().item(idx).setEnabled(caps.has_auto_range)
+        if caps.has_waveform and self.tabs.indexOf(self.wave_tab) < 0:
+            self.tabs.insertTab(1, self.wave_tab, "Waveform")
+        self.note_label.setText(caps.note)
+        self.note_label.setVisible(bool(caps.note))
+        self.buf.clear()
+        self._apply_poll()
+
+    def on_state(self, sp: Setpoints):
+        self.sp = sp
+        self.sp_volt.set_from_instrument(sp.voltage)
+        self.sp_curr.set_from_instrument(sp.current)
+        self.sp_ovp.set_from_instrument(sp.ovp)
+        if self.caps.has_resistance:
+            self.sp_res.set_from_instrument(sp.resistance)
+        self.ocp_chk.setChecked(bool(sp.ocp))
+        self.out_btn.setChecked(bool(sp.output))
+        self.out_btn.setText({True: "OUTPUT ON", False: "OUTPUT OFF",
+                              None: "OUTPUT ?  (state unknown)"}[sp.output])
+        self.out_btn.setStyleSheet(
+            f"QPushButton {{ background:{C_ON}; color:white; font-weight:bold; font-size:15px; }}"
+            if sp.output else "QPushButton { font-weight:bold; font-size:15px; }")
+        if self.caps.has_meas_setup:
+            self.sw_points.blockSignals(True)
+            self.sw_points.setValue(sp.sweep_points)
+            self.sw_points.blockSignals(False)
+            self.sw_tint.set_from_instrument(sp.sweep_tint * 1e6)
+            self._update_acq_label()
+            for i in range(self.range_combo.count()):
+                if self.range_combo.itemText(i).startswith(sp.current_range):
+                    self.range_combo.setCurrentIndex(i)
+            self.det_combo.setCurrentText(sp.detector if sp.detector in ("ACDC", "DC") else "ACDC")
+
+    def on_reading(self, r: SupplyReading):
+        self.r_volt.set("—" if r.voltage is None else f"{r.voltage:+.4f} V")
+        self.r_curr.set(fmt_current(r.current))
+        self.r_pow.set("—" if r.power is None else f"{r.power:+.4f} W")
+        if r.dvm is not None:
+            self.r_dvm.set(f"{r.dvm:+.4f} V")
+        if r.i_max is not None:
+            for k, lab in self.pulse_labels.items():
+                lab.setText(fmt_current(getattr(r, k)))
+        self.mode_badge.setText(r.mode)
+        self._style_badge(r.mode)
+        trip = {"OV", "OCP"} & set(r.flags)
+        self.flags_label.setText("  ".join(r.flags) + ("  (press Clear trip)" if trip else ""))
+        self.buf.append([r.t, r.voltage, r.current, r.i_max, r.dvm])
+        if self.recorder.active:
+            self.recorder.row([time.strftime("%Y-%m-%dT%H:%M:%S"), f"{r.t:.3f}", r.voltage,
+                               r.current, r.power, r.mode, "|".join(r.flags), r.dvm,
+                               r.i_max, r.i_min, r.i_high, r.i_low, r.i_rms])
+
+    def csv_header(self):
+        return ["timestamp", "t_s", "voltage_V", "current_A", "power_W", "mode", "flags",
+                "dvm_V", "i_max_A", "i_min_A", "i_high_A", "i_low_A", "i_rms_A"]
+
+    def csv_name(self):
+        return f"{self.caps.model or 'supply'}_%Y%m%d_%H%M%S.csv"
+
+    def on_waveform(self, what: str, dt: float, data):
+        y = np.asarray(data, dtype=float)
+        x = np.arange(y.size) * dt
+        self.wave = (what, dt, y)
+        color = C_CURR if what == "CURR" else C_VOLT
+        self.wf_curve.setData(x, y, pen=pg.mkPen(color, width=1.2))
+        self.wf_plot.setLabel("left", "Current" if what == "CURR" else "Voltage",
+                              units="A" if what == "CURR" else "V")
+        if y.size:
+            rms = float(np.sqrt(np.mean(y ** 2)))
+            f = fmt_current if what == "CURR" else (lambda v: f"{v:+.4f} V")
+            self.wf_stats.setText(
+                f"mean {f(y.mean())}   min {f(y.min())}   max {f(y.max())}   "
+                f"p-p {f(y.max() - y.min())}   rms {f(rms)}   n={y.size}  dt={fmt_si(dt, 's')}")
+        self.wf_btn.setEnabled(True)
+        self.wf_btn.setText("Capture")
+        if self.wf_cont.isChecked():
+            QTimer.singleShot(50, self.capture)
+
+    def on_error(self, text):
+        super().on_error(text)
+        if not self.wf_btn.isEnabled() and self.connected:
+            self.wf_btn.setEnabled(True)
+            self.wf_btn.setText("Capture")
+
+    # ================================================================ trend
+    def clear_trend(self):
+        self.buf.clear()
+        super().clear_trend()
+
+    def redraw(self):
+        d = self.buf.view()
+        if not len(d):
+            return
+        t = d[:, 0]
+        span = self.span()
+        start = int(np.searchsorted(t, t[-1] - span)) if span else 0
+        d = d[start:]
+        t, v, i, imax, dvm = d.T
+        self.c_v.setData(t, v, connect="finite")
+        self.c_i.setData(t, i)
+        if np.isfinite(imax).any():
+            self.c_imax.setData(t, imax, connect="finite")
+        else:
+            self.c_imax.setData([], [])
+        if self.p_d.isVisible():
+            self.c_d.setData(t, dvm, connect="finite")
+        if span:
+            self.p_v.setXRange(max(0, t[-1] - span), t[-1], padding=0)
+        else:
+            self.p_v.enableAutoRange(axis="x")
+        charge = float(np.trapezoid(i, t)) / 3600 if t.size > 1 else float("nan")
+        vtxt = f"   V avg {np.nanmean(v):.4f} V" if np.isfinite(v).any() else ""
+        self.trend_stats.setText(
+            f"I avg {fmt_current(i.mean())}  min {fmt_current(i.min())}  "
+            f"max {fmt_current(i.max())}{vtxt}   charge {fmt_si(charge, 'Ah')}")
+
+    def _export_wave(self):
+        if not self.wave:
+            return
+        what, dt, y = self.wave
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Export waveform", time.strftime(f"{self.caps.model}_{what.lower()}"
+                                                   f"_%Y%m%d_%H%M%S.csv"), "CSV (*.csv)")
+        if path:
+            with open(path, "w", newline="") as fh:
+                w = csv.writer(fh)
+                w.writerow(["t_s", "current_A" if what == "CURR" else "voltage_V"])
+                for n, val in enumerate(y):
+                    w.writerow([f"{n * dt:.7e}", val])
+            self.message.emit(f"Saved {path}")
+
+    # ================================================================ misc
+    def _style_badge(self, mode: str):
+        bg = {"CV": "#1b5e20", "CC": "#b71c1c", "CC-": "#880e4f", "OFF": "#37474f"}.get(mode, "#263238")
+        self.mode_badge.setStyleSheet(
+            f"background:{bg}; color:white; font-weight:bold; border-radius:4px;")
+
+    def set_enabled(self, on: bool):
+        for cls in (QPushButton, QComboBox, QSpinBox, SafeSpin, QCheckBox):
+            for w in self.findChildren(cls):
+                w.setEnabled(on)
+        # Trend/console controls stay usable even while disconnected.
+        for w in (self.span_combo, self.freeze_chk, self.trace_chk):
+            w.setEnabled(True)
