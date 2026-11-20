@@ -67,7 +67,7 @@ By default the app reopens whatever was open last time, and waits up to 30 s at 
 | Action | How |
 |---|---|
 | Start full screen | `./run.sh --fullscreen` (the launcher does this) |
-| Leave / re-enter full screen | **F11** |
+| Leave / re-enter full screen | **⛶** in the top bar, or **F11** |
 | Quit | **✕** at the top right (only shown in full screen), then confirm |
 | Hide the mouse pointer | `./run.sh --fullscreen --hide-cursor` (for touch-only setups) |
 
@@ -114,6 +114,7 @@ The touch layout needs about 1180×460 pixels. Smaller screens (an 800×480 pane
 | Problem | Fix |
 |---|---|
 | `linux-headers-…` not found | `sudo apt full-upgrade && sudo reboot`, then re-run the setup. The headers must match the running kernel. |
+| Taskbar or title bar still showing | The app was started without `--fullscreen` (e.g. `./run.sh` from a terminal). Tap **⛶** or press F11. The menu entry and autostart launcher start full screen. |
 | Window opens but looks tiny or huge | Check **Screen Configuration** in the Pi menu is at 1280×800. Qt follows the desktop's scale setting. |
 | `qt.qpa.plugin: Could not load the Qt platform plugin "wayland"` | `sudo apt install qt6-wayland`, or run with `QT_QPA_PLATFORM=xcb`. |
 | Touches land in the wrong place | Use the Pi's **Screen Configuration → Touchscreen** to map the touch device to the right display. |

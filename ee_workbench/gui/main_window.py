@@ -99,6 +99,7 @@ class MainWindow(QMainWindow):
                           "font-size:16px; }")
         off.clicked.connect(self.all_outputs_off)
         lay.addWidget(off)
+        lay.addWidget(self._build_fs_button(56))
         self.quit_btn = QPushButton("✕")
         self.quit_btn.setFixedWidth(56)
         self.quit_btn.setToolTip("Quit EE Workbench")
@@ -117,6 +118,23 @@ class MainWindow(QMainWindow):
                                 "as they are.") == QMessageBox.StandardButton.Yes:
             self.close()
 
+    def _build_fs_button(self, width: int | None = None):
+        self.fs_btn = QPushButton("⛶")
+        self.fs_btn.setToolTip("Full screen on/off (F11)")
+        if width:
+            self.fs_btn.setFixedWidth(width)
+        self.fs_btn.clicked.connect(self.toggle_fullscreen)
+        return self.fs_btn
+
+    def go_fullscreen(self):
+        """Some Wayland compositors (the Pi desktop included) ignore a
+        full-screen request made before the window is first mapped, so ask
+        again once it is on screen."""
+        self._want_fs = True
+        self.set_kiosk(True)
+        self.showFullScreen()
+        QTimer.singleShot(700, lambda: self._want_fs and self.showFullScreen())
+
     def set_kiosk(self, on: bool):
         """Full screen has no title bar, so show our own quit button."""
         if hasattr(self, "quit_btn"):
@@ -124,12 +142,12 @@ class MainWindow(QMainWindow):
 
     def toggle_fullscreen(self):
         if self.isFullScreen():
+            self._want_fs = False
             self.showNormal()
             self.showMaximized()
             self.set_kiosk(False)
         else:
-            self.set_kiosk(True)
-            self.showFullScreen()
+            self.go_fullscreen()
 
     def _build_bar(self):
         w = QFrame()
@@ -175,6 +193,7 @@ class MainWindow(QMainWindow):
         off.setStyleSheet("QPushButton { color:#ef9a9a; font-weight:bold; }")
         off.clicked.connect(self.all_outputs_off)
         lay.addWidget(off)
+        lay.addWidget(self._build_fs_button())
         self.quit_btn = QPushButton("✕")
         self.quit_btn.setToolTip("Quit EE Workbench")
         self.quit_btn.clicked.connect(self._confirm_quit)
@@ -389,8 +408,7 @@ def main(argv=None):
     if args.hide_cursor:
         app.setOverrideCursor(Qt.CursorShape.BlankCursor)
     if args.fullscreen:
-        win.set_kiosk(True)
-        win.showFullScreen()
+        win.go_fullscreen()
     elif touch.TOUCH:
         win.showMaximized()
     else:
