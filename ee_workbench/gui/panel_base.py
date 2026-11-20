@@ -18,12 +18,14 @@ SPANS = {"30 s": 30, "2 min": 120, "10 min": 600, "1 h": 3600, "All": None}
 
 class PanelBase(QWidget):
     title_changed = pyqtSignal(str)
+    settings_changed = pyqtSignal()    # something worth remembering for next start
     message = pyqtSignal(str)
     failed = pyqtSignal(str)
 
     def __init__(self, resource: str, model: str, baud: int):
         super().__init__()
         self.resource = resource
+        self.model = model
         self.connected = False
         self.caps = None
         self.recorder = CsvRecorder()
@@ -54,6 +56,13 @@ class PanelBase(QWidget):
     def redraw(self): ...
     def set_enabled(self, on: bool): ...
     def csv_header(self) -> list[str]: return []
+
+    def session_settings(self) -> dict:
+        """Panel settings to restore next time (never supply setpoints: those
+        are always read from the instrument)."""
+        return {}
+
+    def restore_settings(self, settings: dict): ...
     def csv_name(self) -> str: return "reading_%Y%m%d_%H%M%S.csv"
 
     # ---- worker callbacks ----------------------------------------------------

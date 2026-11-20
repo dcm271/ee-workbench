@@ -58,6 +58,10 @@ The repository includes **`ee-workbench.desktop`**. Copy it to the place you wan
 
 It assumes the project is in `~/ee-workbench` and starts full screen. If you cloned somewhere else, edit its `Exec=` line. Remove `--fullscreen` to start in a window. `setup-pi.sh` installs the file with the correct path filled in.
 
+## Instruments at start-up
+
+By default the app reopens whatever was open last time, and waits up to 30 s at boot for the GPIB adapter to come up. If you'd rather it always open a fixed set of instruments, or scan the bus, edit `~/.config/ee-workbench/config.toml`. *Instruments at start-up* in the User's Guide explains the file. If an instrument is off when the Pi boots, switch it on and tap **⟳ Retry** on its tab.
+
 ## Full screen
 
 | Action | How |
@@ -113,4 +117,5 @@ The touch layout needs about 1180×460 pixels. Smaller screens (an 800×480 pane
 | Window opens but looks tiny or huge | Check **Screen Configuration** in the Pi menu is at 1280×800. Qt follows the desktop's scale setting. |
 | `qt.qpa.plugin: Could not load the Qt platform plugin "wayland"` | `sudo apt install qt6-wayland`, or run with `QT_QPA_PLATFORM=xcb`. |
 | Touches land in the wrong place | Use the Pi's **Screen Configuration → Touchscreen** to map the touch device to the right display. |
+| `cannot execute binary file: Exec format error` | Something built on a PC (x86) was copied to the Pi. Re-run `./scripts/setup-pi.sh`: it detects and rebuilds a copied `.venv` and GPIB build. Cloning with git instead of copying the folder avoids this. |
 | App doesn't start at login | Run `~/ee-workbench/run.sh --fullscreen` from a terminal to see the error. Check `~/.config/autostart/ee-workbench.desktop` points at the right folder. |

@@ -20,6 +20,22 @@ step() { printf '\n\033[1;36m==> %s\033[0m\n' "$*"; }
   git clone --depth 1 https://git.code.sf.net/p/linux-gpib/git "$SRC"
 }
 
+# A build left over from another machine (e.g. the folder was copied from an
+# x86 PC to a Pi) looks "up to date" to make, which would install binaries
+# that fail with "Exec format error". Start clean whenever the CPU or kernel
+# differs from the last build here.
+STAMP="$SRC/.built-for"
+WANT="$(uname -m) $KVER"
+if [[ "$(cat "$STAMP" 2>/dev/null)" != "$WANT" ]]; then
+  step "Cleaning previous build output (built for: $(cat "$STAMP" 2>/dev/null || echo unknown))"
+  if [[ -d "$SRC/.git" ]]; then
+    git -C "$SRC" clean -xdfq
+  else
+    make -C "$SRC/linux-gpib-kernel" clean >/dev/null 2>&1 || true
+    (cd "$SRC/linux-gpib-user" && { make distclean >/dev/null 2>&1 || true; })
+  fi
+fi
+
 step "Installing build dependencies (sudo)"
 sudo apt-get install -y build-essential autoconf automake libtool flex bison pkg-config
 # Ubuntu and Raspberry Pi OS Bookworm both ship linux-headers-<uname -r>;
@@ -50,6 +66,8 @@ make -j"$(nproc)"
 step "Installing userspace (sudo)"
 sudo make install
 sudo ldconfig
+
+echo "$WANT" > "$STAMP"
 
 step "Writing /etc/gpib.conf for the NI GPIB-USB-HS"
 if [[ -f /etc/gpib.conf ]]; then

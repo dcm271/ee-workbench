@@ -24,10 +24,19 @@ NPLC_LABELS = {0.01: "0.01 PLC  (fastest, ~4½ digits)", 0.1: "0.1 PLC  (~5½ di
 NPLC_DIGITS = {0.01: 5, 0.1: 6, 1: 7, 10: 7, 100: 7}
 
 
+def _match(value, options):
+    """Case/space-insensitive lookup so config.toml can say "2w ohm" or "100mv"."""
+    def key(x):
+        return str(x).lower().replace(" ", "").replace("ω", "ohm").replace("ohms", "ohm")
+    want = key(value) if value is not None else None
+    return next((o for o in options if key(o) == want), None)
+
+
 class DmmPanel(PanelBase):
     def __init__(self, resource: str, model: str, baud: int):
         super().__init__(resource, model, baud)
         self.cfg = DmmConfig()
+        self._pending: dict | None = None   # settings to apply once connected
         self.buf = TraceBuffer(2)   # t, value
         self.unit = "V"
 
@@ -194,6 +203,36 @@ class DmmPanel(PanelBase):
     def _name_changed(self, text):
         self.title_changed.emit(f"3456A · {text}" if text else "3456A")
         self._update_axis()
+        self.settings_changed.emit()
+
+    # ---- remembered settings ---------------------------------------------
+    def session_settings(self) -> dict:
+        if self._pending is not None and not self.connected:
+            return dict(self._pending)    # never connected: keep what we were given
+        c = self.cfg
+        return {"name": self.name_edit.text(), "function": c.function, "range": c.range,
+                "nplc": c.nplc, "autozero": c.autozero, "filter": c.filter}
+
+    def restore_settings(self, settings: dict):
+        self._pending = dict(settings)
+        self.name_edit.setText(str(settings.get("name", "")))
+
+    def _apply_pending(self):
+        s, self._pending = self._pending, None
+        if not s:
+            return
+        func = _match(s.get("function"), FUNCTIONS) or self.cfg.function
+        rng = _match(s.get("range"), ranges_for(func)) or "AUTO"
+        try:
+            nplc = float(s.get("nplc", self.cfg.nplc))
+        except (TypeError, ValueError):
+            nplc = self.cfg.nplc
+        nplc = min(NPLC_CHOICES, key=lambda n: abs(n - nplc))
+        cfg = DmmConfig(function=func, range=rng, nplc=nplc,
+                        autozero=bool(s.get("autozero", self.cfg.autozero)),
+                        filter=bool(s.get("filter", self.cfg.filter)), null=False)
+        if cfg != self.cfg:
+            self.cmd(lambda d, c: d.apply(c), cfg)
 
     def _update_axis(self):
         name = self.name_edit.text() or self.cfg.function
@@ -205,7 +244,9 @@ class DmmPanel(PanelBase):
     def on_connected(self, family, caps, cfg):
         self.idn_label.setText(f"{caps.idn}\n{caps.note}")
         self.idn_label.setStyleSheet("color:#c9ccd1;")
-        self.title_changed.emit("3456A")
+        self.title_changed.emit(f"3456A · {self.name_edit.text()}" if self.name_edit.text()
+                                else "3456A")
+        self._apply_pending()
 
     def on_state(self, cfg: DmmConfig):
         self.cfg = cfg
@@ -217,6 +258,7 @@ class DmmPanel(PanelBase):
         self.null_btn.setChecked(cfg.null)
         self.unit = FUNCTIONS[cfg.function][1]
         self._update_axis()
+        self.settings_changed.emit()
 
     def on_reading(self, r: DmmReading):
         sig = NPLC_DIGITS.get(self.cfg.nplc, 7)

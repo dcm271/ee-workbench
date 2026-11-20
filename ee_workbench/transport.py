@@ -42,6 +42,19 @@ def scan_gpib(board: int = 0) -> list[int]:
         return []
 
 
+def gpib_ready(board: int = 0) -> bool:
+    """True once the adapter's device node exists and the board answers."""
+    if not os.path.exists(f"/dev/gpib{board}"):
+        return False
+    try:
+        from gpib_ctypes import gpib
+
+        gpib.listener(board, 30)
+        return True
+    except Exception:
+        return False
+
+
 def list_resources(scan: bool = True) -> list[str]:
     """GPIB listeners plus USB serial ports, then the simulators.
 

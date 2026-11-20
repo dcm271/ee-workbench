@@ -40,7 +40,15 @@ fi
 
 step "Creating the Python environment (.venv)"
 cd "$HERE"
+# A .venv copied from another computer has the wrong CPU type and paths
+# ("Exec format error" / "bad interpreter"): rebuild it if it wasn't made here.
+WANT="$(uname -m) $(python3 -V 2>&1) $HERE"
+if [[ -d .venv && "$(cat .venv/.built-for 2>/dev/null)" != "$WANT" ]]; then
+  echo "Existing .venv was made on another machine or Python; recreating it."
+  rm -rf .venv
+fi
 [[ -x .venv/bin/python ]] || python3 -m venv --system-site-packages .venv
+echo "$WANT" > .venv/.built-for
 .venv/bin/pip install --upgrade pip
 # pyvisa is pulled in by pyvisa-py.
 .venv/bin/pip install pyqtgraph pyvisa-py gpib-ctypes pytest

@@ -130,6 +130,8 @@ Then copy it to `~/.local/share/applications/` (menu), `~/Desktop/`, or `~/.conf
 | `--fullscreen` | Start full screen. **F11** toggles, and a ✕ quit button appears in the top bar. |
 | `--touch` / `--no-touch` | Force the touch or desktop layout (normally chosen automatically) |
 | `--hide-cursor` | Hide the mouse pointer (touch-only setups) |
+| `--open last\|list\|scan\|none` | What to open at start-up, overriding `config.toml` (see the User's Guide) |
+| `--config FILE` | Use a different config file |
 
 ## Alternatives
 

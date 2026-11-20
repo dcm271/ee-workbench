@@ -172,6 +172,45 @@ Use the 66321D as the input supply, the 6632A as a second rail, and the 3456A on
 
 Open the resources `SIM::66321D`, `SIM::6632A` and `SIM::3456A` to try every feature without hardware. The simulated 66321D drives a phone-like load drawing short current bursts. The 6632A drives a 10 Ω resistor. The 3456A reads a slightly drifting 5 V rail, about 1 kΩ, or 120 mV AC.
 
+## Instruments at start-up
+
+EE Workbench remembers which instruments were open, and reopens them the next time it starts. Panel settings come back too: the 3456A's channel name, function, range, integration and filter/autozero. **Supply setpoints and outputs are never restored.** They are always read from the supply itself, so starting the app never changes what a supply is doing.
+
+What happens at start-up is set in `~/.config/ee-workbench/config.toml`. The file is created, with comments, the first time the app runs:
+
+```toml
+[startup]
+open = "last"        # "last", "list", "scan" or "none"
+wait_for_gpib = 30   # seconds to wait for the adapter at boot
+
+[[instrument]]
+resource = "GPIB0::5::INSTR"
+model = "auto"
+
+[[instrument]]
+resource = "GPIB0::22::INSTR"
+model = "3456A"
+name = "E3610A output"
+function = "DCV"     # DCV, ACV, ACV+DCV, 2W ohm, 4W ohm, ...
+range = "AUTO"       # e.g. "10 V", "10 kohm"
+nplc = 1
+```
+
+| `open =` | At start-up |
+|---|---|
+| `"last"` (default) | Reopen whatever was open when the app last closed |
+| `"list"` | Always open the `[[instrument]]` entries, whatever was used last |
+| `"scan"` | Scan the GPIB bus and open every instrument that answers. A 3456A needs its model in the list, or to have been opened once before, because it can't identify itself. |
+| `"none"` | Start empty |
+
+Notes:
+
+- Resources on the command line (`./run.sh GPIB0::5::INSTR`) override the file for that run. `--open last|list|scan|none` overrides just the mode.
+- At boot, the app waits up to `wait_for_gpib` seconds for the GPIB adapter before connecting, showing a countdown in the status bar.
+- An instrument that doesn't answer (switched off, say) gets a **⟳ Retry** button on its tab. It stays in the session, so it's tried again at the next start. Close its tab to forget it.
+- The session is saved within a second of any change, and again on quit, so pulling the power on a Pi loses nothing.
+- The remembered session is in `~/.config/ee-workbench/last-session.json`. Delete it to start fresh.
+
 ## Touch screens
 
 On a touch screen (or any display of 1280×800 or smaller) the app uses a touch layout: larger controls, a numeric keypad for setpoints, two taps to turn an output on, and an **＋ Add instrument** dialog instead of the toolbar. See *Raspberry Pi & Touch Screen* for details.
