@@ -658,13 +658,13 @@ class Ppk2Panel(PanelBase):
         st = summarize(t, i, i, i, DT)
         if st:
             self.live_stats.setText(
-                f"avg {fmt_si(st['avg'], 'A')}   max {fmt_si(st['max'], 'A')}   "
-                f"min {fmt_si(st['min'], 'A')}   charge {fmt_si(st['charge'], 'C')}")
+                f"avg {fmt_si(st['avg'], 'A', signed=True)}   max {fmt_si(st['max'], 'A', signed=True)}   "
+                f"min {fmt_si(st['min'], 'A', signed=True)}   charge {fmt_si(st['charge'], 'C', signed=True)}")
 
     def _update_readout(self):
         t, i, lg = self.ring.latest(SAMPLE_RATE // 4)
         if i.size:
-            self.readout.set(fmt_si(float(i.mean()), "A", 4))
+            self.readout.set(fmt_si(float(i.mean()), "A", 4, signed=True))
             self._set_leds(int(np.bitwise_or.reduce(lg)) if lg.size else 0)
 
     def _update_stats(self):
@@ -688,9 +688,9 @@ class Ppk2Panel(PanelBase):
                 v.setText("—")
             return
         volts = self.state.voltage_mv / 1000
-        self.stat_labels["Average"].setText(fmt_si(st["avg"], "A"))
-        self.stat_labels["Max"].setText(fmt_si(st["max"], "A"))
-        self.stat_labels["Min"].setText(fmt_si(st["min"], "A"))
+        self.stat_labels["Average"].setText(fmt_si(st["avg"], "A", signed=True))
+        self.stat_labels["Max"].setText(fmt_si(st["max"], "A", signed=True))
+        self.stat_labels["Min"].setText(fmt_si(st["min"], "A", signed=True))
         self.stat_labels["Duration"].setText(fmt_si(st["duration"], "s"))
         self.stat_labels["Charge"].setText(
             f"{fmt_si(st['charge'], 'C')}  ·  {fmt_si(st['charge'] / 3600, 'Ah')}")

@@ -16,7 +16,8 @@ from ..instruments.base import DmmConfig, DmmReading
 from ..instruments.hp3456a import FUNCTIONS, NPLC_CHOICES, ranges_for
 from . import touch
 from .panel_base import PanelBase
-from .widgets import C_DMM, C_MUTED, C_WARN, MONO, Readout, TraceBuffer, fmt_fixed
+from .widgets import (C_DMM, C_MUTED, C_WARN, MONO, Readout, TraceBuffer, fmt_fixed,
+                      range_full_scale)
 
 NPLC_LABELS = {0.01: "0.01 PLC  (fastest, ~4½ digits)", 0.1: "0.1 PLC  (~5½ digits)",
                1: "1 PLC  (~6½ digits)", 10: "10 PLC  (low noise)",
@@ -261,6 +262,14 @@ class DmmPanel(PanelBase):
         self._update_axis()
         self.settings_changed.emit()
 
+    def _fmt(self, x: float, unit: str, sig: int) -> str:
+        """Fixed decimals for a fixed range (like the meter's display); on
+        AUTO they follow the value, which changes only when the meter would
+        change range.  Ratios are plain numbers with sig - 1 decimals."""
+        if not unit:
+            return f"{x:+.{sig - 1}f}"
+        return fmt_fixed(x, unit, sig, range_full_scale(self.cfg.range))
+
     def on_reading(self, r: DmmReading):
         sig = NPLC_DIGITS.get(self.cfg.nplc, 7)
         if r.overload:
@@ -268,7 +277,7 @@ class DmmPanel(PanelBase):
             self.ovld_label.setText("Overload: input exceeds the range")
             value = None
         else:
-            self.readout.set(fmt_fixed(r.value, r.unit, sig) if r.unit else f"{r.value:+.{sig}g}")
+            self.readout.set(self._fmt(r.value, r.unit, sig))
             self.ovld_label.setText("")
             value = r.value
         self.buf.append([r.t, value])
@@ -301,7 +310,8 @@ class DmmPanel(PanelBase):
         y = y[np.isfinite(y)]
         if y.size:
             sig = NPLC_DIGITS.get(self.cfg.nplc, 7)
-            f = (lambda x: fmt_fixed(x, self.unit, sig)) if self.unit else (lambda x: f"{x:+.{sig}g}")
+            def f(x):
+                return self._fmt(x, self.unit, sig)
             self.stat_labels["Mean"].setText(f(y.mean()))
             self.stat_labels["Std dev"].setText(f(y.std()) if y.size > 1 else "—")
             self.stat_labels["Min"].setText(f(y.min()))
