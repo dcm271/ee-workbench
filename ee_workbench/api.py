@@ -29,6 +29,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from .config import config_dir
 
 DEFAULT_PORT = 8765
+MAX_BODY = 10_000_000        # bytes of one request
 METHODS = ("instruments", "set", "measure", "capture", "wait", "note", "record", "gpio",
            "read_pin", "wait_for", "profile", "expect", "outputs_off", "log")
 
@@ -109,14 +110,23 @@ class ApiServer:
                     return
                 try:
                     n = int(self.headers.get("Content-Length", "0"))
+                    if not 0 <= n <= MAX_BODY:
+                        raise ValueError(f"Content-Length {n} out of range")
                     req = json.loads(self.rfile.read(n) or b"{}")
-                    method = req.get("method", "")
+                    if not isinstance(req, dict):
+                        raise ValueError("the body must be a JSON object")
+                    method = str(req.get("method", ""))
                     args = req.get("args", []) or []
                     kwargs = req.get("kwargs", {}) or {}
+                    if not isinstance(args, list) or not isinstance(kwargs, dict):
+                        raise ValueError("args must be a list and kwargs an object")
                 except (ValueError, TypeError) as e:
                     self._reply(400, {"error": f"bad request: {e}"})
                     return
-                self._reply(*srv.call(method, args, kwargs))
+                try:
+                    self._reply(*srv.call(method, args, kwargs))
+                except OSError:
+                    pass            # the client went away (timeout, Ctrl+C) mid-call
 
         self.httpd = ThreadingHTTPServer(("127.0.0.1", self.port), Handler)
         self.httpd.daemon_threads = True
@@ -124,12 +134,16 @@ class ApiServer:
         self.thread = threading.Thread(target=self.httpd.serve_forever, daemon=True,
                                        name="api")
         self.thread.start()
-        p = api_file()
-        p.parent.mkdir(parents=True, exist_ok=True)
-        fd = os.open(p, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-        with os.fdopen(fd, "w") as fh:
-            json.dump({"url": f"http://127.0.0.1:{self.port}", "port": self.port,
-                       "token": self.token, "pid": os.getpid()}, fh)
+        try:
+            p = api_file()
+            p.parent.mkdir(parents=True, exist_ok=True)
+            fd = os.open(p, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            with os.fdopen(fd, "w") as fh:
+                json.dump({"url": f"http://127.0.0.1:{self.port}", "port": self.port,
+                           "token": self.token, "pid": os.getpid()}, fh)
+        except OSError:
+            self.stop()          # no token file: nobody could use it, so don't leave it running
+            raise
 
     def call(self, method: str, args: list, kwargs: dict) -> tuple[int, dict]:
         from .sequencer import SequenceError, Stopped
@@ -153,9 +167,12 @@ class ApiServer:
 
     def stop(self):
         if self.httpd:
-            self.httpd.shutdown()
-            self.httpd.server_close()
-            self.httpd = None
+            httpd, self.httpd = self.httpd, None
+            try:
+                httpd.shutdown()
+                httpd.server_close()
+            except OSError:
+                pass
         try:
             d = json.loads(api_file().read_text())
             if d.get("pid") == os.getpid():

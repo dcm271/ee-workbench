@@ -26,7 +26,9 @@ Across instruments:
 - **Setups.** Save the whole bench (instruments, sequence, watchdog, math) under a name, and recall it in one click.
 - **Remote API.** Drive the open bench from Jupyter, pytest or CI: `bench = connect(); bench.measure("PPK2", "current", 2.0)`.
 
-Each instrument opens in its own tab with live readouts, trend plots on a shared time base, and CSV recording. **Esc turns every output off**: supplies, PPK2 DUT power, generator channels and GPIO outputs. It also stops a running sequence or profile. Simulators (`SIM::66321D`, `SIM::6632A`, `SIM::3456A`, `SIM::PPK2`, `SIM::SALEAE`, `SIM::SIGROK`, `SIM::FGEN`, `SIM::SDG`, `SIM::GPIO`) let you try everything without hardware.
+Each instrument opens in its own tab with live readouts, trend plots on a shared time base, and CSV recording. **Esc turns every output off**: supplies, PPK2 DUT power, generator channels and GPIO outputs. It also stops a running sequence or profile.
+
+**Built to keep running.** An error inside the app is logged to `~/.config/ee-workbench/crash.log` and reported once, never closing the window or touching the outputs. An instrument that stops answering gets a **⟳ Reconnect** button on its tab. Damaged settings files cost only the damaged entries, and Esc still reaches every other instrument if one fails. `./run.sh --restart-on-crash` brings an unattended screen back after a hard crash (the Pi's autostart uses it). See [When something goes wrong](docs/03-users-guide.md#when-something-goes-wrong). Simulators (`SIM::66321D`, `SIM::6632A`, `SIM::3456A`, `SIM::PPK2`, `SIM::SALEAE`, `SIM::SIGROK`, `SIM::FGEN`, `SIM::SDG`, `SIM::GPIO`) let you try everything without hardware.
 
 ![66321D panel](docs/images/supply-66321d.png)
 
@@ -51,6 +53,7 @@ Each instrument opens in its own tab with live readouts, trend plots on a shared
 ./run.sh FGEN@TCPIP::192.168.1.50::INSTR   # a LAN function generator
 ./run.sh GPIO@                             # the Raspberry Pi's GPIO header
 ./run.sh SIM::66321D SIM::PPK2 SIM::GPIO   # no hardware needed
+./run.sh --restart-on-crash --fullscreen   # kiosk: start again if it ever crashes
 ```
 
 On a Raspberry Pi with a touch screen, `./scripts/setup-pi.sh` installs everything and sets the app to start full screen at login. `ee-workbench.desktop` is a ready-made launcher. See [Raspberry Pi & Touch Screen](docs/05-raspberry-pi.md).
@@ -70,10 +73,10 @@ Read the guides here on GitHub (the Markdown sources in [`docs/`](docs/)), or as
 
 1. [Hardware & Resources](docs/01-hardware-and-resources.md): supported instruments, function generators, the Pi's GPIO header and its wiring, GPIB addresses, cabling, manuals
 2. [Installation & Setup](docs/02-installation.md): setup scripts and their options, GPIB driver, PPK2, Saleae, sigrok, function generators (LAN/USB), GPIO, PDF reports, Remote API, troubleshooting
-3. [User's Guide](docs/03-users-guide.md): every panel and control, profiles, events, sequencer and limits, watchdog, math, reports, setups, Remote API, sessions, workflows, file formats
-4. [Technical Reference](docs/04-technical-reference.md): command sets, timings, architecture, file formats, the Remote API protocol, adding instruments
+3. [User's Guide](docs/03-users-guide.md): every panel and control, profiles, events, sequencer and limits, watchdog, math, reports, setups, Remote API, sessions, workflows, file formats, what happens when something goes wrong
+4. [Technical Reference](docs/04-technical-reference.md): command sets, timings, architecture, error handling and recovery, file formats, environment variables, the Remote API protocol, adding instruments
 5. [Raspberry Pi & Touch Screen](docs/05-raspberry-pi.md): one-step Pi setup, full-screen launcher, touch layout, GPIO, remote use
-6. [How-to Guides](docs/06-howtos.md): step-by-step recipes, from sleep current and battery life, to relay power-cycling, pass/fail reports, frequency response, Jupyter and CI
+6. [How-to Guides](docs/06-howtos.md): step-by-step recipes, from sleep current and battery life, to relay power-cycling, pass/fail reports, frequency response, Jupyter and CI, and recovering from a pulled cable or a crash
 
 ## Tests
 

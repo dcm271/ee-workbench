@@ -31,7 +31,12 @@ class Hub(QObject):
             for rule in self.watchdog.feed(name, sig):
                 self.tripped.emit(rule, name)
         if want_math:
-            self.math.feed(name, sig)
+            try:
+                self.math.feed(name, sig)
+            except Exception:       # noqa: BLE001 - math is a convenience; never let it
+                from .. import crash   # get in the way of the readings or the watchdog
+                import sys
+                crash.report(*sys.exc_info(), where="math channels")
 
 
 hub = Hub()

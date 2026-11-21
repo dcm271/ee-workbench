@@ -30,15 +30,17 @@ The project lives in `~/Dev/ee-workbench`:
 
 ```
 ee-workbench/
-├── run.sh                       launch the GUI
+├── run.sh                       launch the GUI (--restart-on-crash: start again after a crash)
 ├── ee-workbench.desktop         launcher for the menu, desktop or autostart
 ├── ee_workbench/                application source
 ├── scripts/
 │   ├── install-gpib-driver.sh   builds and installs linux-gpib
+│   ├── prepare-kernel-tree.sh   kernel tree for boards with no headers package (called by the above)
 │   ├── setup-ubuntu.sh          complete Ubuntu setup
 │   ├── setup-pi.sh              complete Raspberry Pi setup
-│   ├── build-docs.sh            renders these docs to PDF
-│   └── make_screenshots.py      regenerates the user-guide images (--touch: touch layout)
+│   ├── build-docs.sh            renders these docs to PDF (runs build_docs.py)
+│   ├── make_screenshots.py      regenerates the user-guide images (--touch: touch layout)
+│   └── touch_screenshots.py     the touch-layout part of make_screenshots.py --touch
 ├── requirements.txt             the Python packages for .venv
 ├── vendor/linux-gpib/           linux-gpib source (fetched from SourceForge)
 ├── docs/                        this documentation (Markdown and PDF)
@@ -62,7 +64,11 @@ python3 -m venv --system-site-packages .venv
 | pyqtgraph, numpy | fast real-time plots and data buffers |
 | pyvisa, pyvisa-py | instrument I/O (pure-Python VISA) |
 | gpib-ctypes | lets pyvisa-py reach linux-gpib's `libgpib.so` |
-| pyserial | only needed for instruments on RS-232 |
+| pyserial | the Nordic PPK2, and instruments on RS-232 |
+| pyusb | USB-TMC instruments (function generators) through pyvisa-py |
+| pytest | the test suite |
+
+Optional extras, installed by the setup scripts unless you opt out: `weasyprint` ([PDF reports](#pdf-reports)), `logic2-automation` ([Saleae](#saleae-logic-analyzer-optional), x86-64 only) and the apt package `python3-libgpiod` ([GPIO](#raspberry-pi-gpio-optional)).
 
 Check that it works without any hardware:
 
@@ -235,6 +241,7 @@ Then copy it to `~/.local/share/applications/` (menu), `~/Desktop/`, or `~/.conf
 | `--open last\|list\|scan\|none` | What to open at start-up, overriding `config.toml` (see the User's Guide) |
 | `--config FILE` | Use a different config file |
 | `--api` | Start the [Remote API](#remote-api-optional) |
+| `--restart-on-crash` | **`run.sh` only.** If the app ends with an error or crashes, start it again after 3 s. A normal quit ends it; five crashes within two minutes give up. Each restart is noted in `~/.config/ee-workbench/crash.log`. Meant for unattended screens: the Pi's autostart uses it. |
 
 ## Alternatives
 
@@ -265,7 +272,11 @@ Then copy it to `~/.local/share/applications/` (menu), `~/Desktop/`, or `~/.conf
 | Saleae: "invalid digital sample rate" (or similar) at Capture | That rate isn't possible with this many channels on. Pick a lower rate or turn channels off. |
 | Saleae: a decoder finds nothing | Wrong channel or bit rate, or the analyzer setting names don't match Logic 2's (for **Other…** decoders they must match exactly). |
 | "Couldn't identify the instrument" | Auto-detect only knows the supplies. Pick the model by hand (the 3456A always needs this). |
-| Readings stop and "Polling paused" appears | A bus error occurred. Fix the cause, then press **Resume polling**. |
+| Readings stop and "Polling paused" appears; the tab shows ⚠ and **⟳ Reconnect** | A bus error occurred, or the instrument was switched off or unplugged. Fix the cause, then press **Resume polling**, or **⟳ Reconnect** to reopen the tab with its settings. |
+| A window "EE Workbench: internal error" | A bug was caught; the app keeps running and the instruments are untouched. Details are in `~/.config/ee-workbench/crash.log`; include it when reporting the problem. |
+| The app vanished (no window, no message) | A crash inside Qt or a driver library. The stack is in `~/.config/ee-workbench/fault.log`. Restart it; it reopens the same instruments. On an unattended screen launch it with `./run.sh --restart-on-crash`. |
+| Status bar: "Skipped damaged watchdog rules", or "bench.json is damaged" | A hand edit or disk problem. The rest was loaded; fix or delete the file in `~/.config/ee-workbench/`. |
+| Status bar: "Output OFF … ⚠ FAILED for …" after Esc | That instrument didn't take the command (disconnected?). Every other output was still switched off; check the named one by hand. |
 | 66321D waveform capture is slow | Normal: the instrument sends arrays at about 3.7 KB/s (about 1.2 s per 1024 points in binary). |
 | Function generator: "Could not open TCPIP::…" | Wrong IP, or the generator's LAN is off. `ping` it; check its I/O menu. Try the `::5025::SOCKET` form. |
 | Function generator over USB: "No backend available" | `pyusb` or libusb is missing: `.venv/bin/pip install pyusb` and `sudo apt install libusb-1.0-0`. |

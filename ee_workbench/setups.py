@@ -34,8 +34,9 @@ def list_setups() -> list[tuple[str, float, str]]:
     for p in setups_dir().glob("*.json"):
         try:
             d = json.loads(p.read_text())
-            out.append((d.get("name", p.stem), p.stat().st_mtime, d.get("description", "")))
-        except (OSError, ValueError):
+            out.append((str(d.get("name", p.stem)), p.stat().st_mtime,
+                        str(d.get("description", ""))))
+        except (OSError, ValueError, AttributeError):
             continue
     return sorted(out, key=lambda x: -x[1])
 
@@ -46,7 +47,8 @@ def save_setup(name: str, data: dict, description: str = "") -> Path:
     p = _file(name)
     p.parent.mkdir(parents=True, exist_ok=True)
     tmp = p.with_suffix(".tmp")
-    tmp.write_text(json.dumps(d, indent=1))
+    from .config import json_default
+    tmp.write_text(json.dumps(d, indent=1, default=json_default))
     os.replace(tmp, p)
     return p
 
@@ -59,6 +61,8 @@ def load_setup(name: str) -> dict:
         raise ValueError(f"No setup called '{name}'") from e
     except ValueError as e:
         raise ValueError(f"{p} is damaged: {e}") from e
+    if not isinstance(d, dict):
+        raise ValueError(f"{p} is damaged: not a JSON object")
     d.setdefault("instruments", [])
     return d
 
@@ -76,7 +80,9 @@ def export_setup(name: str, path: str):
 
 def import_setup(path: str) -> str:
     d = json.loads(Path(path).read_text())
-    name = d.get("name") or Path(path).stem
+    if not isinstance(d, dict):
+        raise ValueError("not a setup file (expected a JSON object)")
+    name = str(d.get("name") or Path(path).stem)
     save_setup(name, {k: v for k, v in d.items() if k not in ("version", "name", "saved",
                                                               "description")},
                d.get("description", ""))

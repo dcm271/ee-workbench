@@ -104,7 +104,10 @@ chmod +x "$HERE/run.sh"
 if (( AUTOSTART )); then
   step "Starting full screen at login"
   mkdir -p ~/.config/autostart
-  cp "$DESK" ~/.config/autostart/ee-workbench.desktop
+  # At login it also restarts itself after a crash (see run.sh), so an
+  # unattended bench screen doesn't stay on an empty desktop.
+  sed "s|^Exec=.*|Exec=\"$HERE/run.sh\" --restart-on-crash --fullscreen|" "$HERE/ee-workbench.desktop" \
+    > ~/.config/autostart/ee-workbench.desktop
   echo "Remove ~/.config/autostart/ee-workbench.desktop to stop this."
 fi
 

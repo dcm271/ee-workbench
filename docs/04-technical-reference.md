@@ -7,7 +7,7 @@ subtitle: Command sets, measured timings, architecture and extending the app
 
 Other chapters: [Hardware](01-hardware-and-resources.md) · [Installation](02-installation.md) · [User's Guide](03-users-guide.md) · [Raspberry Pi](05-raspberry-pi.md) · [How-to guides](06-howtos.md) · [README](../README.md)
 
-**Contents:** [Architecture](#architecture) · [66321D](#agilent-66321d-scpi) · [6632A](#hp-6632a--6633a--6634a) · [3456A](#hp-3456a) · [PPK2](#nordic-ppk2) · [Saleae](#saleae-logic-2-automation) · [sigrok](#sigrok-sigrok-cli) · [Alignment](#lining-up-a-logic-capture-with-a-ppk2-alignpy) · [Sessions](#session-files-sessionpy) · [Sequencer](#sequencer-sequencerpy) · [Function generators](#function-generators-instrumentsfgenpy) · [GPIO](#gpio-instrumentsgpiopy) · [Profiles](#profiles-profilepy) · [Watchdog, events, math](#signals-watchdog-events-math) · [Reports](#reports-reportpy) · [Setups](#setups-and-bench-state-setupspy) · [Remote API](#remote-api-apipy-clientpy) · [Files](#files-the-app-writes) · [Simulators](#simulators) · [Tests](#tests) · [Adding an instrument](#adding-an-instrument)
+**Contents:** [Architecture](#architecture) · [66321D](#agilent-66321d-scpi) · [6632A](#hp-6632a--6633a--6634a) · [3456A](#hp-3456a) · [PPK2](#nordic-ppk2) · [Saleae](#saleae-logic-2-automation) · [sigrok](#sigrok-sigrok-cli) · [Alignment](#lining-up-a-logic-capture-with-a-ppk2-alignpy) · [Sessions](#session-files-sessionpy) · [Sequencer](#sequencer-sequencerpy) · [Function generators](#function-generators-instrumentsfgenpy) · [GPIO](#gpio-instrumentsgpiopy) · [Profiles](#profiles-profilepy) · [Watchdog, events, math](#signals-watchdog-events-math) · [Reports](#reports-reportpy) · [Setups](#setups-and-bench-state-setupspy) · [Remote API](#remote-api-apipy-clientpy) · [Errors and recovery](#errors-and-recovery-crashpy) · [Files](#files-the-app-writes) · [Environment](#environment-variables) · [Simulators](#simulators) · [Tests](#tests) · [Adding an instrument](#adding-an-instrument)
 
 ## Architecture
 
@@ -33,7 +33,8 @@ MainWindow
 
 - **One I/O thread per instrument** (`worker.py`). The GUI never blocks on the bus. Commands from the GUI go into a queue and run before the next poll.
 - After each command the worker drains the instrument's error queue and re-reads the instrument's state, so the GUI always shows what the instrument actually has.
-- If a poll fails, polling pauses (no flood of errors) until you press **Resume polling**.
+- If a poll fails, polling pauses (no flood of errors) until you press **Resume polling**. The panel emits `link_lost`, and the main window puts **⟳ Reconnect** on the tab; the next reading emits `link_ok` and removes it. Tabs without a Resume button (GPIO) re-enable polling themselves every 5 s.
+- The worker's loop is wrapped so an unexpected exception is reported (and the tab offered a Retry) rather than ending the thread silently, and the driver and transport are always closed on the way out, each on its own, so a failing `close()` can't keep a port open.
 - Each poll uses a **snapshot** of the poll settings, so changing a checkbox mid-poll can't make the query and its parsing disagree.
 - **Shared clock:** every reading is stamped with seconds since the app started (`worker.now()`).
 - **Transports** (`transport.py`) all provide `write / read / query / read_stb / clear / temp_timeout`. A real session (`VisaTransport`) and the simulators (`sim/`) are interchangeable.
@@ -65,6 +66,8 @@ MainWindow
 | `report.py` | HTML / PDF reports with SVG plots |
 | `setups.py` | Named bench setups (JSON) |
 | `api.py`, `client.py` | Remote API server, and its stdlib-only client |
+| `crash.py` | Exception hooks, crash / fault logs, SIGINT / SIGTERM handling |
+| `config.py` | `config.toml`, `last-session.json`, start-up plan |
 | `gui/hub.py` | Where readings meet the watchdog and live math |
 | `gui/sequencer_window.py`, `session_viewer.py` | Sequencer window; session viewer (cursors, math, export) |
 | `gui/fgen_panel.py`, `gpio_panel.py`, `profile_box.py`, `events_tab.py` | Generator and GPIO tabs; the Profile and PPK2 Events tabs |
@@ -376,6 +379,31 @@ TOKEN=$(python3 -c 'import json,os;print(json.load(open(os.path.expanduser("~/.c
 curl -s -H "Authorization: Bearer $TOKEN" -d '{"method":"instruments"}' http://127.0.0.1:8765/call
 ```
 
+## Errors and recovery (`crash.py`)
+
+PyQt6 calls `qFatal()` (abort, core dump) when a Python exception escapes a slot. With instruments connected that would leave outputs on and the bench unattended, so `main()` calls `crash.install()` before creating the `QApplication`:
+
+| Hook | Does |
+|---|---|
+| `sys.excepthook` | Logs the traceback to `crash.log` and calls the main window's notifier, which shows a non-modal *internal error* box (one at a time) and a status-bar line. Identical errors (same traceback tail and place) are logged and shown at most once a minute, with a count of the repeats, so a failing timer or per-reading slot can't flood the log or the screen. |
+| `threading.excepthook` | Logs exceptions escaping plain Python threads. The sequence, profile and API threads catch and report their own. |
+| `faulthandler` | Writes every thread's stack to `fault.log` on SIGSEGV / SIGABRT / SIGBUS / SIGFPE. |
+| SIGINT / SIGTERM | `crash.install_signal_handlers()` calls `MainWindow.close()` on the GUI thread (a 250 ms timer lets Python see the signal while Qt's loop runs). |
+
+Both logs rotate to `.1` at about 1 MB. `crash.report(exc_type, exc, tb, where=…)` is the entry point for code that catches an exception but wants it recorded.
+
+Other measures, by place:
+
+- **Safety paths.** `all_outputs_off()` and the watchdog's *turn off* call each panel's `output_off()` through `MainWindow._off()`, which never raises; a failure is listed in the status bar. In the hub, the watchdog sees each reading before math channels, and math errors are caught there.
+- **Closing.** `closeEvent` runs each step (stop the sequence, close the session, stop the API, save `last-session.json` and `bench.json`, shut each panel down) independently. `PanelBase.shutdown()` also stops the tab's profile runner and Tests-tab run. `InstrumentWorker.stop()` waits 10 s; a thread still inside a driver call is *parked* (kept referenced) instead of being destroyed while running, which would abort. At exit `worker.wait_all()` gives parked threads 5 s more, then the process ends with `os._exit` rather than abort.
+- **Threads and Qt.** Widgets are only created on the GUI thread: switching the Remote API on creates the (hidden) Sequencer window first, since `make_bench()` runs on the HTTP server's threads.
+- **Start-up files.** `config.Session`, `Watchdog.load`, `Channel.load_list`, `Plan.from_dict` and the setups check types and skip damaged entries; `_finish_restore` opens each remembered instrument on its own (retrying once without its saved settings). JSON state is written atomically (`.tmp` + `os.replace`) with `config.json_default` for numpy values.
+- **Setups** are validated by `check_bench()` before any tab is closed; `apply_bench()` returns the parts it had to skip.
+- **Writes that can fail.** `CsvRecorder.row()` stops recording on `OSError` and sets `error`; `SessionWriter.stop()` never raises and returns the error; save / export methods carry `@io_errors(title)` (`gui/widgets.py`), which turns `OSError` into a warning box.
+- **Math.** Anything an expression raises, including shape and type errors after evaluation, becomes `MathError`; `LiveMath.tick` isolates channels from each other.
+- **Remote API.** Bodies that aren't a JSON object, or have non-list `args` / non-object `kwargs`, get 400; a client that disconnects mid-call is ignored; if `api.json` can't be written the server is stopped again.
+- **`run.sh --restart-on-crash`** relaunches after a non-zero exit other than 2 (bad options), 3 s later, at most 5 times in 120 s.
+
 ## Files the app writes
 
 | File | What |
@@ -383,12 +411,26 @@ curl -s -H "Authorization: Bearer $TOKEN" -d '{"method":"instruments"}' http://1
 | `~/.config/ee-workbench/config.toml` | Start-up settings (created with comments on first run) |
 | `~/.config/ee-workbench/last-session.json` | The open instruments and their panel settings, for the next start |
 | `~/.config/ee-workbench/bench.json` | Watchdog rules (and whether armed) and math channels |
-| `~/.config/ee-workbench/sequence.json` | The sequencer's steps and script as last run |
+| `~/.config/ee-workbench/sequence.json` | The sequencer's steps and script as last run (`sequence.bad`: a damaged one, set aside at start-up) |
+| `~/.config/ee-workbench/presets.json` | 663xx System-tab presets |
 | `~/.config/ee-workbench/setups/*.json` | Named [setups](#setups-and-bench-state-setupspy) |
 | `~/.config/ee-workbench/api.json` | Remote API address and token (mode 600), only while it runs |
+| `~/.config/ee-workbench/crash.log` (`.1`) | Caught errors with tracebacks, signals received, `run.sh` restarts ([details](#errors-and-recovery-crashpy)) |
+| `~/.config/ee-workbench/fault.log` (`.1`) | A line per start-up; every thread's stack after a hard crash |
 | `*.csv`, `*.eewb`, `*.html` / `*.pdf` | Wherever you save recordings, sessions and reports |
 
 `$XDG_CONFIG_HOME` moves `~/.config`.
+
+## Environment variables
+
+| Variable | Effect |
+|---|---|
+| `XDG_CONFIG_HOME` | Where `ee-workbench/` (all the files above) lives, instead of `~/.config` |
+| `EEWB_VISA_LIB` | VISA library for pyvisa: `@py` (default, pyvisa-py) or `@ivi` (NI-VISA / Keysight IO Libraries) |
+| `EEWB_GPIB_LIB` | Full path of `libgpib.so.0`, tried before the usual locations |
+| `EEWB_SIGROK_CLI` | The `sigrok-cli` program to run, instead of the one on `PATH` |
+| `EEWB_TOUCH` | `1` / `0`: force the touch or desktop layout (`--touch` / `--no-touch` win) |
+| `QT_QPA_PLATFORM` | Qt's display back end, e.g. `xcb` when Wayland misbehaves, `offscreen` for screenshots and tests |
 
 ## Look and feel (`gui/theme.py`)
 
@@ -416,7 +458,7 @@ All three logic/power simulators share a **debug pin** (`sim/shared.py`): an irr
 .venv/bin/python -m pytest tests
 ```
 
-The tests run each driver against its simulator: identification, CV/CC, protection trips and events, error decoding, every 663xx setting, saved setups, immediate/level/segmented/output-step captures with pre-trigger, abort, capture validation, the waveform measurements in `analysis.py`, the config files, and the 3456A reading formats. PPK2 tests cover metadata captured from a real unit, word decoding, the calibration formula, the spike filter against a sample-by-sample reference (across chunk boundaries), and the driver against the simulator: sample count, timing, levels, logic, lost samples, modes, and stop/start. `test_bench_features.py` covers profiles (parsing, timing, skipping), GPIO and both generator dialects against their simulators, limits and stop-on-fail, Wait for, the watchdog's hold logic across blocks, event finding and bus attachment, math evaluation and resampling, reports (HTML, and PDF when WeasyPrint is present), setups, and the Remote API end to end over HTTP. Saleae tests cover both binary-format versions (including multi-chunk files), the edge measurements and lane envelope, resource parsing, and timed, triggered, manual and aborted captures, decoding and save/export through the simulator and the real worker thread.
+The tests run each driver against its simulator: identification, CV/CC, protection trips and events, error decoding, every 663xx setting, saved setups, immediate/level/segmented/output-step captures with pre-trigger, abort, capture validation, the waveform measurements in `analysis.py`, the config files, and the 3456A reading formats. PPK2 tests cover metadata captured from a real unit, word decoding, the calibration formula, the spike filter against a sample-by-sample reference (across chunk boundaries), and the driver against the simulator: sample count, timing, levels, logic, lost samples, modes, and stop/start. `test_bench_features.py` covers profiles (parsing, timing, skipping), GPIO and both generator dialects against their simulators, limits and stop-on-fail, Wait for, the watchdog's hold logic across blocks, event finding and bus attachment, math evaluation and resampling, reports (HTML, and PDF when WeasyPrint is present), setups, and the Remote API end to end over HTTP. Saleae tests cover both binary-format versions (including multi-chunk files), the edge measurements and lane envelope, resource parsing, and timed, triggered, manual and aborted captures, decoding and save/export through the simulator and the real worker thread. `test_robustness.py` covers the error handling: crash-log rate limiting and rotation, damaged `last-session.json` / `config.toml` / watchdog / math / sequence / setup data, math expressions that fail after evaluating, a session file whose last write fails, foreign session files, malformed Remote API requests, and, in an offscreen Qt window, an exception in a slot not aborting, a GPIO tab's lost link offering ⟳ Reconnect and clearing it on recovery, and Esc still reaching every instrument when one fails.
 
 ## Adding an instrument
 
@@ -425,7 +467,8 @@ The tests run each driver against its simulator: identification, CV/CC, protecti
 3. **Register it:** add it to `MODELS` and `_CLASSES` in `instruments/__init__.py`, and teach `detect()` its ID string if it has one.
 4. **Simulator:** subclass `sim.base.SimBase`, implement `write()`, and add it to `sim.open_sim` and `SIM_RESOURCES`.
 5. **Panel:** a new kind needs a `PanelBase` subclass with `KIND` set (so Esc, the sequencer and the watchdog know what it is), `output_off()` if it has outputs, `csv_header()` and `self.record(row)` from `on_reading` for CSV and sessions, `session_settings()` / `restore_settings()`, and a mapping in `MainWindow`. To use it from the sequencer, add its settings to `sequencer.SET_WHAT` / `MEASURE_WHAT` (and `PROFILE_WHAT`) and handle them in `PanelInst`; for the watchdog and math, add its quantities to `signals.py`.
-6. **Tests:** add `tests/test_<model>.py`.
+6. **Errors:** let driver exceptions propagate: the worker reports them, pauses polling and offers ⟳ Reconnect. Give a `close()` that releases the device even after an error, and keep each driver call bounded in time (a timeout), since a stuck call holds the tab's thread.
+7. **Tests:** add `tests/test_<model>.py`.
 
 ## Licences and third-party code
 

@@ -5,7 +5,7 @@ subtitle: Every panel, control and workflow
 
 # User's Guide
 
-**Contents:** [Starting up](#starting-up) · [66321D supply](#power-supply-panel-agilent-66321d) · [6632A supply](#power-supply-panel-hp-6632a) · [3456A DMM](#multimeter-panel-hp-3456a) · [PPK2](#power-profiler-panel-nordic-ppk2) · [Logic analyzers](#logic-analyzer-panel-saleae-and-sigrok) · [Function generator](#function-generator-panel) · [GPIO](#gpio-panel-raspberry-pi-header) · [Profiles](#profiles-varying-a-setpoint-over-time) · [PPK2 events](#ppk2-events-tab) · [Sequencer & limits](#sequencer) · [Watchdog](#watchdog) · [Math channels](#math-channels) · [Reports](#reports) · [Setups](#setups-the-whole-bench-by-name) · [Remote API](#remote-api-python-and-jupyter) · [Sessions](#sessions-everything-in-one-file) · [Workflows](#workflows) · [CSV formats](#csv-formats) · [Simulators](#simulators) · [Start-up](#instruments-at-start-up) · [Keys](#keyboard-and-mouse-reference)
+**Contents:** [Starting up](#starting-up) · [66321D supply](#power-supply-panel-agilent-66321d) · [6632A supply](#power-supply-panel-hp-6632a) · [3456A DMM](#multimeter-panel-hp-3456a) · [PPK2](#power-profiler-panel-nordic-ppk2) · [Logic analyzers](#logic-analyzer-panel-saleae-and-sigrok) · [Function generator](#function-generator-panel) · [GPIO](#gpio-panel-raspberry-pi-header) · [Profiles](#profiles-varying-a-setpoint-over-time) · [PPK2 events](#ppk2-events-tab) · [Sequencer & limits](#sequencer) · [Watchdog](#watchdog) · [Math channels](#math-channels) · [Reports](#reports) · [Setups](#setups-the-whole-bench-by-name) · [Remote API](#remote-api-python-and-jupyter) · [Sessions](#sessions-everything-in-one-file) · [Workflows](#workflows) · [CSV formats](#csv-formats) · [Simulators](#simulators) · [Start-up](#instruments-at-start-up) · [When something goes wrong](#when-something-goes-wrong) · [Keys](#keyboard-and-mouse-reference)
 
 Step-by-step recipes for common jobs are in [How-to guides](06-howtos.md).
 
@@ -31,7 +31,7 @@ The **toolbar** along the top is always visible:
 
 Each instrument gets its own **tab**. Closing a tab disconnects that instrument but leaves its outputs as they are. All tabs share one time axis (seconds since the app started), so you can line up events across instruments.
 
-> **Safety:** **Esc** works from anywhere in the window. It turns *off* every output (supplies, PPK2, generators, GPIO) and never turns one on. Connecting to an instrument never changes its output; the app reads the current settings first.
+> **Safety:** **Esc** works from anywhere in the window. It turns *off* every output (supplies, PPK2, generators, GPIO) and never turns one on. Each instrument is handled on its own, so a problem with one never stops the others being switched off; if one does fail, the status bar says **⚠ FAILED for …** and names it, so you can check that one by hand. Connecting to an instrument never changes its output; the app reads the current settings first.
 
 ## Power-supply panel: Agilent 66321D
 
@@ -96,7 +96,7 @@ Strip charts of voltage, current (with the per-reading **max** as a dotted line 
 - The stats line above the plot shows average, minimum and maximum current, average voltage, and the **charge** delivered (mAh/Ah) over the span. Use it for battery-life estimates.
 - Drag a plot to pan, use the mouse wheel to zoom, and right-click for export and autoscale options.
 - The trend scrolls smoothly with the clock rather than jumping at each reading. The vertical scale grows as soon as a reading would go off-scale but shrinks only gradually, once the data uses less than half of it. Zooming vertically by hand turns this off; the plot's **A** button turns it back on.
-- **● Record CSV** writes every reading to a file until you press it again.
+- **● Record CSV** writes every reading to a file until you press it again. If the file stops being writable (disk full, USB stick removed) recording stops by itself and the status bar says why.
 
 ### Capture tab
 
@@ -510,6 +510,8 @@ A **report** is one page with everything about a test, as **HTML** (a single fil
 
 A recall **never switches an output on** and doesn't send supply setpoints (they're read from the supply, as always): put the setpoints in the sequence's first steps.
 
+A setup file is checked before anything is closed: if it is damaged (say, a hand-edited export with a missing resource), Recall says why and leaves the open tabs alone. A smaller problem inside an otherwise good setup (one bad watchdog rule, one tab's unreadable settings) is skipped, and listed once the rest has been recalled.
+
 ## Remote API: Python and Jupyter
 
 **Tools ▾ → Remote API** (or `api = true` in [config.toml](#instruments-at-start-up), or `./run.sh --api`) lets Python outside the app drive the open instruments: a Jupyter notebook, pytest, a CI job. The calls are those of the [Script tab](#script-tab), carried out through the tabs as usual, so you watch it happen on screen and Esc still stops everything.
@@ -685,7 +687,7 @@ Switch on **Tools ▾ → Remote API**, then in the notebook `from ee_workbench.
 
 ## Simulators
 
-Open the resources `SIM::66321D`, `SIM::6632A`, `SIM::3456A`, `SIM::PPK2`, `SIM::SALEAE`, `SIM::SIGROK`, `SIM::FGEN`, `SIM::SDG` and `SIM::GPIO` to try every feature without hardware. The simulated 66321D drives a phone-like load drawing short current bursts. The 6632A drives a 10 Ω resistor. The 3456A reads a slightly drifting 5 V rail, about 1 kΩ, or 120 mV AC. The PPK2 powers a BLE-style sensor: 3 µA asleep, a 400 µA wake-up every 10 ms, and a 6–9 mA radio event every 100 ms (shown on D0). The Saleae is a Logic Pro 16 that needs no Logic 2: D0 sends `EE Workbench\r\n` at 115200 baud every 2 ms, D1 is 1 kHz at 25 % duty, D2 10 kHz, D3 bursts of eight 1 MHz clocks, A0 a 1 kHz sine and A1 the D1 signal through an RC filter. Its Async Serial decoder works on D0. `SIM::SIGROK` is a 16-channel fx2lafw-style analyzer whose D7 carries the same irregular debug pin as the simulated PPK2's D7, so [alignment](#lining-a-capture-up-with-a-ppk2) can be tried. `SIM::FGEN` is a two-channel Keysight 33522B (SCPI commands); `SIM::SDG` a Siglent SDG2042X (Siglent's commands). `SIM::GPIO` is a Pi header wired like a small test jig: GPIO21 reads what GPIO20 drives, GPIO12 reads GPIO16 inverted, and GPIO26 is a button pressed (low) for 0.2 s every 2 s.  is a 16-channel fx2lafw-style analyzer whose D7 carries the same irregular debug pin as the simulated PPK2's D7, so [alignment](#lining-a-capture-up-with-a-ppk2) can be tried.  is a two-channel Keysight 33522B (SCPI commands);  a Siglent SDG2042X (Siglent's commands).  is a Pi header wired like a small test jig: GPIO21 reads what GPIO20 drives, GPIO12 reads GPIO16 inverted, and GPIO26 is a button pressed (low) for 0.2 s every 2 s.
+Open the resources `SIM::66321D`, `SIM::6632A`, `SIM::3456A`, `SIM::PPK2`, `SIM::SALEAE`, `SIM::SIGROK`, `SIM::FGEN`, `SIM::SDG` and `SIM::GPIO` to try every feature without hardware. The simulated 66321D drives a phone-like load drawing short current bursts. The 6632A drives a 10 Ω resistor. The 3456A reads a slightly drifting 5 V rail, about 1 kΩ, or 120 mV AC. The PPK2 powers a BLE-style sensor: 3 µA asleep, a 400 µA wake-up every 10 ms, and a 6–9 mA radio event every 100 ms (shown on D0). The Saleae is a Logic Pro 16 that needs no Logic 2: D0 sends `EE Workbench\r\n` at 115200 baud every 2 ms, D1 is 1 kHz at 25 % duty, D2 10 kHz, D3 bursts of eight 1 MHz clocks, A0 a 1 kHz sine and A1 the D1 signal through an RC filter. Its Async Serial decoder works on D0. `SIM::SIGROK` is a 16-channel fx2lafw-style analyzer whose D7 carries the same irregular debug pin as the simulated PPK2's D7, so [alignment](#lining-a-capture-up-with-a-ppk2) can be tried. `SIM::FGEN` is a two-channel Keysight 33522B (SCPI commands); `SIM::SDG` a Siglent SDG2042X (Siglent's commands). `SIM::GPIO` is a Pi header wired like a small test jig: GPIO21 reads what GPIO20 drives, GPIO12 reads GPIO16 inverted, and GPIO26 is a button pressed (low) for 0.2 s every 2 s.
 
 ## Instruments at start-up
 
@@ -725,8 +727,33 @@ Notes:
 - Resources on the command line (`./run.sh GPIB0::5::INSTR`) override the file for that run. `--open last|list|scan|none` overrides just the mode.
 - At boot, the app waits up to `wait_for_gpib` seconds for the GPIB adapter before connecting, showing a countdown in the status bar.
 - An instrument that doesn't answer (switched off, say) gets a **⟳ Retry** button on its tab. It stays in the session, so it's tried again at the next start. Close its tab to forget it.
+- A damaged `last-session.json`, `bench.json` or `sequence.json` (a hand edit gone wrong, a disk problem) never stops the app starting: the damaged entries are skipped, the rest is loaded, and the status bar says what was skipped. A sequence file that can't be read is kept as `sequence.bad` and the Sequencer starts empty.
 - The session is saved within a second of any change, and again on quit, so pulling the power on a Pi loses nothing.
 - The remembered session is in `~/.config/ee-workbench/last-session.json`. Delete it to start fresh.
+
+## When something goes wrong
+
+EE Workbench is built to keep running, and to keep the bench safe, when something fails.
+
+**An instrument stops answering** (switched off, USB cable pulled, a GPIB timeout). Polling pauses instead of filling the log with errors, the tab title gets a **⚠**, and a **⟳ Reconnect** button appears on the tab. Fix the cause (switch it on, plug it back in), then:
+
+- press **⟳ Reconnect**: the tab closes and reopens in the same place with its settings (names, ranges, decoders, pins) kept; or
+- press **Resume polling** (supplies, DMM) or **▶ Run** (PPK2), if the connection itself is still good, e.g. after a bus timeout.
+
+GPIO tabs have no Resume button: they retry by themselves every 5 s. As soon as readings arrive again the ⚠ and the button go away.
+
+**A file can't be written** (a full disk, a read-only folder, a removed USB stick). Saving or exporting shows a warning naming the file. A CSV recording that fails part way stops itself (the **● Record CSV** button comes back up) and says why in the status bar and the tab's console. A session recording that fails stops with a warning; everything up to the last second is in the file.
+
+**An internal error** (a bug in EE Workbench). The app does not close. A window titled *EE Workbench: internal error* says what happened; **Show Details…** has the technical details. Your instruments and their outputs are left as they were, and you can carry on working. The same error is reported at most once a minute, however often it happens. Everything is recorded in `~/.config/ee-workbench/crash.log`; please include that file if you report a problem.
+
+**The app closes unexpectedly** (a crash inside Qt or a driver library). The stack of every thread is written to `~/.config/ee-workbench/fault.log`. Instrument outputs stay as they were, so check the bench. Start the app again and it reopens the same instruments. To have it restart by itself (an unattended Pi, for example), launch it as `./run.sh --restart-on-crash`: see [Raspberry Pi](05-raspberry-pi.md#start-again-after-a-crash).
+
+**Quitting from outside** (Ctrl+C in the terminal you started it from, logging out, `kill`). The app closes as if you had pressed ✕: the session file, the open instruments and the bench state are saved, and every instrument is released. If an instrument is stuck in a long operation (a slow decoder, a bus timeout), the app waits a few seconds for it and then exits anyway.
+
+| File (in `~/.config/ee-workbench/`) | What's in it |
+|---|---|
+| `crash.log` | Errors the app caught and carried on from, with details; also when it was closed by a signal, and when `run.sh --restart-on-crash` restarted it. Kept under about 1 MB (older entries move to `crash.log.1`). |
+| `fault.log` | One line per start-up, plus the stack of every thread if the app ever crashed hard. Also kept under about 1 MB. |
 
 ## Touch screens
 
@@ -744,3 +771,5 @@ On a touch screen (or any display of 1280×800 or smaller) the app uses a touch 
 | Pan a plot | drag |
 | Autoscale / export a plot | right-click the plot |
 | Close an instrument | **×** on its tab |
+| Reopen an instrument that stopped answering | **⟳ Reconnect** (or **⟳ Retry**) on its tab |
+| Quit cleanly from a terminal | **Ctrl+C** (or `kill`): state is saved as with ✕ |

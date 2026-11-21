@@ -14,7 +14,7 @@ from PyQt6.QtWidgets import (QCheckBox, QFormLayout, QGridLayout, QGroupBox, QHB
 from ..config import config_dir
 from . import touch
 from .forms import choice, hint, number, select
-from .widgets import C_MUTED, C_ON, C_WARN
+from .widgets import C_MUTED, C_ON, C_WARN, io_errors
 
 COMP_MODES = {
     "LLOC": ("Low capacitance, local sense",
@@ -435,6 +435,7 @@ class SystemTab(QWidget):
         for name in sorted(self._read_presets()):
             self.preset.addItem(name, name)
 
+    @io_errors("Save preset")
     def _save_preset(self):
         sp = self.p.sp
         name, ok = QInputDialog.getText(self, "Save preset", "Name:")
@@ -451,6 +452,7 @@ class SystemTab(QWidget):
         self._load_presets()
         select(self.preset, name.strip())
 
+    @io_errors("Delete preset")
     def _delete_preset(self):
         name = self.preset.currentData()
         if not name:

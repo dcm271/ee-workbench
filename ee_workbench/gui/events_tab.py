@@ -18,7 +18,7 @@ from .. import events as ev
 from . import touch
 from .panel_base import open_panels
 from .theme import set_role
-from .widgets import C_CURR, C_MUTED, C_WARN, SafeSpin, fmt_si
+from .widgets import C_CURR, C_MUTED, C_WARN, SafeSpin, fmt_si, io_errors
 
 COLS = ["#", "Start (s)", "Duration", "Peak", "Average", "Charge", "Bus during the event"]
 HIST = {"Duration": ("duration", "s"), "Charge": ("charge", "C"), "Peak": ("peak", "A"),
@@ -248,6 +248,7 @@ class EventsTab(QWidget):
         self.wcurve.setData(self._t[a:b] - e.t0, self._i[a:b])
         self.wplot.autoRange()
 
+    @io_errors("Save events")
     def save_csv(self):
         if not self.events:
             return

@@ -55,6 +55,18 @@ class SessionWriter:
     def start(self, path: str):
         self.stop()
         db = sqlite3.connect(path)
+        try:
+            self._open(db)
+        except Exception:
+            db.close()
+            raise
+        self.db, self.path = db, path
+        self._streams.clear()
+        self._pending.clear()
+        self.rows = 0
+        self.started = now()
+
+    def _open(self, db: sqlite3.Connection):
         db.executescript("""
             PRAGMA journal_mode=WAL;
             CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY, value TEXT);
@@ -78,17 +90,23 @@ class SessionWriter:
         db.executemany("INSERT OR REPLACE INTO meta VALUES (?, ?)",
                        [(k, str(v)) for k, v in meta.items()])
         db.commit()
-        self.db, self.path = db, path
-        self._streams.clear()
-        self._pending.clear()
-        self.rows = 0
-        self.started = now()
 
-    def stop(self):
+    def stop(self) -> str:
+        """Write what is buffered and close the file. Never raises (it runs
+        while quitting and after a failed write); returns the error, if any."""
+        err = ""
         if self.db is not None:
-            self.flush()
-            self.db.close()
+            try:
+                self.flush()
+            except Exception as e:      # noqa: BLE001 - full disk, file removed
+                err = f"{type(e).__name__}: {e}"
+            try:
+                self.db.close()
+            except Exception:           # noqa: BLE001
+                pass
         self.db = None
+        self._pending.clear()
+        return err
 
     # ---- data ------------------------------------------------------------
     def stream(self, key, name: str, model: str, resource: str, columns: list[str]) -> int:
@@ -224,6 +242,14 @@ class SessionReader:
     def __init__(self, path: str):
         self.path = path
         self.db = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+        try:
+            self._read()
+        except Exception:
+            self.db.close()      # a damaged or foreign file: don't keep it open
+            raise
+
+    def _read(self):
+        path = self.path
         self.meta = dict(self.db.execute("SELECT key, value FROM meta"))
         if "wall_t0" not in self.meta:
             raise ValueError(f"{path} isn't an EE Workbench session file")

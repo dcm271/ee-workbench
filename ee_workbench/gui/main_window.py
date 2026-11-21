@@ -12,6 +12,7 @@ from PyQt6.QtWidgets import (QApplication, QComboBox, QFileDialog, QFrame, QHBox
                              QInputDialog, QLabel, QMainWindow, QMenu, QMessageBox, QPushButton,
                              QStatusBar, QTabWidget, QToolButton, QVBoxLayout, QWidget)
 
+from .. import crash
 from ..clock import now
 from ..config import Config, Entry, Session, load_config, norm_model, startup_entries
 from ..instruments import MODELS, model_for
@@ -101,11 +102,37 @@ class MainWindow(QMainWindow):
             QTimer.singleShot(0, self._restore)
         if self.config.warning:
             self.status.showMessage("Config: " + self.config.warning, 20000)
+        elif getattr(self, "_bench_warning", ""):
+            self.status.showMessage(self._bench_warning, 20000)
         if self.config.api:
             QTimer.singleShot(0, lambda: self.api_action.setChecked(True))
         if hub.math.channels:
             from .math_window import MathWindow
             self.math_win = MathWindow(self)     # computes (and records) while hidden
+        self._err_box = None
+        crash.set_notifier(self._internal_error)
+
+    # ---------------------------------------------------------------- errors
+    def _internal_error(self, summary: str, details: str):
+        """An exception nobody caught (see crash.py): the app carries on, the
+        user is told once, and the traceback is in the crash log."""
+        from PyQt6.QtCore import QThread
+        if QThread.currentThread() is not self.thread():
+            return                       # logged already; Qt widgets only on the GUI thread
+        self.status.showMessage(f"⚠ Internal error: {summary}  (details in {crash.log_path()})",
+                                20000)
+        if self._err_box is not None and self._err_box.isVisible():
+            return                       # one box at a time
+        box = QMessageBox(QMessageBox.Icon.Warning, "EE Workbench: internal error",
+                          f"Something went wrong, but EE Workbench is still running and "
+                          f"your instruments are as they were.\n\n{summary}\n\n"
+                          f"The details are in {crash.log_path()}; please include that "
+                          f"file if you report it.", parent=self)
+        box.setDetailedText(details[-6000:])
+        box.setModal(False)
+        box.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        self._err_box = box
+        box.show()
 
     # ---------------------------------------------------------------- bench state
     def _bench_file(self):
@@ -113,30 +140,41 @@ class MainWindow(QMainWindow):
         return config_dir() / "bench.json"
 
     def _load_bench_state(self):
-        """Watchdog rules and math channels from last time."""
+        """Watchdog rules and math channels from last time. A damaged
+        bench.json loses only the damaged entries, never the start-up."""
         import json
         try:
             d = json.loads(self._bench_file().read_text())
-        except (OSError, ValueError):
+            if not isinstance(d, dict):
+                raise ValueError("not a JSON object")
+        except FileNotFoundError:
+            return
+        except (OSError, ValueError) as e:
+            self._bench_warning = f"{self._bench_file()} is damaged ({e}); not loaded"
+            crash.write_log(self._bench_warning)
             return
         from ..mathchannels import Channel
-        hub.watchdog.load(d.get("watchdog", []))
+        bad = hub.watchdog.load(d.get("watchdog", []))
         hub.watchdog.armed = bool(d.get("watchdog_armed", True))
-        hub.math.channels = [Channel.from_dict(c) for c in d.get("math", [])]
+        hub.math.channels = Channel.load_list(d.get("math", []))
+        if bad:
+            self._bench_warning = "Skipped damaged watchdog rules: " + "; ".join(bad)
+            crash.write_log(self._bench_warning)
 
     def save_bench_state(self):
         import json
         import os
         d = {"watchdog": hub.watchdog.to_list(), "watchdog_armed": hub.watchdog.armed,
              "math": [c.to_dict() for c in hub.math.channels]}
+        from ..config import json_default
         p = self._bench_file()
         try:
             p.parent.mkdir(parents=True, exist_ok=True)
             tmp = p.with_suffix(".tmp")
-            tmp.write_text(json.dumps(d, indent=1))
+            tmp.write_text(json.dumps(d, indent=1, default=json_default))
             os.replace(tmp, p)
-        except OSError:
-            pass
+        except (OSError, TypeError, ValueError) as e:
+            crash.write_log(f"Couldn't save {p}: {e}")
 
     # ---------------------------------------------------------------- bars
     def _build_touch_bar(self):
@@ -223,11 +261,14 @@ class MainWindow(QMainWindow):
             self.status.showMessage(f"Recording session to {path}", 5000)
         elif not on and session.active:
             path = session.path
-            session.stop()
+            err = session.stop()
             self._sess_timer.stop()
             self.sess_btn.setText("⏺ Record")
             set_role(self.sess_btn, "")
             self.note_btn.setEnabled(False)
+            if err:
+                QMessageBox.warning(self, "Session", f"The last second of the session may "
+                                    f"be missing from {path}:\n{err}")
             box = QMessageBox(QMessageBox.Icon.Information, "Session saved",
                               f"Saved {path}", parent=self)
             show = box.addButton("Open in viewer", QMessageBox.ButtonRole.AcceptRole)
@@ -294,7 +335,7 @@ class MainWindow(QMainWindow):
             hits = [p for p in self.panels() if rule.target and
                     rule.target.lower() in p.display_name().lower()]
             for p in hits:
-                p.output_off()
+                self._off(p)
             what += f" → {', '.join(p.display_name() for p in hits) or 'nothing matched'} OFF"
         elif rule.action == "stop sequence":
             seq = getattr(self, "seq_win", None)
@@ -322,12 +363,14 @@ class MainWindow(QMainWindow):
             import threading
             self._api_invoke = Invoker()
             self._api_stop = threading.Event()
+            # make_bench runs on the server's threads, which must never create
+            # Qt widgets: make the (hidden) sequencer window now, on this one.
+            seq = self.sequencer()
 
             def make_bench():
                 stop = self._api_stop
                 insts = [PanelInst(p, self._api_invoke, stop) for p in open_panels()
                          if kind_of(p)]
-                seq = self.sequencer()
                 b = Bench(insts, now, log=lambda s: None, on_row=seq.sig.row.emit,
                           on_note=seq.sig.note.emit, stop=stop)
                 return b
@@ -508,7 +551,14 @@ class MainWindow(QMainWindow):
         scanned = [f"GPIB0::{pad}::INSTR" for pad in scan_gpib()] if mode == "scan" else []
         plan = startup_entries(self.config, self.session, scanned, mode)
         for e in plan:
-            self.open_instrument(e.resource, e.model, e.settings)
+            try:
+                self.open_instrument(e.resource, e.model, e.settings)
+            except Exception:       # noqa: BLE001 - e.g. damaged settings in last-session.json
+                crash.report(*sys.exc_info(), where=f"reopening {e.resource}")
+                try:
+                    self.open_instrument(e.resource, e.model)     # without its settings
+                except Exception:   # noqa: BLE001
+                    crash.report(*sys.exc_info(), where=f"reopening {e.resource}")
         self._restoring = False
         where = self.config.path or "config.toml"
         what = {"last": "Reopened last session", "list": "Opened configured instruments",
@@ -564,6 +614,8 @@ class MainWindow(QMainWindow):
             lambda t, p=panel, w=where: self.tabs.setTabText(self.tabs.indexOf(p), f"{t}  ·  {w}"))
         panel.message.connect(lambda m: self.status.showMessage(m, 8000))
         panel.failed.connect(lambda m, p=panel: self._failed(p, m))
+        panel.link_lost.connect(lambda m, p=panel: self._lost(p, m))
+        panel.link_ok.connect(lambda p=panel: self._recovered(p))
         panel.settings_changed.connect(self.schedule_save)
         self._update_empty()
         self.schedule_save()
@@ -573,11 +625,39 @@ class MainWindow(QMainWindow):
         i = self.tabs.indexOf(panel)
         if i >= 0:
             self.tabs.setTabText(i, f"⚠ {describe(panel.resource)}")
-            retry = QToolButton()
-            retry.setText("⟳ Retry")
-            retry.setToolTip("Try connecting again (e.g. after switching the instrument on)")
-            retry.clicked.connect(lambda _, p=panel: self.reconnect(p))
-            self.tabs.tabBar().setTabButton(i, self.tabs.tabBar().ButtonPosition.LeftSide, retry)
+            self._retry_button(panel, "⟳ Retry",
+                               "Try connecting again (e.g. after switching the instrument on)")
+
+    def _retry_button(self, panel, text: str, tip: str):
+        i = self.tabs.indexOf(panel)
+        if i < 0:
+            return
+        retry = QToolButton()
+        retry.setText(text)
+        retry.setToolTip(tip)
+        retry.clicked.connect(lambda _, p=panel: self.reconnect(p))
+        self.tabs.tabBar().setTabButton(i, self.tabs.tabBar().ButtonPosition.LeftSide, retry)
+
+    def _lost(self, panel, msg):
+        """Readings stopped after an error: an instrument switched off, a USB
+        cable pulled. Offer a one-click reconnect (close + reopen, settings kept)."""
+        i = self.tabs.indexOf(panel)
+        if i < 0:
+            return
+        self.status.showMessage(f"{panel.display_name()}: {msg}", 15000)
+        text = self.tabs.tabText(i)
+        if not text.startswith("⚠"):
+            self.tabs.setTabText(i, "⚠ " + text)
+        self._retry_button(panel, "⟳ Reconnect",
+                           "Close and reopen this instrument (after replugging or switching "
+                           "it back on). Its tab settings are kept.")
+
+    def _recovered(self, panel):
+        i = self.tabs.indexOf(panel)
+        if i < 0:
+            return
+        self.tabs.tabBar().setTabButton(i, self.tabs.tabBar().ButtonPosition.LeftSide, None)
+        self.tabs.setTabText(i, self.tabs.tabText(i).removeprefix("⚠ "))
 
     def reconnect(self, panel):
         i = self.tabs.indexOf(panel)
@@ -591,7 +671,10 @@ class MainWindow(QMainWindow):
 
     def close_tab(self, i: int):
         p = self.tabs.widget(i)
-        p.shutdown()
+        try:
+            p.shutdown()
+        except Exception:       # noqa: BLE001 - the tab goes anyway
+            crash.report(*sys.exc_info(), where=f"closing {p.resource}")
         self.tabs.removeTab(i)
         p.deleteLater()
         self._update_empty()
@@ -611,26 +694,51 @@ class MainWindow(QMainWindow):
             stop.set()
             import threading
             self._api_stop = threading.Event()
-        n = 0
+        n, bad = 0, []
         for p in self.panels():
             if p.KIND in ("supply", "ppk2", "fgen", "gpio") and p.connected:
-                p.output_off()
-                n += 1
-        self.status.showMessage(f"Output OFF sent to {n} instrument(s)", 5000)
+                if self._off(p):
+                    n += 1
+                else:
+                    bad.append(p.display_name())
+        msg = f"Output OFF sent to {n} instrument(s)"
+        if bad:
+            msg += f"  ·  ⚠ FAILED for {', '.join(bad)}: check them by hand"
+        self.status.showMessage(msg, 30000 if bad else 5000)
+
+    def _off(self, panel) -> bool:
+        """panel.output_off(), never raising: Esc and the watchdog go through
+        every tab even if one of them has a problem."""
+        try:
+            panel.output_off()
+            return True
+        except Exception:       # noqa: BLE001
+            crash.report(*sys.exc_info(), where=f"output off: {panel.resource}")
+            return False
 
     def closeEvent(self, e):
+        """Quit: save what's worth keeping and stop every thread. Each step
+        runs even if an earlier one fails, so instruments are always released."""
+        crash.set_notifier(None)        # no dialogs while closing; still logged
+
+        def step(fn, what):
+            try:
+                fn()
+            except Exception:           # noqa: BLE001
+                crash.report(*sys.exc_info(), where=f"quit: {what}")
+
         seq = getattr(self, "seq_win", None)
         if seq is not None:
-            seq.stop()
-            seq.close()
-        session.stop()
+            step(seq.stop, "stop sequence")
+            step(seq.close, "close sequencer")
+        step(session.stop, "close session file")
         if getattr(self, "api", None) is not None:
-            self.api.stop()
+            step(self.api.stop, "stop remote API")
         self._save_timer.stop()
-        self.save_session()
-        self.save_bench_state()
+        step(self.save_session, "save last-session.json")
+        step(self.save_bench_state, "save bench.json")
         for p in self.panels():
-            p.shutdown()
+            step(p.shutdown, f"close {p.resource}")
         super().closeEvent(e)
 
 
@@ -685,6 +793,7 @@ def main(argv=None):
     ap.add_argument("--config", metavar="FILE",
                     help="config file (default ~/.config/ee-workbench/config.toml)")
     args = ap.parse_args(argv)
+    crash.install()
     app = QApplication(sys.argv[:1])
     app.setApplicationName("EE Workbench")
     dark_palette(app)
@@ -697,6 +806,7 @@ def main(argv=None):
     if args.api:
         cfg.api = True
     win = MainWindow([parse_target(t) for t in args.targets], cfg, Session(), args.open)
+    crash.install_signal_handlers(app, win.close)
     if args.hide_cursor:
         app.setOverrideCursor(Qt.CursorShape.BlankCursor)
     if args.fullscreen:
@@ -705,4 +815,14 @@ def main(argv=None):
         win.showMaximized()
     else:
         win.show()
-    return app.exec()
+    code = app.exec()
+    from ..worker import wait_all
+    if not wait_all(5.0):
+        # An instrument thread is still stuck in a driver call. Destroying it
+        # would abort with a core dump; everything worth saving is saved.
+        crash.write_log("Exiting with an instrument I/O thread still busy")
+        sys.stdout.flush()
+        sys.stderr.flush()
+        import os
+        os._exit(code)
+    return code

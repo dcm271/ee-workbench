@@ -34,6 +34,8 @@ class PanelBase(QWidget):
     settings_changed = pyqtSignal()    # something worth remembering for next start
     message = pyqtSignal(str)
     failed = pyqtSignal(str)
+    link_lost = pyqtSignal(str)        # polling stopped after an error (unplugged?)
+    link_ok = pyqtSignal()             # readings arrive again after `link_lost`
 
     def __init__(self, resource: str, model: str, baud: int):
         super().__init__()
@@ -55,6 +57,7 @@ class PanelBase(QWidget):
         self._edge: float | None = None
         self._x_plot = None                   # the plot whose X range scrolls (others link to it)
         self._steady: list[SteadyY] = []
+        self._lost = False
 
         _OPEN.append(self)
         self.worker = InstrumentWorker(resource, model, baud)
@@ -107,6 +110,9 @@ class PanelBase(QWidget):
         self.console("⚠ Connect failed: " + msg)
 
     def _on_reading(self, r):
+        if self._lost:
+            self._lost = False
+            self.link_ok.emit()
         now = time.monotonic()
         self._stamps.append(now)
         while self._stamps and now - self._stamps[0] > 5:
@@ -122,8 +128,22 @@ class PanelBase(QWidget):
         self._dirty = True
 
     def _on_poll_paused(self):
-        self.on_error("Polling paused after an error. Press Resume to retry.")
-        self.pause_btn.setChecked(True)
+        self._lost = True
+        btn = getattr(self, "pause_btn", None)
+        if btn is not None:
+            self.on_error("Polling paused after an error. Press Resume to retry, or "
+                          "⟳ Reconnect on the tab.")
+            btn.setChecked(True)
+        else:
+            # tabs without a Pause button (GPIO, generators): retry on their own
+            self.on_error("Reading failed (unplugged?). Retrying every 5 s; ⟳ Reconnect "
+                          "on the tab opens it again.")
+            QTimer.singleShot(5000, self._auto_resume)
+        self.link_lost.emit("Polling stopped after an error")
+
+    def _auto_resume(self):
+        if self._lost and self.connected and self in _OPEN:
+            self.worker.poll_enabled = True
 
     def readings_per_s(self) -> float:
         if len(self._stamps) < 2:
@@ -307,7 +327,12 @@ class PanelBase(QWidget):
 
     def record(self, row: list):
         """One reading, laid out like csv_header(): to the CSV file and the session."""
-        self.recorder.row(row)
+        if not self.recorder.row(row) and self.recorder.error:
+            err, self.recorder.error = self.recorder.error, ""
+            btn = getattr(self, "rec_btn", None)
+            if btn is not None:
+                btn.setChecked(False)               # resets the button
+            self.on_error(f"CSV recording stopped: {err}")
         if session.active:
             hdr = self.csv_header()
             skip = ("timestamp", "t_s")
@@ -324,7 +349,21 @@ class PanelBase(QWidget):
         return f"{model} · {text}" if text else f"{model} ({self.resource})"
 
     def shutdown(self):
+        """Closing the tab: stop everything that runs on its behalf. Each part
+        is independent, so one failing can't leave the I/O thread running."""
         if self in _OPEN:
             _OPEN.remove(self)
-        self.recorder.stop()
+        self.plot_timer.stop()
+        for part in ("profile_box", "tests_tab"):
+            obj = getattr(self, part, None)
+            fn = getattr(obj, "stop" if part == "profile_box" else "abort", None)
+            if fn is not None:
+                try:
+                    fn()
+                except Exception:        # noqa: BLE001
+                    pass
+        try:
+            self.recorder.stop()
+        except Exception:                # noqa: BLE001
+            pass
         self.worker.stop()

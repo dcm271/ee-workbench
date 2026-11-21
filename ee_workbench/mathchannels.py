@@ -48,7 +48,21 @@ class Channel:
 
     @classmethod
     def from_dict(cls, d: dict) -> "Channel":
-        return cls(**{k: v for k, v in d.items() if k in cls.__dataclass_fields__})
+        c = cls(**{k: v for k, v in d.items() if k in cls.__dataclass_fields__})
+        c.name, c.expr, c.unit = str(c.name), str(c.expr), str(c.unit)
+        c.integrate, c.enabled = bool(c.integrate), bool(c.enabled)
+        return c
+
+    @classmethod
+    def load_list(cls, items) -> list["Channel"]:
+        """Channels from bench.json / a setup, skipping any damaged entry."""
+        out = []
+        for d in items if isinstance(items, list) else []:
+            try:
+                out.append(cls.from_dict(d))
+            except (TypeError, ValueError, AttributeError):
+                continue
+        return out
 
 
 class _Inst:
@@ -163,11 +177,11 @@ def evaluate(expr: str, series: dict, grid: np.ndarray | None = None,
     try:
         with np.errstate(all="ignore"):
             y = eval(compile(expr, "<math>", "eval"), {"__builtins__": {}}, env)  # noqa: S307
+        y = np.broadcast_to(np.asarray(y, float), grid.shape).astype(float)
     except MathError:
         raise
-    except Exception as e:      # noqa: BLE001
+    except Exception as e:      # noqa: BLE001 - a typo must never reach the GUI as a crash
         raise MathError(f"{type(e).__name__}: {e}") from None
-    y = np.broadcast_to(np.asarray(y, float), grid.shape).astype(float)
     return grid, y
 
 
@@ -231,6 +245,9 @@ class LiveMath:
                 self.errors.pop(ch.name, None)
             except MathError as e:
                 self.errors[ch.name] = str(e)
+                continue
+            except Exception as e:      # noqa: BLE001 - one channel must not stop the others
+                self.errors[ch.name] = f"{type(e).__name__}: {e}"
                 continue
             if ch.integrate:
                 last = self.last_t.get(ch.name)

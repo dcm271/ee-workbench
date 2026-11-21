@@ -33,7 +33,7 @@ from ..mathchannels import MathError, evaluate, integrate
 from ..session import SUFFIX, SessionReader, Stream
 from ..signals import slug
 from . import touch
-from .widgets import C_CURR, C_MUTED, fmt_si
+from .widgets import C_CURR, C_MUTED, fmt_si, io_errors
 
 COLORS = ["#4fc3f7", "#ffb347", "#7ee787", "#c39bff", "#ef9a9a", "#fff176", "#80cbc4",
           "#f48fb1", "#aed581", "#90caf9"]
@@ -532,6 +532,7 @@ class SessionViewer(QMainWindow):
         x0, x1 = self.plots[0].viewRange()[0]
         return x0 + self.t_ref, x1 + self.t_ref
 
+    @io_errors("Export")
     def export_csv(self):
         if self.s is None:
             return
@@ -552,10 +553,13 @@ class SessionViewer(QMainWindow):
                                 f"{v:.9g}"])
         self.cursor.setText(f"Saved {path}")
 
+    @io_errors("Save picture")
     def save_png(self):
         path, _ = QFileDialog.getSaveFileName(self, "Save picture", "session.png", "PNG (*.png)")
         if path:
-            self.glw.grab().save(path if path.lower().endswith(".png") else path + ".png")
+            path = path if path.lower().endswith(".png") else path + ".png"
+            if not self.glw.grab().save(path):
+                raise OSError(f"Can't write {path}")
 
     def report(self):
         if self.s is None:

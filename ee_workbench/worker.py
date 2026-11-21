@@ -12,6 +12,24 @@ from .clock import APP_T0, now  # noqa: F401  (one time base for every instrumen
 from .instruments import make_driver, model_for
 from .transport import open_transport
 
+# Workers whose thread was still busy (a long bus timeout, a decoder run) when
+# their tab closed. Qt aborts the whole app if a running QThread is destroyed,
+# so they are kept here until their thread ends; see `wait_all`.
+_PARKED: list = []
+
+
+def _unpark():
+    _PARKED[:] = [w for w in _PARKED if w.isRunning()]
+
+
+def wait_all(timeout_s: float = 5.0) -> bool:
+    """At exit: give parked workers up to timeout_s to finish. True if all did."""
+    end = time.monotonic() + timeout_s
+    for w in list(_PARKED):
+        w.wait(max(0, int((end - time.monotonic()) * 1000)))
+    _unpark()
+    return not _PARKED
+
 
 class InstrumentWorker(QThread):
     connected = pyqtSignal(object, object, object)   # driver family, caps, state
@@ -49,15 +67,33 @@ class InstrumentWorker(QThread):
         if self.drv:
             self.drv.log = self.log.emit if on else None
 
-    def stop(self):
+    def stop(self, timeout_s: float = 10.0):
+        """Ask the thread to end and wait for it. If it is stuck in a slow
+        call, it is parked rather than destroyed (which would abort the app);
+        it closes its transport as soon as that call returns."""
         self._running = False
         self._q.put(None)
-        self.wait(10000)
+        if not self.wait(int(timeout_s * 1000)):
+            self.log.emit("The I/O thread is still busy; it will close when the "
+                          "current operation ends.")
+            _unpark()
+            _PARKED.append(self)
 
     # ---- thread body ----------------------------------------------------
     def run(self):
         if not self._connect():
             return
+        try:
+            self._loop()
+        except Exception as e:      # noqa: BLE001 - a bug here must not kill the thread silently
+            self._fail(e)
+            self.error.emit("The instrument's I/O thread stopped. Close the tab and open "
+                            "it again (or press Retry).")
+            self.connect_failed.emit(f"I/O thread stopped: {type(e).__name__}: {e}")
+        finally:
+            self._close()
+
+    def _loop(self):
         next_poll = 0.0
         while self._running:
             if self._cap:
@@ -80,11 +116,16 @@ class InstrumentWorker(QThread):
             elif self.poll_enabled:
                 self._do_poll()
                 next_poll = time.monotonic() + self.interval_s
+
+    def _close(self):
         try:
             if hasattr(self.drv, "close"):
                 self.drv.close()        # e.g. stop a streaming device
+        except Exception:               # noqa: BLE001
+            pass
+        try:
             self.drv.t.close()
-        except Exception:
+        except Exception:               # noqa: BLE001
             pass
 
     def _connect(self) -> bool:

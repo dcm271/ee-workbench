@@ -26,7 +26,7 @@ from PyQt6.QtWidgets import (QButtonGroup, QCheckBox, QFileDialog, QFormLayout, 
 from ..instruments.base import SupplyPoll
 from . import touch
 from .forms import choice, hint, integer, number
-from .widgets import C_CURR, C_DVM, C_VOLT, fmt_si
+from .widgets import C_CURR, C_DVM, C_VOLT, fmt_si, io_errors
 
 # Open-circuit voltage per cell at 0, 10, ... 100 % state of charge.
 CHEMISTRIES = {
@@ -248,6 +248,7 @@ class TestsTab(QWidget):
                 raise ValueError(f"Row {r + 1} has a missing or bad number")
         return steps
 
+    @io_errors("Save sequence")
     def _seq_save(self):
         try:
             steps = self._seq_steps()
@@ -649,6 +650,7 @@ class TestsTab(QWidget):
             return f"{s // 86400} d {s % 86400 // 3600} h"
         return f"{s // 3600}:{s % 3600 // 60:02d}:{s % 60:02d}"
 
+    @io_errors("Save test data")
     def save_csv(self):
         if not self.rows:
             self.p.message.emit("Nothing to save yet.")

@@ -481,27 +481,44 @@ class SequencerWindow(QMainWindow):
         self.use_script.setChecked(bool(d.get("use_script")))
 
     def _save(self, path):
-        Path(path).parent.mkdir(parents=True, exist_ok=True)
-        with open(path, "w") as fh:
+        path = Path(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_name(path.name + ".tmp")
+        with open(tmp, "w") as fh:
             json.dump(self._state(), fh, indent=1)
+        tmp.replace(path)            # atomic: a crash mid-write can't leave half a file
 
     def _load(self, path, quiet=False):
+        """quiet: the remembered sequence at start-up; a missing or damaged
+        one just gives an empty table (a damaged file is kept as .bad)."""
         try:
             with open(path) as fh:
                 d = json.load(fh)
-        except (OSError, ValueError) as e:
-            if not quiet:
-                QMessageBox.warning(self, "Load sequence", f"Can't read {path}:\n{e}")
-            if quiet:
-                self.add_step(Step("Set", "", "", ""))
+            if not isinstance(d, dict):
+                raise ValueError("not a sequence (expected a JSON object)")
+            self.set_state(d)
             return
-        self.set_state(d)
+        except (OSError, ValueError, TypeError, AttributeError, KeyError) as e:
+            err = e
+        if quiet:
+            if not isinstance(err, FileNotFoundError):
+                try:
+                    Path(path).replace(Path(path).with_suffix(".bad"))
+                except OSError:
+                    pass
+            self.table.setRowCount(0)
+            self.add_step(Step("Set", "", "", ""))
+        else:
+            QMessageBox.warning(self, "Load sequence", f"Can't read {path}:\n{err}")
 
     def save_dialog(self):
         path, _ = QFileDialog.getSaveFileName(self, "Save sequence", "sequence.json",
                                               "Sequence (*.json)")
         if path:
-            self._save(path)
+            try:
+                self._save(path)
+            except OSError as e:
+                QMessageBox.warning(self, "Save sequence", f"Can't write {path}:\n{e}")
 
     def load_dialog(self):
         path, _ = QFileDialog.getOpenFileName(self, "Load sequence", "", "Sequence (*.json)")
@@ -514,10 +531,13 @@ class SequencerWindow(QMainWindow):
         path, _ = QFileDialog.getSaveFileName(
             self, "Save results", time.strftime("sequence_%Y%m%d_%H%M%S.csv"), "CSV (*.csv)")
         if path:
-            with open(path, "w", newline="") as fh:
-                w = csv.DictWriter(fh, self.columns)
-                w.writeheader()
-                w.writerows(self.rows)
+            try:
+                with open(path, "w", newline="") as fh:
+                    w = csv.DictWriter(fh, self.columns, extrasaction="ignore")
+                    w.writeheader()
+                    w.writerows(self.rows)
+            except OSError as e:
+                QMessageBox.warning(self, "Save results", f"Can't write {path}:\n{e}")
 
     # ---------------------------------------------------------------- running
     def running(self) -> bool:

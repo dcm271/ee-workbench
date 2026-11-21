@@ -30,16 +30,51 @@ def capture_bench(main) -> dict:
             "math": [c.to_dict() for c in hub.math.channels]}
 
 
-def apply_bench(main, d: dict):
+def check_bench(d) -> list[dict]:
+    """The setup's instrument entries, or ValueError if it is damaged. Checked
+    before anything is closed, so a bad file leaves the bench as it was."""
+    if not isinstance(d, dict):
+        raise ValueError("not a setup (expected a JSON object)")
+    insts = d.get("instruments", [])
+    if not isinstance(insts, list):
+        raise ValueError("'instruments' must be a list")
+    out = []
+    for k, e in enumerate(insts):
+        if not isinstance(e, dict) or not str(e.get("resource", "")).strip():
+            raise ValueError(f"instrument {k + 1} has no resource")
+        settings = e.get("settings") or {}
+        out.append({"resource": str(e["resource"]).strip(),
+                    "model": str(e.get("model", "auto")),
+                    "settings": settings if isinstance(settings, dict) else {}})
+    for key in ("sequence",):
+        if d.get(key) is not None and not isinstance(d[key], dict):
+            raise ValueError(f"'{key}' must be an object")
+    return out
+
+
+def apply_bench(main, d: dict) -> list[str]:
+    """Replace the bench with the setup's. Returns problems that didn't stop it."""
+    insts = check_bench(d)
+    problems = []
     for i in reversed(range(main.tabs.count())):
         main.close_tab(i)
-    for e in d.get("instruments", []):
-        main.open_instrument(e["resource"], e.get("model", "auto"), e.get("settings") or {})
+    for e in insts:
+        try:
+            main.open_instrument(e["resource"], e["model"], e["settings"])
+        except Exception as ex:          # noqa: BLE001 - damaged tab settings
+            problems.append(f"{e['resource']}: {ex}")
+            try:
+                main.open_instrument(e["resource"], e["model"])
+            except Exception:            # noqa: BLE001
+                pass
     if d.get("sequence"):
-        main.sequencer().set_state(d["sequence"])
-    hub.watchdog.load(d.get("watchdog", []))
+        try:
+            main.sequencer().set_state(d["sequence"])
+        except Exception as ex:          # noqa: BLE001
+            problems.append(f"sequence: {ex}")
+    problems += hub.watchdog.load(d.get("watchdog", []))
     hub.watchdog.armed = bool(d.get("watchdog_armed", True))
-    hub.math.channels = [Channel.from_dict(c) for c in d.get("math", [])]
+    hub.math.channels = Channel.load_list(d.get("math", []))
     for attr in ("wd_win", "math_win"):
         w = getattr(main, attr, None)
         if w is not None:            # rebuilt with the new rules / channels next time
@@ -50,6 +85,7 @@ def apply_bench(main, d: dict):
         from .math_window import MathWindow
         main.math_win = MathWindow(main)     # records math into sessions while hidden
     main.save_bench_state()
+    return problems
 
 
 class SetupsDialog(QDialog):
@@ -107,7 +143,11 @@ class SetupsDialog(QDialog):
                 self, "Save setup", f"Replace '{name}'?") != QMessageBox.StandardButton.Yes:
             return
         desc, _ = QInputDialog.getText(self, "Save setup", "Description (optional):")
-        setups.save_setup(name, capture_bench(self.main), desc.strip())
+        try:
+            setups.save_setup(name, capture_bench(self.main), desc.strip())
+        except OSError as e:
+            QMessageBox.warning(self, "Save setup", f"Can't save '{name}':\n{e}")
+            return
         self._fill()
         self.main.status.showMessage(f"Saved setup '{name}'", 5000)
 
@@ -117,15 +157,19 @@ class SetupsDialog(QDialog):
             return
         try:
             d = setups.load_setup(name)
+            check_bench(d)
         except ValueError as e:
-            QMessageBox.warning(self, "Recall setup", str(e))
+            QMessageBox.warning(self, "Recall setup", f"Can't recall '{name}': {e}")
             return
         if self.main.panels() and QMessageBox.question(
                 self, "Recall setup", f"Close the open instruments and open '{name}'?"
         ) != QMessageBox.StandardButton.Yes:
             return
-        apply_bench(self.main, d)
+        problems = apply_bench(self.main, d)
         self.main.status.showMessage(f"Recalled setup '{name}'", 5000)
+        if problems:
+            QMessageBox.warning(self, "Recall setup", f"'{name}' was recalled, but some parts "
+                                "were damaged and skipped:\n\n" + "\n".join(problems))
         self.accept()
 
     def delete(self):
@@ -141,7 +185,10 @@ class SetupsDialog(QDialog):
             return
         path, _ = QFileDialog.getSaveFileName(self, "Export setup", f"{name}.json", "Setup (*.json)")
         if path:
-            setups.export_setup(name, path)
+            try:
+                setups.export_setup(name, path)
+            except OSError as e:
+                QMessageBox.warning(self, "Export setup", f"Can't write {path}:\n{e}")
 
     def import_(self):
         path, _ = QFileDialog.getOpenFileName(self, "Import setup", "", "Setup (*.json)")

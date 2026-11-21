@@ -18,7 +18,7 @@ from .. import analysis
 from ..instruments.base import CaptureResult, CaptureSpec
 from . import touch
 from .forms import choice, hint, integer, number
-from .widgets import C_CURR, C_MUTED, C_VOLT, C_WARN, MONO, fmt_si
+from .widgets import C_CURR, C_MUTED, C_VOLT, C_WARN, MONO, fmt_si, io_errors
 
 TRIGGERS = [("Immediate", "IMM"), ("Signal level", "LEVEL"),
             ("External input", "EXT"), ("Output step", "STEP")]
@@ -560,6 +560,7 @@ class CaptureTab(QWidget):
         self.redraw()
 
     # ================================================================ files
+    @io_errors("Save capture")
     def save(self):
         if self.y is None:
             return

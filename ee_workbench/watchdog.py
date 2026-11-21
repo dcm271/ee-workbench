@@ -50,7 +50,13 @@ class Rule:
                                                          "hold_ms", "action", "target",
                                                          "enabled")})
         r.limit = float(r.limit)
-        r.hold_ms = float(r.hold_ms)
+        r.hold_ms = max(0.0, float(r.hold_ms))
+        r.source, r.quantity, r.target = str(r.source), str(r.quantity), str(r.target)
+        if r.op not in (">", "<"):
+            raise ValueError(f"op must be > or <, not {r.op!r}")
+        if r.action not in ACTIONS:
+            raise ValueError(f"unknown action {r.action!r}")
+        r.enabled = bool(r.enabled)
         return r
 
     def rearm(self):
@@ -113,5 +119,13 @@ class Watchdog:
     def to_list(self) -> list[dict]:
         return [r.to_dict() for r in self.rules]
 
-    def load(self, items: list[dict]):
-        self.rules = [Rule.from_dict(d) for d in items or []]
+    def load(self, items: list[dict]) -> list[str]:
+        """Replace the rules. A damaged entry is skipped (and reported) rather
+        than losing every rule; returns what was skipped."""
+        self.rules, bad = [], []
+        for k, d in enumerate(items if isinstance(items, list) else []):
+            try:
+                self.rules.append(Rule.from_dict(d))
+            except (TypeError, ValueError, AttributeError) as e:
+                bad.append(f"rule {k + 1}: {e}")
+        return bad

@@ -35,7 +35,7 @@ from ..worker import now
 from . import touch
 from .panel_base import PanelBase, open_panels
 from .theme import set_role
-from .widgets import C_CURR, C_MUTED, C_WARN, MONO, SafeSpin, fmt_si
+from .widgets import C_CURR, C_MUTED, C_WARN, MONO, SafeSpin, fmt_si, io_errors
 
 COLORS = ["#ffb347", "#7ee787", "#c39bff", "#ef9a9a", "#4fc3f7", "#fff176", "#80cbc4",
           "#bcaaa4", "#f48fb1", "#aed581", "#90caf9", "#ffcc80", "#b39ddb", "#80deea",
@@ -844,6 +844,7 @@ class LogicPanel(PanelBase):
         if path:
             self.worker.submit_result("csv", lambda d, p: (d.export_csv(p), p)[1], path)
 
+    @io_errors("Save decoded data")
     def save_table(self):
         if self.capture is None or not self.capture.table_header:
             return

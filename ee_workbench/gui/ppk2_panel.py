@@ -32,7 +32,7 @@ from .panel_base import PanelBase
 from .profile_box import ProfileBox
 from .supply_panel import _profile_page
 from .widgets import (C_CURR, C_MUTED, C_ON, C_WARN, MONO, Readout, SafeSpin, TraceBuffer,
-                      fmt_si)
+                      fmt_si, io_errors)
 
 LIVE_SECONDS = 10
 LIVE_WINDOWS = {"1 ms": 1e-3, "10 ms": 10e-3, "100 ms": 0.1, "1 s": 1.0, "5 s": 5.0,
@@ -484,7 +484,10 @@ class Ppk2Panel(PanelBase):
             self.cmd(lambda d: d.stop())
 
     def _on_poll_paused(self):
-        self.on_error("Stopped after an error (unplugged?). Press ▶ Run to try again.")
+        self._lost = True
+        self.link_lost.emit("Stopped after an error")
+        self.on_error("Stopped after an error (unplugged?). Press ▶ Run to try again, or "
+                      "⟳ Reconnect on the tab after replugging it.")
         self.state.measuring = False
         self._style_run()
 
@@ -501,6 +504,7 @@ class Ppk2Panel(PanelBase):
         self.cmd(lambda d, b: d.t.write(b), data)
         self.raw_line.clear()
 
+    @io_errors("Save live samples")
     def save_live(self):
         k = int(LIVE_WINDOWS[self.live_combo.currentText()] * SAMPLE_RATE)
         t, i, lg = self.ring.latest(k)

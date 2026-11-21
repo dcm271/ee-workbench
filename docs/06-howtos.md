@@ -26,6 +26,7 @@ Each recipe is a complete job from start to finish. The [User's Guide](03-users-
 | [Run hardware tests from pytest or CI](#run-hardware-tests-from-pytest-or-ci) | Remote API |
 | [Analyse a recorded session](#analyse-a-recorded-session) | session viewer, cursors, export |
 | [Connect a LAN function generator](#connect-a-lan-function-generator) | function generator |
+| [Recover from a pulled cable or a crash](#recover-from-a-pulled-cable-or-a-crash) | ⟳ Reconnect, crash log, restart-on-crash |
 
 ---
 
@@ -300,3 +301,22 @@ model = "FGEN"
 ```
 
 If VXI-11 doesn't answer, use the raw socket form: `TCPIP::192.168.1.50::5025::SOCKET` for Keysight and Siglent, or `::5555::SOCKET` for Rigol.
+
+## Recover from a pulled cable or a crash
+
+**An instrument stopped answering** (its tab shows ⚠ and **⟳ Reconnect**):
+
+1. Fix the cause: switch it back on, replug the USB cable, reseat the GPIB connector.
+2. Tap **⟳ Reconnect** on the tab. It closes and reopens in the same place, with its tab settings kept, and reads the instrument's state as usual (nothing is switched on).
+3. If you were recording a [session](03-users-guide.md#sessions-everything-in-one-file), it carries on; the gap shows as a gap.
+
+**A window "EE Workbench: internal error" appeared:** the app caught a problem and carried on. Close the window and keep working. To report it, send `~/.config/ee-workbench/crash.log`.
+
+**The app closed by itself:**
+
+1. Check the bench first: outputs stay as they were when the app ended.
+2. Start it again (`./run.sh`). It reopens the same instruments; supply setpoints are read from the supplies.
+3. The cause is in `~/.config/ee-workbench/fault.log` (a crash in Qt or a driver) or `crash.log`.
+4. On a screen nobody watches, launch it with `./run.sh --restart-on-crash --fullscreen` so it comes back by itself (the Pi's autostart already does). Add a [watchdog](#protect-a-dut-with-the-watchdog) rule if the DUT must be protected meanwhile.
+
+**Esc reported "⚠ FAILED for …":** every other output was switched off; switch the named instrument off at its front panel, then reconnect it.

@@ -8,7 +8,7 @@ import time
 import numpy as np
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QColor, QFont, QPalette
-from PyQt6.QtWidgets import (QApplication, QDoubleSpinBox, QFileDialog, QLabel,
+from PyQt6.QtWidgets import (QApplication, QDoubleSpinBox, QFileDialog, QLabel, QMessageBox,
                              QVBoxLayout, QWidget)
 
 C_VOLT = "#ffb347"
@@ -194,11 +194,29 @@ class TraceBuffer:
         return self.data[: self.n]
 
 
+def io_errors(title: str):
+    """Decorator for a widget's save / export method (taking only self): a
+    file that can't be written (permissions, full disk, a removed USB stick)
+    becomes a warning instead of an internal error."""
+    def deco(fn):
+        def wrapper(self):
+            try:
+                return fn(self)
+            except (OSError, UnicodeError) as e:
+                where = f"\n{e.filename}" if getattr(e, "filename", None) else ""
+                QMessageBox.warning(self, title, f"Couldn't write the file:{where}\n\n"
+                                    f"{getattr(e, 'strerror', None) or e}")
+        wrapper.__name__, wrapper.__doc__ = fn.__name__, fn.__doc__
+        return wrapper
+    return deco
+
+
 class CsvRecorder:
     def __init__(self):
         self.fh = None
         self.w = None
         self.path = ""
+        self.error = ""          # why the last row() failed (disk full, unplugged USB stick)
 
     @property
     def active(self) -> bool:
@@ -209,20 +227,36 @@ class CsvRecorder:
             parent, "Record to CSV", time.strftime(default_name), "CSV (*.csv)")
         if not path:
             return False
-        self.fh = open(path, "w", newline="")
-        self.w = csv.writer(self.fh)
-        self.w.writerow(header)
-        self.path = path
+        try:
+            fh = open(path, "w", newline="")
+            w = csv.writer(fh)
+            w.writerow(header)
+        except OSError as e:
+            QMessageBox.warning(parent, "Record to CSV", f"Can't write {path}:\n{e}")
+            return False
+        self.fh, self.w, self.path, self.error = fh, w, path, ""
         return True
 
-    def row(self, values):
-        if self.w:
+    def row(self, values) -> bool:
+        """Write one row. False (with `error` set) if the file can't be written;
+        recording then stops instead of failing again on every reading."""
+        if not self.w:
+            return False
+        try:
             self.w.writerow(["" if v is None else v for v in values])
             self.fh.flush()
+            return True
+        except (OSError, ValueError) as e:
+            self.error = str(e)
+            self.stop()
+            return False
 
     def stop(self):
         if self.fh:
-            self.fh.close()
+            try:
+                self.fh.close()
+            except OSError:
+                pass
         self.fh = self.w = None
 
 

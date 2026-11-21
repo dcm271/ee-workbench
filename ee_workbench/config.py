@@ -117,6 +117,9 @@ def load_config(path: Path | None = None) -> Config:
         cfg.warning = f"{path}: {e}. Using defaults."
         return cfg
     st = data.get("startup", {})
+    if not isinstance(st, dict):
+        cfg.warning = f"{path}: [startup] should be a table. Using defaults."
+        st = {}
     mode = str(st.get("open", "last")).lower()
     if mode in OPEN_MODES:
         cfg.open = mode
@@ -131,7 +134,8 @@ def load_config(path: Path | None = None) -> Config:
         cfg.api_port = int(st.get("api_port", 8765))
     except (TypeError, ValueError):
         pass
-    for item in data.get("instrument", []):
+    items = data.get("instrument", [])
+    for item in items if isinstance(items, list) else []:
         if not isinstance(item, dict) or not item.get("resource"):
             continue
         rest = {k: v for k, v in item.items() if k not in ("resource", "model")}
@@ -150,15 +154,33 @@ class Session:
         self.known: dict[str, Entry] = {}
         try:
             data = json.loads(self.path.read_text())
-            self.open = [self._entry(d) for d in data.get("open", [])]
-            self.known = {k: self._entry(d) for k, d in data.get("known", {}).items()}
-        except (OSError, ValueError, AttributeError, TypeError):
-            pass
+        except (OSError, ValueError):
+            return
+        if not isinstance(data, dict):
+            return
+        # one damaged entry costs only that entry, never the start-up
+        opened = data.get("open", [])
+        for d in opened if isinstance(opened, list) else []:
+            e = self._entry(d)
+            if e:
+                self.open.append(e)
+        known = data.get("known", {})
+        for k, d in (known.items() if isinstance(known, dict) else []):
+            e = self._entry(d)
+            if e:
+                self.known[str(k)] = e
 
     @staticmethod
-    def _entry(d: dict) -> Entry:
-        return Entry(str(d["resource"]), norm_model(d.get("model", "auto")),
-                     dict(d.get("settings", {})))
+    def _entry(d) -> Entry | None:
+        try:
+            res = str(d["resource"]).strip()
+            settings = d.get("settings") or {}
+            if not res:
+                return None
+            return Entry(res, norm_model(d.get("model", "auto")),
+                         dict(settings) if isinstance(settings, dict) else {})
+        except (KeyError, TypeError, ValueError, AttributeError):
+            return None
 
     def save(self, entries: list[Entry]):
         self.open = entries
@@ -169,10 +191,22 @@ class Session:
         try:
             self.path.parent.mkdir(parents=True, exist_ok=True)
             tmp = self.path.with_suffix(".tmp")
-            tmp.write_text(json.dumps(data, indent=2))
+            tmp.write_text(json.dumps(data, indent=2, default=json_default))
             os.replace(tmp, self.path)       # atomic: survives a power cut mid-write
-        except OSError:
+        except (OSError, TypeError, ValueError):
             pass
+
+
+def json_default(o):
+    """For json.dumps: numpy numbers and anything else odd in a tab's settings."""
+    if hasattr(o, "item"):
+        try:
+            return o.item()
+        except (TypeError, ValueError):
+            pass
+    if isinstance(o, (set, tuple)):
+        return list(o)
+    return str(o)
 
 
 def startup_entries(cfg: Config, session: Session, scanned: list[str] | None = None,

@@ -138,8 +138,14 @@ class Plan:
     def from_dict(cls, d: dict) -> "Plan":
         known = {k: v for k, v in d.items() if k in cls.__dataclass_fields__}
         p = cls(**known)
-        p.steps = [Step(**{k: v for k, v in s.items() if k in Step.__dataclass_fields__})
-                   for s in d.get("steps", [])]
+        # a hand-edited file may say 3.3 rather than "3.3"; the editor wants text
+        p.steps = [Step(**{k: "" if v is None else str(v) for k, v in s.items()
+                           if k in Step.__dataclass_fields__})
+                   for s in d.get("steps", []) if isinstance(s, dict)]
+        p.loop = p.loop if p.loop in ("once", "repeat", "sweep") else "once"
+        p.count = int(p.count)
+        p.start, p.stop, p.step = float(p.start), float(p.stop), float(p.step)
+        p.off_at_end, p.stop_on_fail = bool(p.off_at_end), bool(p.stop_on_fail)
         return p
 
 

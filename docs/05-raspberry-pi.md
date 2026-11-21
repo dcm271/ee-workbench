@@ -38,12 +38,13 @@ The script is safe to re-run. It does the following:
 2. Creates `.venv` and installs `requirements.txt` into it (pyqtgraph, pyvisa-py, gpib-ctypes, …).
 3. Runs the test suite against the simulators.
 4. Builds the GPIB driver with `scripts/install-gpib-driver.sh`. It uses the Pi's `linux-headers-$(uname -r)` package, and skips the kernel-module build if the running kernel already provides `ni_usb_gpib`.
-5. Adds **EE Workbench** to the application menu and to `~/.config/autostart`, so it starts full screen at every login.
+5. Adds **EE Workbench** to the application menu and to `~/.config/autostart`, so it starts full screen at every login. The autostart entry also uses `--restart-on-crash`, so the screen never stays on an empty desktop (see [below](#start-again-after-a-crash)).
 
 | Option | Effect |
 |---|---|
 | `--no-gpib` | Skip the driver build, e.g. to try the simulators first |
 | `--no-autostart` | Menu entry only; don't launch at login |
+| `--no-pdf` | Skip WeasyPrint (PDF reports); HTML reports still work |
 | `--docs` | Also install the PDF tool-chain (Markdown + WeasyPrint) |
 
 > **After a kernel upgrade** (`apt full-upgrade` can bring a new kernel), re-run `scripts/install-gpib-driver.sh`. The module is built for one specific kernel.
@@ -58,7 +59,20 @@ The repository includes **`ee-workbench.desktop`**. Copy it to the place you wan
 | Application menu | `~/.local/share/applications/` |
 | Desktop icon | `~/Desktop/` (the file manager may ask you to trust it the first time) |
 
-It assumes the project is in `~/ee-workbench` and starts full screen. If you cloned somewhere else, edit its `Exec=` line. Remove `--fullscreen` to start in a window. `setup-pi.sh` installs the file with the correct path filled in.
+It assumes the project is in `~/ee-workbench` and starts full screen. If you cloned somewhere else, edit its `Exec=` line. Remove `--fullscreen` to start in a window. `setup-pi.sh` installs the file with the correct path filled in (and, for autostart, `--restart-on-crash` added).
+
+## Start again after a crash
+
+EE Workbench catches its own errors and keeps running (see *When something goes wrong* in the User's Guide), but a crash inside Qt or a driver library can still end it. On a bench screen nobody is watching, `run.sh --restart-on-crash` starts it again 3 s later, reopening the same instruments:
+
+```
+Exec="/home/<you>/ee-workbench/run.sh" --restart-on-crash --fullscreen
+```
+
+- A normal quit (**✕**, logging out, shutting down) is not a crash, so it stays closed.
+- Five crashes within two minutes stop the restarts, so a fault that happens at every start can't loop for ever.
+- Each restart is noted in `~/.config/ee-workbench/crash.log`; the crash itself is in `fault.log` next to it.
+- Outputs are never switched on by a restart: supplies keep whatever they were doing, and the app reads their state as usual. Use the [watchdog](03-users-guide.md#watchdog) if the DUT must be protected while nobody is there.
 
 ## Instruments at start-up
 
@@ -162,3 +176,5 @@ The touch layout needs about 1180×460 pixels. Smaller screens (an 800×480 pane
 | GPIO: "Permission denied" | Log out and back in after setup, for the `gpio` group. |
 | GPIO: a pin is "busy" | I²C, SPI, the serial console, 1-Wire or a HAT's overlay uses it (`gpioinfo` shows the owner). Pick another pin or turn that interface off in `raspi-config`. |
 | App doesn't start at login | Run `~/ee-workbench/run.sh --fullscreen` from a terminal to see the error. Check `~/.config/autostart/ee-workbench.desktop` points at the right folder. |
+| App keeps restarting, or stopped after several restarts | It crashes at start-up. Look at the end of `~/.config/ee-workbench/crash.log` and `fault.log`. Starting with `./run.sh --open none` (no instruments) shows whether one instrument is the cause. |
+| A tab shows ⚠ and **⟳ Reconnect** | The instrument stopped answering (switched off, cable pulled). Fix that and tap **⟳ Reconnect**. |
