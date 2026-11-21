@@ -16,6 +16,7 @@ This guide lists the hardware EE Workbench supports, what each instrument can do
 | **HP 6632A** System DC Power Supply (also 6633A, 6634A) | Second supply, 20 V / 5 A | GPIB only | Supported. Written from the manual and tested on the simulator |
 | **HP 3456A** 6½-digit DMM | Precision voltage / resistance | GPIB only | Supported. Written from the manual and tested on the simulator |
 | **Nordic Power Profiler Kit II** (PPK2) | 100 kS/s current profiler and 0.8–5 V source | USB (ID `1915:c00a`, serial) | Supported. Tested on real hardware (HW 8682) |
+| **Saleae Logic 8 / Logic Pro 8 / Logic Pro 16** | Logic analyzer with analog inputs | USB, through the **Logic 2** software (automation API) | Supported. Written from Saleae's API and file-format docs and tested on the simulator; not yet tried on real hardware |
 | **Agilent E3610A** bench supply | Manual bench supply | **None** | Cannot be controlled. Monitor its output with the 3456A instead (see below) |
 | **NI GPIB-USB-HS** | USB-to-GPIB controller | USB 2.0 (ID `3923:709b`) | Supported through linux-gpib |
 | Linux PC | Runs the application | — | Ubuntu with kernel 7.0 tested |
@@ -90,6 +91,19 @@ The PPK2 shows up as **two** serial ports (`/dev/ttyACM0` and `/dev/ttyACM1`, sa
 
 Each unit stores its own calibration, which the app reads at connect. The PPK2 can't report whether DUT power is on, so the button shows **?** until you set it. Close nRF Connect Power Profiler first: only one program can read the stream.
 
+### Saleae Logic 8 / Logic Pro 8 / Logic Pro 16
+
+| | |
+|---|---|
+| Channels | 8 or 16 digital; each can also be an analog input (Logic 8: 8; Pro 16: 16) |
+| Digital rate | Up to 100 MS/s (Logic 8) or 500 MS/s (Pro), less with many channels on |
+| Analog rate | Up to 10 MS/s (Logic 8) or 50 MS/s (Pro) |
+| Threshold | Pro: 1.2, 1.8 or 3.3 V; Logic 8: fixed |
+
+Saleae doesn't publish the USB protocol of these analyzers. The only supported way to control them is **Logic 2's automation server**, so EE Workbench talks to a running copy of Logic 2 (on this computer, port 10430), and Logic 2 talks to the analyzer. Logic 2 runs on x86-64 Linux, Windows and macOS, **not on the Raspberry Pi**, so on the Pi only the simulator (`SIM::SALEAE`) is available.
+
+Older Saleae models (the original 8-channel Logic and the original Logic16) are not supported. Logic 2 doesn't drive them; sigrok does.
+
 ### Agilent E3610A: not remotely controllable
 
 The E3610A is a manual bench supply (front-panel knobs, analog meters) with **no GPIB, RS-232 or USB port**, so no software can control or read it directly. Two practical options:
@@ -135,4 +149,6 @@ A typical bench needs one GPIB-USB-HS and two or three 1 m or 2 m GPIB cables.
 | HP 3456A Operating & Service Manual | [ManualsLib](https://www.manualslib.com/manual/1303474/Hp-3456a.html) |
 | HP 3456A quick-reference card (M. Hepperle) | [mh-aerotools.de](https://mh-aerotools.de/hp/documents/HP%203456A%20-%20Quick-Reference.pdf) |
 | Agilent 66311B/66321B/D User's Guide | Keysight website, search "66321D user's guide" |
+| Saleae Logic 2 automation API | [saleae.github.io/logic2-automation](https://saleae.github.io/logic2-automation/) |
+| Saleae binary export format | [support.saleae.com](https://support.saleae.com/faq/technical-faq/binary-export-format-logic-2) |
 | linux-gpib project | [linux-gpib.sourceforge.io](https://linux-gpib.sourceforge.io/) |

@@ -11,7 +11,8 @@ from . import touch
 from .widgets import C_MUTED
 
 SHORT_MODELS = {"auto": "Auto\n(supplies)", "663xx": "66321D\n66311B/21B",
-                "6632A": "6632A\n33A/34A", "3456A": "3456A\nDMM", "PPK2": "PPK2\nNordic"}
+                "6632A": "6632A\n33A/34A", "3456A": "3456A\nDMM", "PPK2": "PPK2\nNordic",
+                "SALEAE": "Saleae\nLogic"}
 
 
 class ConnectDialog(QDialog):

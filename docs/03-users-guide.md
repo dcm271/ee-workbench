@@ -227,6 +227,38 @@ The PPK2 measures current 100,000 times a second. The panel keeps every sample o
 
 **Console:** raw command bytes in hex (e.g. `0C 01` turns DUT power on). Nothing is read back. Use this only if you know the PPK2's protocol.
 
+## Logic analyzer panel: Saleae
+
+![Saleae waveform](images/logic-wave.png)
+
+The panel drives a Saleae Logic 8, Logic Pro 8 or Logic Pro 16 through **Logic 2**, which must be running with its automation server on (see Installation). Nothing streams: each **Capture** records once, then shows the result.
+
+**Capture**
+
+- **Timed** records for the **Duration**.
+- **Trigger** waits for a **Rising edge**, **Falling edge**, **High pulse** or **Low pulse** on one digital channel, then keeps **Before trigger** seconds from before it and records **After trigger** seconds after. For pulses, **Pulse width** limits which pulses count (0 = no limit). The trigger is at **0 s** on the time axis (dashed line).
+- **Manual** records until you press **■ Stop** (✕ throws the capture away).
+- **▶ Capture** starts; while a timed or triggered capture runs the same button reads **✕ Abort**. **Repeat** starts the next capture as soon as one is shown, like a scope's Normal mode. **Esc** aborts.
+
+**Channels and Sampling.** Tick the digital (D) and analog (A) inputs to record. Logic 2 refuses rates the analyzer can't reach with that many channels on; the reason appears in the console and status bar. **Threshold** (Pro models only) sets the logic level.
+
+**Waveform tab.** Digital lanes on top, analog traces underneath, on one time axis. Drag to pan and scroll to zoom (or use **Fit ＋ － ◀ ▶**, which also work on a touch screen). Wherever there are more edges than pixels, a lane is drawn as a solid band, so a fast clock reads as a block and a single glitch never vanishes.
+
+The tables under the plot measure **what's in view**, or the band when **Measure region** is ticked (its width shows as Δt and 1/Δt):
+
+- Digital: **Frequency** and **Period** (from rising edges), **Duty** (time high ÷ window), **High** and **Low** pulse widths (shortest … longest, counting only pulses that start and end in the window), and **Edges**.
+- Analog: **Mean, Min, Max, Pk-pk, RMS**.
+
+**Save .sal…** saves the capture for Logic 2 to open. **Export CSV…** has Logic 2 write `digital.csv` / `analog.csv` into a folder you choose.
+
+![Saleae decoded](images/logic-decoded.png)
+
+**Protocol decoders** are Logic 2's analyzers. **Add…** picks **Async Serial**, **I2C** or **SPI** and their channels (and bit rate), or **Other…** for any analyzer Logic 2 has (CAN, 1-Wire, …): type its name and settings as JSON, exactly as Logic 2's Add Analyzer panel spells them. Decoders run after every capture. **Decode** (or changing the list) re-runs them on the last capture without capturing again.
+
+**Decoded tab.** Logic 2's data table for all decoders, in time order. Type in **Filter** to narrow it (e.g. `0x41`, or `error`). Click a row to jump to it on the Waveform tab. **Save…** writes the whole table to CSV.
+
+The capture stays open in Logic 2 until the next one or until the tab closes, so you can also look at it in Logic 2 itself.
+
 ## Workflows
 
 ### Monitoring an E3610A (or any manual supply)
@@ -250,6 +282,13 @@ The PPK2 measures current 100,000 times a second. The panel keeps every sample o
 3. Choose a **Span** that covers several cycles (e.g. 2 min), or tick **Measure region** and drag over exactly one or more whole cycles.
 4. Read **Average**. Battery life ≈ capacity ÷ average current, e.g. 220 mAh ÷ 15 µA ≈ 14,700 h. **Charge** per cycle tells you which events dominate.
 
+### Checking a UART against a power event (Saleae with a supply or PPK2)
+
+1. Open the supply (or PPK2) and the Saleae. Connect the DUT's TX to D0.
+2. Add an **Async Serial** decoder on D0 at the DUT's baud rate.
+3. Choose **Trigger** on D0, **Falling edge** (the first start bit), with 10 ms **Before trigger**. Press **▶ Capture**, then switch the DUT on.
+4. The Decoded tab shows the boot message. The status line gives the capture's app time, so you can find the same moment on the supply's trend.
+
 ### Characterizing a regulator with two supplies and the DMM
 
 Use the 66321D as the input supply, the 6632A as a second rail, and the 3456A on the output. All three trends share one time axis. Record a CSV from each tab and join them on `t_s`.
@@ -262,6 +301,8 @@ Use the 66321D as the input supply, the 6632A as a second rail, and the 3456A on
 
 **PPK2 tab:** `timestamp, t_s, current_A, current_min_A, current_max_A, logic` (one row per **CSV row every** interval; `logic` is D0–D7 as a byte, with a bit set if that input was high at any point in the interval). **Live ▸ Save…:** `t_s, current_A, logic`, one row per sample.
 
+**Saleae Decoded ▸ Save…:** Logic 2's data-table columns (`name, type, start_time, duration`, then one per decoder field). **Export CSV…** writes Logic 2's own `digital.csv` (one row per change) and `analog.csv`.
+
 **Capture export:** `t_s, segment, current_A` (or `voltage_V`); the last line, starting with `#`, holds the trigger settings.
 
 **Tests:** battery life `t_s, voltage_V, current_A, charge_mAh, energy_mWh`; battery emulator `t_s, soc_pct, ocv_V, voltage_V, current_A`; sequencer `t_s, step, set_V, set_A, voltage_V, current_A`; I-V sweep `set, voltage_V, current_A`.
@@ -270,7 +311,7 @@ Use the 66321D as the input supply, the 6632A as a second rail, and the 3456A on
 
 ## Simulators
 
-Open the resources `SIM::66321D`, `SIM::6632A`, `SIM::3456A` and `SIM::PPK2` to try every feature without hardware. The simulated 66321D drives a phone-like load drawing short current bursts. The 6632A drives a 10 Ω resistor. The 3456A reads a slightly drifting 5 V rail, about 1 kΩ, or 120 mV AC. The PPK2 powers a BLE-style sensor: 3 µA asleep, a 400 µA wake-up every 10 ms, and a 6–9 mA radio event every 100 ms (shown on D0).
+Open the resources `SIM::66321D`, `SIM::6632A`, `SIM::3456A`, `SIM::PPK2` and `SIM::SALEAE` to try every feature without hardware. The simulated 66321D drives a phone-like load drawing short current bursts. The 6632A drives a 10 Ω resistor. The 3456A reads a slightly drifting 5 V rail, about 1 kΩ, or 120 mV AC. The PPK2 powers a BLE-style sensor: 3 µA asleep, a 400 µA wake-up every 10 ms, and a 6–9 mA radio event every 100 ms (shown on D0). The Saleae is a Logic Pro 16 that needs no Logic 2: D0 sends `EE Workbench\r\n` at 115200 baud every 2 ms, D1 is 1 kHz at 25 % duty, D2 10 kHz, D3 bursts of eight 1 MHz clocks, A0 a 1 kHz sine and A1 the D1 signal through an RC filter. Its Async Serial decoder works on D0.
 
 ## Instruments at start-up
 

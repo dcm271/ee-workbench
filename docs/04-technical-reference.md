@@ -17,6 +17,7 @@ MainWindow
                                               libgpib ─ ni_usb_gpib (kernel)
 
  └─ Ppk2Panel   (PPK2)   ── worker thread ── PPK2 ── SerialStream (pyserial + reader thread)
+ └─ LogicPanel  (Saleae) ── worker thread ── SaleaeLogic ── Logic2Link ── gRPC ── Logic 2 ── USB
 ```
 
 - **One I/O thread per instrument** (`worker.py`). The GUI never blocks on the bus. Commands from the GUI go into a queue and run before the next poll.
@@ -39,6 +40,8 @@ MainWindow
 | `gui/` | Main window, panels, shared widgets |
 | `gui/capture_tab.py`, `tests_tab.py`, `system_tab.py` | The 663xx Capture, Tests and System tabs |
 | `gui/ppk2_panel.py` | PPK2 tab: binning, ring buffer, min/max envelope plots, region statistics |
+| `instruments/saleae.py` | Saleae through Logic 2: `Logic2Link`, binary-export parser, edge measurements, lane envelope |
+| `gui/logic_panel.py` | Saleae tab: capture modes, lanes, measurements, decoders and their table |
 
 ## Agilent 66321D (SCPI)
 
@@ -188,6 +191,35 @@ I = UG[r] · ( x · (GS[r]·x + GI[r]) + S[r]·VDD/1000 + I[r] )
 - **Spike filter:** after each range switch, 3 samples are replaced by an exponential average (α = 0.18; 0.06 in range 4, which also skips its first 2 samples). The reference runs the averages sample by sample. Here they're evaluated only where needed, over a 400-sample window (truncation ≈ 2·10⁻¹¹). The tests check it against a direct port of the reference, and with an 800-sample window it matches to rounding error.
 - **Display.** The worker emits each block of raw samples (~5000). The panel bins them (1 ms and 100 ms min/mean/max), keeps 10 s raw in a ring buffer, and draws at most ~3000 min/max pairs per curve.
 
+## Saleae (Logic 2 automation)
+
+Saleae's current analyzers have an undocumented USB protocol, so the driver uses Logic 2's gRPC automation API (`logic2-automation` package, API 1.x, port 10430). `Logic2Link` wraps it in a few blocking calls (`start`, `wait`, `stop`, `close_capture`, `export_binary`, `add_analyzer`, `export_table`, `save`), which `SimLogic2` also implements.
+
+### A capture
+
+1. `start_capture` with the channels, rates and threshold, and a `TimedCaptureMode`, `DigitalTriggerCaptureMode` (`after_trigger_seconds`, and `trim_data_seconds = before + after`, which keeps that much from the end) or `ManualCaptureMode`.
+2. Timed and trigger: a helper thread calls `wait()`, and the worker's capture loop polls it every 100 ms, so the I/O queue stays responsive. Manual: **Stop** calls `stop()`. The API forbids calling both on one capture. **Abort** therefore uses `close()`, which also ends a pending `wait()`.
+3. `export_raw_data_binary` into a temporary folder, then parse `digital_<ch>.bin` / `analog_<ch>.bin`. Analog is downsampled by Logic 2 to at most ~2 M points per channel, estimated from the capture's elapsed time.
+4. If decoders are set: `add_analyzer` for each, `export_data_table` (hex radix) to one CSV, then `remove_analyzer`.
+
+The capture stays open in Logic 2 (for **Decode**, **Save .sal**, **Export CSV**) until the next capture or the tab closes.
+
+### Binary export format
+
+Little-endian. Header: `<SALEAE>`, int32 version (0 or 1), int32 type (0 digital, 1 analog). Both versions are read.
+
+| | Version 0 | Version 1 |
+|---|---|---|
+| Digital | u32 initial state, f64 begin, f64 end, u64 n, f64[n] transition times | u64 chunks; per chunk: u32 initial state, f64 sample rate, f64 begin, f64 end, u64 n, f64[n] |
+| Analog | f64 begin, u64 rate, u64 downsample, u64 n, f32[n] | u64 waveforms; per waveform: f64 begin, f64 trigger time, f64 rate, i64 downsample, u64 n, f32[n] |
+
+A digital channel becomes edge times plus levels (they alternate from the initial state). Chunk boundaries count as edges only where the level changes. Gaps between analog waveforms are filled with NaN, so one uniform time base remains.
+
+### Drawing and measuring
+
+- **Lanes:** with no more edges in view than the plot is wide, the exact steps; otherwise one column per pixel, full height where that column has any edge. Recomputed (throttled to 20/s) when the view changes.
+- **Frequency** is from the first to the last rising edge in the window; **duty** is time high ÷ window; pulse widths count only pulses with both edges inside the window.
+
 ## Simulators
 
 | Resource | Model |
@@ -195,6 +227,7 @@ I = UG[r] · ( x · (GS[r]·x + GI[r]) + S[r]·VDD/1000 + I[r] )
 | `SIM::66321D` | 47 Ω load with 4.7 Ω, 577 µs bursts every 4.615 ms. The output is modelled over time (40 µs step response from a history of setpoint changes), so level triggers, pre-trigger data, segments, output steps, external triggers (fires 0.4 s after arming) and `ABOR` behave like the real unit. Binary and ASCII arrays, the WTG bit, latched status events, every System-tab setting with `*RST` defaults, `*SAV/*RCL`, `*TST?`, a DVM at 3.7 V ± 0.15 V, the full SCPI error queue (including +603), and OCP trips |
 | `SIM::6632A` | 10 Ω load; ERR codes; OCP/OVP trips; 30 ms readback delay |
 | `SIM::3456A` | DCV 5 V with slow drift, Ω ~1 kΩ, ACV 120 mV; noise scales with integration time; null; syntax-error status |
+| `SIM::SALEAE` | A Logic Pro 16 behind a fake Logic 2: UART text on D0, square waves on D1/D2, clock bursts on D3, analog sine and RC-filtered square. Edges fall on the sample grid; the trigger finds the real first edge and times everything from it. It writes real version 0 or 1 binary files, rejects invalid sample rates like Logic 2, and decodes Async Serial on D0 at 115200. Its `speed` lets tests finish captures faster than real time |
 | `SIM::PPK2` | The real byte stream: a BLE-style DUT encoded through its own calibration (with range switching and a spike on each switch), metadata, mode, voltage and DUT power commands, counter, logic D0/D1, and a hook to drop samples. Its clock can be injected, so tests run without waiting |
 
 ## Tests
@@ -203,7 +236,7 @@ I = UG[r] · ( x · (GS[r]·x + GI[r]) + S[r]·VDD/1000 + I[r] )
 .venv/bin/python -m pytest tests
 ```
 
-The tests run each driver against its simulator: identification, CV/CC, protection trips and events, error decoding, every 663xx setting, saved setups, immediate/level/segmented/output-step captures with pre-trigger, abort, capture validation, the waveform measurements in `analysis.py`, the config files, and the 3456A reading formats. PPK2 tests cover metadata captured from a real unit, word decoding, the calibration formula, the spike filter against a sample-by-sample reference (across chunk boundaries), and the driver against the simulator: sample count, timing, levels, logic, lost samples, modes, and stop/start.
+The tests run each driver against its simulator: identification, CV/CC, protection trips and events, error decoding, every 663xx setting, saved setups, immediate/level/segmented/output-step captures with pre-trigger, abort, capture validation, the waveform measurements in `analysis.py`, the config files, and the 3456A reading formats. PPK2 tests cover metadata captured from a real unit, word decoding, the calibration formula, the spike filter against a sample-by-sample reference (across chunk boundaries), and the driver against the simulator: sample count, timing, levels, logic, lost samples, modes, and stop/start. Saleae tests cover both binary-format versions (including multi-chunk files), the edge measurements and lane envelope, resource parsing, and timed, triggered, manual and aborted captures, decoding and save/export through the simulator and the real worker thread.
 
 ## Adding an instrument
 

@@ -113,6 +113,19 @@ groups | grep -q dialout || sudo usermod -aG dialout $USER   # then log out and 
 
 Plug it in and it appears in the resource list as `PPK2::/dev/serial/by-id/…`.
 
+## Saleae logic analyzer (optional)
+
+1. Install **Logic 2** from [saleae.com/downloads](https://www.saleae.com/downloads/) (an AppImage on Linux) and its udev rules, as Saleae's instructions describe. Check that Logic 2 sees the analyzer.
+2. Install the automation library into the app's environment:
+
+   ```bash
+   .venv/bin/pip install logic2-automation
+   ```
+
+3. Turn on Logic 2's automation server: **Preferences ▸ Automation ▸ Enable automation server** (port 10430), or start it with `./Logic-2.x.AppImage --automation`.
+
+While Logic 2 runs with the server on, each analyzer it sees appears in the resource list as `SALEAE::<device id>`. `SALEAE::` (no ID) means the first one. Logic 2 must run on the same computer, because it writes the captured data to files that EE Workbench then reads.
+
 ## 4. Launching
 
 ```bash
@@ -120,9 +133,11 @@ Plug it in and it appears in the resource list as `PPK2::/dev/serial/by-id/…`.
 ./run.sh GPIB0::5::INSTR                   # open the 66321D (auto-detected)
 ./run.sh GPIB0::5::INSTR 6632A@GPIB0::6::INSTR 3456A@GPIB0::22::INSTR
 ./run.sh PPK2@/dev/ttyACM0                 # Nordic PPK2
+./run.sh SALEAE@                           # Saleae: the first analyzer Logic 2 sees
+./run.sh SALEAE@F4241                      # ... or a particular one, by its device ID
 ```
 
-`MODEL@RESOURCE` forces a driver. Models are `663xx` (or `66321D`), `6632A`, `3456A` and `PPK2`. **The 3456A always has to be named**, because it has no ID query.
+`MODEL@RESOURCE` forces a driver. Models are `663xx` (or `66321D`), `6632A`, `3456A`, `PPK2` and `SALEAE`. **The 3456A always has to be named**, because it has no ID query.
 
 ### Desktop launcher (optional)
 
@@ -165,6 +180,11 @@ Then copy it to `~/.local/share/applications/` (menu), `~/Desktop/`, or `~/.conf
 | PPK2: "Permission denied" | Not in the `dialout` group yet: `sudo usermod -aG dialout $USER`, then log out and back in. |
 | PPK2: "No metadata from the PPK2" | You opened its second serial port, or nRF Connect Power Profiler has it open. Use the `PPK2::…-if01` entry and close the other program. |
 | PPK2: "Samples lost" climbs | The USB link or the computer can't keep up (400 kB/s). Use another USB port and avoid hubs; on a Pi, close other heavy programs. |
+| Saleae: "Logic 2 isn't answering on 127.0.0.1:10430" | Logic 2 isn't running, or its automation server is off: **Preferences ▸ Automation**. |
+| Saleae: "logic2-automation package is missing" | `.venv/bin/pip install logic2-automation` |
+| Saleae: "Logic 2 doesn't see analyzer …" | Unplugged, or another analyzer is connected. Check Logic 2's device list; `SALEAE::` picks whichever is there. |
+| Saleae: "invalid digital sample rate" (or similar) at Capture | That rate isn't possible with this many channels on. Pick a lower rate or turn channels off. |
+| Saleae: a decoder finds nothing | Wrong channel or bit rate, or the analyzer setting names don't match Logic 2's (for **Other…** decoders they must match exactly). |
 | "Couldn't identify the instrument" | Auto-detect only knows the supplies. Pick the model by hand (the 3456A always needs this). |
 | Readings stop and "Polling paused" appears | A bus error occurred. Fix the cause, then press **Resume polling**. |
 | 66321D waveform capture is slow | Normal: the instrument sends arrays at about 3.7 KB/s (about 1.2 s per 1024 points in binary). |

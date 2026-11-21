@@ -125,11 +125,49 @@ def ppk_start():
     def live():
         pw.grab().save(str(OUT / "ppk2-live.png"))
         pw.close()
-        app.quit()
+        logic_start()
 
     at(1500, power)
     at(6500, trend)
     at(7200, live)
+
+
+def logic_start():
+    global lw
+    lw = MainWindow([parse_target("SIM::SALEAE")])
+    lw.resize(1440, 900)
+    lw.show()
+
+    def capture():
+        p = lw.panels()[0]
+        p.name_edit.setText("UART + PWM demo")
+        for k in range(4):
+            p.dig_chks[k].setChecked(True)
+        p.an_chks[0].setChecked(True)
+        p.an_chks[1].setChecked(True)
+        p.duration.setValue(0.01)
+        p.cfg.decoders = [{"name": "Async Serial", "label": "uart",
+                           "settings": {"Input Channel": 0, "Bit Rate (Bits/s)": 115200}}]
+        p._fill_decoders()
+        p.capture_now()
+
+    def wave():
+        p = lw.panels()[0]
+        p.zoom(0.25)
+        p.region_chk.setChecked(True)
+
+    def shots():
+        p = lw.panels()[0]
+        lw.grab().save(str(OUT / "logic-wave.png"))
+        p.tabs.setCurrentIndex(1)
+        app.processEvents()
+        lw.grab().save(str(OUT / "logic-decoded.png"))
+        lw.close()
+        app.quit()
+
+    at(1500, capture)
+    at(3000, wave)
+    at(3600, shots)
 
 
 at(1500, setup)

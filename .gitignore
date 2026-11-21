@@ -4,3 +4,6 @@ __pycache__/
 *.pyc
 .pytest_cache/
 *.csv
+
+# Vendor app downloads (e.g. Saleae Logic 2) are too big for GitHub
+*.AppImage

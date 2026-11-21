@@ -21,7 +21,7 @@ class TransportError(Exception):
     pass
 
 
-SIM_RESOURCES = ["SIM::66321D", "SIM::6632A", "SIM::3456A", "SIM::PPK2"]
+SIM_RESOURCES = ["SIM::66321D", "SIM::6632A", "SIM::3456A", "SIM::PPK2", "SIM::SALEAE"]
 
 
 def _visa_library() -> str:
@@ -137,6 +137,9 @@ def list_resources(scan: bool = True) -> list[str]:
         found.append("GPIB0::5::INSTR")
     ppk_data, ppk_all = find_ppk2()
     found += [f"PPK2::{dev}" for dev in ppk_data]
+    from .instruments.saleae import find_logic2
+
+    found += find_logic2()          # analyzers a running Logic 2 can see
     for dev in sorted(glob.glob("/dev/ttyUSB*") + glob.glob("/dev/ttyACM*")):
         if dev not in ppk_all:
             found.append(f"ASRL{dev}::INSTR")
@@ -187,6 +190,8 @@ def describe(resource: str) -> str:
         path = resource[6:]
         m = re.search(r"PPK2_([0-9A-F]+)", path, re.I)
         return f"PPK2 {m.group(1)[-6:]}" if m else path.removeprefix("/dev/")
+    if resource.upper().startswith("SALEAE::"):
+        return f"Saleae {resource[8:]}".strip()
     return resource.replace("::INSTR", "")
 
 
@@ -206,6 +211,11 @@ def open_transport(resource: str, baud: int = 9600, model: str = "auto"):
         return sim.open_sim(resource)
     if resource.upper().startswith("PPK2::") or model == "PPK2":
         return SerialStream(serial_path(resource))
+    if resource.upper().startswith("SALEAE::") or model == "SALEAE":
+        from .instruments.saleae import Logic2Link, parse_resource
+
+        _, host, port = parse_resource(resource)
+        return Logic2Link(host, port)
     return VisaTransport(resource, baud=baud)
 
 

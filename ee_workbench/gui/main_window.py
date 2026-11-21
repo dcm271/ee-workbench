@@ -18,6 +18,7 @@ from ..transport import describe, gpib_ready, list_resources, scan_gpib
 from . import touch
 from .connect_dialog import ConnectDialog
 from .dmm_panel import DmmPanel
+from .logic_panel import LogicPanel
 from .ppk2_panel import Ppk2Panel
 from .supply_panel import SupplyPanel
 from .widgets import C_MUTED, dark_palette
@@ -56,8 +57,10 @@ class MainWindow(QMainWindow):
             if touch.TOUCH else
             "Pick a resource and model above, then Connect.\n\n"
             "Tip: ⌕ scans the GPIB bus. The HP 3456A has no ID query, "
-            "so select it by model.\nA Nordic PPK2 appears as PPK2::… when plugged in.\n"
-            "Try SIM::66321D, SIM::6632A, SIM::3456A or SIM::PPK2 to explore without hardware.")
+            "so select it by model.\nA Nordic PPK2 appears as PPK2::… when plugged in; a Saleae "
+            "analyzer as SALEAE::… while Logic 2 runs with its automation server on.\n"
+            "Try SIM::66321D, SIM::6632A, SIM::3456A, SIM::PPK2 or SIM::SALEAE to explore "
+            "without hardware.")
         self.empty.setWordWrap(True)
         self.empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.empty.setStyleSheet(f"color:{C_MUTED}; font-size:14px;")
@@ -296,7 +299,7 @@ class MainWindow(QMainWindow):
                 self.status.showMessage(f"{resource} is already open", 4000)
                 return
         model = model_for(resource, model)
-        cls = {"3456A": DmmPanel, "PPK2": Ppk2Panel}.get(model, SupplyPanel)
+        cls = {"3456A": DmmPanel, "PPK2": Ppk2Panel, "SALEAE": LogicPanel}.get(model, SupplyPanel)
         baud = int(self.baud_combo.currentText()) if hasattr(self, "baud_combo") else 9600
         panel = cls(resource, model, baud)
         if settings:
@@ -367,12 +370,18 @@ class MainWindow(QMainWindow):
 
 def parse_target(s: str) -> tuple[str, str]:
     """'GPIB0::22::INSTR' or '3456A@GPIB0::22::INSTR' -> (model, resource)."""
+    if s.upper().startswith("SALEAE::"):
+        return "SALEAE", s                 # its own '@host:port' is not MODEL@
     if "@" in s:
         model, res = s.split("@", 1)
         model = {"66321D": "663xx", "66321B": "663xx", "66311B": "663xx",
                  "6633A": "6632A", "6634A": "6632A", "ppk2": "PPK2"}.get(model, model)
         if model == "PPK2" and not res.upper().startswith(("PPK2::", "SIM")):
             res = "PPK2::" + res           # PPK2@/dev/ttyACM0
+        if model.upper() == "SALEAE":
+            model = "SALEAE"
+            if not res.upper().startswith(("SALEAE::", "SIM")):
+                res = "SALEAE::" + res     # SALEAE@F4241 (SALEAE@ = the first one)
         return model, res
     return "auto", s
 
@@ -383,7 +392,7 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description="EE Workbench instrument control")
     ap.add_argument("targets", nargs="*",
                     help="resources to open, optionally MODEL@RESOURCE, e.g. "
-                         "GPIB0::5::INSTR 3456A@GPIB0::22::INSTR PPK2@/dev/ttyACM0 SIM::6632A")
+                         "GPIB0::5::INSTR 3456A@GPIB0::22::INSTR PPK2@/dev/ttyACM0 SALEAE@ SIM::6632A")
     mode = ap.add_mutually_exclusive_group()
     mode.add_argument("--touch", dest="touch", action="store_true", default=None,
                       help="force the touch-screen layout")

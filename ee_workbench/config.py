@@ -17,9 +17,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 OPEN_MODES = ("last", "list", "scan", "none")
-MODEL_KEYS = ("auto", "663xx", "6632A", "3456A", "PPK2")
+MODEL_KEYS = ("auto", "663xx", "6632A", "3456A", "PPK2", "SALEAE")
 MODEL_ALIASES = {"66321D": "663xx", "66321B": "663xx", "66311B": "663xx",
-                 "6633A": "6632A", "6634A": "6632A", "ppk2": "PPK2"}
+                 "6633A": "6632A", "6634A": "6632A", "ppk2": "PPK2",
+                 "saleae": "SALEAE", "Saleae": "SALEAE"}
 
 
 def config_dir() -> Path:
@@ -45,9 +46,12 @@ open = "last"
 wait_for_gpib = 30
 
 # Instruments for open = "list" (also tells "scan" which model is where).
-# model: "auto" (supplies identify themselves), "663xx", "6632A", "3456A" or "PPK2".
+# model: "auto" (supplies identify themselves), "663xx", "6632A", "3456A", "PPK2"
+# or "SALEAE".
 # The 3456A cannot identify itself, so always give its model.
 # A Nordic PPK2 is a serial port: resource = "PPK2::/dev/ttyACM0".
+# A Saleae logic analyzer goes through a running Logic 2 (automation server on):
+# resource = "SALEAE::<device id>" (or "SALEAE::" for the first one it sees).
 # Optional for a 3456A: name, function, range, nplc, autozero, filter.
 #
 # [[instrument]]
