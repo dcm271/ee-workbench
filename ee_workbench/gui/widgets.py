@@ -18,7 +18,7 @@ C_DMM = "#7ee787"
 C_POW = "#9e9e9e"
 C_ON = "#2e7d32"
 C_WARN = "#ef5350"
-C_MUTED = "#8a8f98"
+C_MUTED = "#8a93a0"
 MONO = "DejaVu Sans Mono"
 
 
@@ -227,31 +227,9 @@ class CsvRecorder:
 
 
 def dark_palette(app: QApplication):
-    app.setStyle("Fusion")
-    p = QPalette()
-    base, window, text = QColor("#1a1d21"), QColor("#202328"), QColor("#d7dae0")
-    p.setColor(QPalette.ColorRole.Window, window)
-    p.setColor(QPalette.ColorRole.WindowText, text)
-    p.setColor(QPalette.ColorRole.Base, base)
-    p.setColor(QPalette.ColorRole.AlternateBase, window)
-    p.setColor(QPalette.ColorRole.Text, text)
-    p.setColor(QPalette.ColorRole.Button, QColor("#2b2f36"))
-    p.setColor(QPalette.ColorRole.ButtonText, text)
-    p.setColor(QPalette.ColorRole.Highlight, QColor("#3d6fb4"))
-    p.setColor(QPalette.ColorRole.HighlightedText, QColor("white"))
-    p.setColor(QPalette.ColorRole.ToolTipBase, QColor("#2b2f36"))
-    p.setColor(QPalette.ColorRole.ToolTipText, text)
-    for role in (QPalette.ColorRole.Text, QPalette.ColorRole.ButtonText,
-                 QPalette.ColorRole.WindowText):
-        p.setColor(QPalette.ColorGroup.Disabled, role, QColor("#6b7079"))
-    app.setPalette(p)
-    app.setStyleSheet("""
-        QGroupBox { border:1px solid #33373e; border-radius:6px; margin-top:14px; padding:8px; }
-        QGroupBox::title { subcontrol-origin: margin; left:10px; padding:0 4px; color:#8a8f98; }
-        QFrame#bar { background:#262a30; border-radius:6px; }
-        QTabWidget#instruments::pane { border-top: 1px solid #33373e; }
-    """)
-
+    """The app's look (kept under this name for the scripts that call it)."""
+    from . import theme
+    theme.apply(app)
 
 class SteadyY:
     """Y autoscale for a scrolling strip chart that doesn't twitch.

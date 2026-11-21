@@ -21,7 +21,8 @@ class TransportError(Exception):
     pass
 
 
-SIM_RESOURCES = ["SIM::66321D", "SIM::6632A", "SIM::3456A", "SIM::PPK2", "SIM::SALEAE"]
+SIM_RESOURCES = ["SIM::66321D", "SIM::6632A", "SIM::3456A", "SIM::PPK2", "SIM::SALEAE",
+                 "SIM::SIGROK", "SIM::FGEN", "SIM::GPIO"]
 
 
 def _visa_library() -> str:
@@ -140,6 +141,12 @@ def list_resources(scan: bool = True) -> list[str]:
     from .instruments.saleae import find_logic2
 
     found += find_logic2()          # analyzers a running Logic 2 can see
+    from .instruments.sigrok import find_sigrok
+
+    found += find_sigrok()          # USB logic analyzers sigrok can see, and its demo
+    from .instruments.gpio import find_gpio
+
+    found += find_gpio()            # the Raspberry Pi's 40-pin header, on a Pi
     for dev in sorted(glob.glob("/dev/ttyUSB*") + glob.glob("/dev/ttyACM*")):
         if dev not in ppk_all:
             found.append(f"ASRL{dev}::INSTR")
@@ -192,6 +199,13 @@ def describe(resource: str) -> str:
         return f"PPK2 {m.group(1)[-6:]}" if m else path.removeprefix("/dev/")
     if resource.upper().startswith("SALEAE::"):
         return f"Saleae {resource[8:]}".strip()
+    if resource.upper().startswith("SIGROK::"):
+        return f"sigrok {resource[8:].split(':')[0]}"
+    if resource.upper().startswith("GPIO::"):
+        return "GPIO " + (resource[6:].removeprefix("/dev/") or "header")
+    m = re.match(r"TCPIP\d*::([^:]+)", resource, re.I)
+    if m:
+        return m.group(1)
     return resource.replace("::INSTR", "")
 
 
@@ -211,6 +225,14 @@ def open_transport(resource: str, baud: int = 9600, model: str = "auto"):
         return sim.open_sim(resource)
     if resource.upper().startswith("PPK2::") or model == "PPK2":
         return SerialStream(serial_path(resource))
+    if resource.upper().startswith("GPIO::") or model == "GPIO":
+        from .instruments.gpio import GpioLink, resource_chip
+
+        return GpioLink(resource_chip(resource))
+    if resource.upper().startswith("SIGROK::") or model == "SIGROK":
+        from .instruments.sigrok import SigrokLink
+
+        return SigrokLink()
     if resource.upper().startswith("SALEAE::") or model == "SALEAE":
         from .instruments.saleae import Logic2Link, parse_resource
 

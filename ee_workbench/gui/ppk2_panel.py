@@ -24,9 +24,13 @@ from PyQt6.QtWidgets import (QButtonGroup, QCheckBox, QComboBox, QFileDialog, QF
                              QVBoxLayout, QWidget)
 
 from ..instruments.ppk2 import DT, SAMPLE_RATE, VDD_MAX_MV, VDD_MIN_MV, PpkReading, PpkState
+from ..session import recorder as session
 from ..worker import now
 from . import touch
+from .events_tab import EventsTab
 from .panel_base import PanelBase
+from .profile_box import ProfileBox
+from .supply_panel import _profile_page
 from .widgets import (C_CURR, C_MUTED, C_ON, C_WARN, MONO, Readout, SafeSpin, TraceBuffer,
                       fmt_si)
 
@@ -42,6 +46,9 @@ PLOT_POINTS = 3000                           # envelope pairs drawn per curve
 
 
 # ---------------------------------------------------------------- data helpers
+SESSION_BIN = 100                            # samples per session-file row: 1 ms
+
+
 class Binner:
     """Groups a sample stream into fixed-size bins: (t_mid, mean, min, max, logic OR)."""
 
@@ -103,6 +110,13 @@ class Ring:
         self.count = min(self.n, self.count + k)
         self.t_end = r.t0 + (r.n - 1) * DT
 
+    def between(self, t0: float, t1: float):
+        """(t, current, logic) of the samples from t0 to t1 still in the ring."""
+        k = int(np.ceil((self.t_end - t0) / DT)) + 1
+        t, i, lg = self.latest(max(0, k))
+        keep = (t >= t0) & (t <= t1)
+        return t[keep], i[keep], lg[keep]
+
     def latest(self, k: int):
         """(t, current, logic) of the newest k samples, oldest first."""
         k = min(k, self.count)
@@ -141,6 +155,8 @@ def summarize(t_mid, mean, lo, hi, bin_s):
 
 # ---------------------------------------------------------------- panel
 class Ppk2Panel(PanelBase):
+    KIND = "ppk2"
+
     def __init__(self, resource: str, model: str, baud: int):
         super().__init__(resource, model, baud)
         self.state = PpkState()
@@ -149,6 +165,7 @@ class Ppk2Panel(PanelBase):
         self.coarse = TraceBuffer(5)
         self.b_fine, self.b_coarse = Binner(FINE_BIN), Binner(COARSE_BIN)
         self.b_csv = Binner(CSV_INTERVALS["10 ms"])
+        self.b_sess = Binner(SESSION_BIN)
         self.lost = 0
         self._samples: list[tuple[float, int]] = []          # (monotonic, n) for the rate
         self._armed = False
@@ -167,6 +184,11 @@ class Ppk2Panel(PanelBase):
         self.tabs = QTabWidget()
         self.tabs.addTab(self._build_trend_tab(), "Trend")
         self.tabs.addTab(self._build_live_tab(), "Live")
+        self.tabs.addTab(self._build_events_tab(), "Events")
+        self.profile_box = ProfileBox(self, {"voltage": lambda d, v: d.set_voltage(
+            int(round(v * 1000)))}, {"voltage": "V"},
+            title="Profile  (vary the source-meter voltage over time)")
+        self.tabs.addTab(touch.scroll(_profile_page(self.profile_box)), "Profile")
         if not touch.TOUCH:
             lay.addWidget(self._build_idn())
         g = self._build_readouts()
@@ -268,8 +290,6 @@ class Ppk2Panel(PanelBase):
             b = QPushButton(label)
             b.setCheckable(True)
             b.setToolTip(tip)
-            b.setStyleSheet("QPushButton:checked { background:#3d6fb4; color:white; "
-                            "font-weight:bold; }")
             b.clicked.connect(lambda _, k=key: self._mode_clicked(k))
             self.mode_group.addButton(b)
             self.mode_btns[key] = b
@@ -354,6 +374,10 @@ class Ppk2Panel(PanelBase):
         self.scrolling_trend(self.plot, self.plot)
         v.addWidget(self.plot, 1)
         return w
+
+    def _build_events_tab(self):
+        self.events_tab = EventsTab(self)
+        return self.events_tab
 
     def _build_live_tab(self):
         w = QWidget()
@@ -447,6 +471,7 @@ class Ppk2Panel(PanelBase):
     def output_off(self):
         """Esc / ALL OUTPUTS OFF."""
         self._armed = False
+        self.profile_box.stop()
         if self.connected:
             self.cmd(lambda d: d.set_dut_power(False))
 
@@ -578,6 +603,14 @@ class Ppk2Panel(PanelBase):
         self._samples.append((m, r.n))
         while self._samples and m - self._samples[0][0] > 2:
             self._samples.pop(0)
+        if session.active:
+            rows = self.b_sess.push(r.t0, r.current, r.logic)
+            if rows.size:
+                session.stream(self, self.display_name(), "PPK2", self.resource,
+                               ["current_A", "current_min_A", "current_max_A", "logic"])
+                session.add_many(self, rows.tolist())
+        else:
+            self.b_sess.reset()
         if self.recorder.active:
             rows = self.b_csv.push(r.t0, r.current, r.logic)
             if rows.size:
@@ -734,3 +767,6 @@ class Ppk2Panel(PanelBase):
         for w in (self.span_combo, self.freeze_chk, self.trace_chk, self.log_chk,
                   self.region_chk, self.live_combo, self.logic_chk, self.live_log_chk):
             w.setEnabled(True)
+        self.profile_box.set_enabled(on)
+        for w in self.events_tab.findChildren(QPushButton):
+            w.setEnabled(True)          # works on what was recorded, connected or not

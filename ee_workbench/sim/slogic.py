@@ -8,6 +8,7 @@ Signals (idle channels stay low):
   D1  1 kHz square, 25 % duty
   D2  10 kHz square, 50 % duty
   D3  bursts of 8 clocks at 1 MHz, every 50 µs
+  D7  the shared debug pin (sim.shared), also on the simulated PPK2's D7
   A0  1 kHz sine, 0..3.3 V, plus noise
   A1  D1 seen through a 20 µs RC, 0..3.3 V
   other analog channels: noise around 0 V
@@ -23,7 +24,9 @@ from contextlib import contextmanager
 
 import numpy as np
 
+from ..clock import now as app_now
 from ..instruments.saleae import DIGITAL_RATES, MAGIC, LogicConfig
+from .shared import SHARED_CH, shared_edges
 
 UART_TEXT = b"EE Workbench\r\n"
 UART_BAUD = 115200
@@ -58,8 +61,13 @@ PATTERNS = {   # channel: (period, offsets, levels, level before the first offse
 }
 
 
-def channel_edges(ch: int, a: float, b: float, rate: float):
-    """Initial level at a and the transitions in (a, b], on the sample grid."""
+def channel_edges(ch: int, a: float, b: float, rate: float, app0: float | None = None):
+    """Initial level at a and the transitions in (a, b], on the sample grid.
+    With app0 (the app time of capture time 0), D7 carries the shared debug pin."""
+    if ch == SHARED_CH and app0 is not None:
+        init, e = shared_edges(app0 + a, app0 + b)
+        e = np.round((e - app0) * rate) / rate
+        return init, e[(e > a) & (e <= b)]
     if ch not in PATTERNS:
         return 0, np.empty(0)
     period, off, lv, idle = PATTERNS[ch]
@@ -168,6 +176,7 @@ class SimLogic2:
             a, b, run_s = 0.0, None, None
         if cfg.mode != "trigger":
             self._shift = 0.0
+        self._app0 = app_now()
         self.cap = {"cfg": cfg, "a": a, "b": b, "run_s": run_s, "t0": time.monotonic(),
                     "closed": threading.Event(), "done": False}
 
@@ -202,7 +211,7 @@ class SimLogic2:
         cfg, sh = cap["cfg"], self._shift
         a, b = cap["a"], cap["b"]
         for ch in digital:
-            init, edges = channel_edges(ch, a, b, cfg.digital_rate)
+            init, edges = channel_edges(ch, a, b, cfg.digital_rate, self._app0)
             write_digital(os.path.join(directory, f"digital_{ch}.bin"), init, a - sh, b - sh,
                           edges - sh, cfg.digital_rate, self.version)
         for ch in analog:
@@ -228,7 +237,8 @@ class SimLogic2:
         with open(os.path.join(directory, "digital.csv"), "w", newline="") as fh:
             w = csv.writer(fh)
             w.writerow(["Time [s]"] + [f"Channel {c}" for c in digital])
-            chans = [channel_edges(c, cap["a"], cap["b"], cfg.digital_rate) for c in digital]
+            chans = [channel_edges(c, cap["a"], cap["b"], cfg.digital_rate, self._app0)
+                     for c in digital]
             times = np.unique(np.concatenate([[cap["a"]]] + [e for _, e in chans]))
             cols = []
             for init, e in chans:

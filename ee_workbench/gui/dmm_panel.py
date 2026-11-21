@@ -34,6 +34,8 @@ def _match(value, options):
 
 
 class DmmPanel(PanelBase):
+    KIND = "dmm"
+
     def __init__(self, resource: str, model: str, baud: int):
         super().__init__(resource, model, baud)
         self.cfg = DmmConfig()
@@ -281,8 +283,8 @@ class DmmPanel(PanelBase):
             self.ovld_label.setText("")
             value = r.value
         self.buf.append([r.t, value])
-        if self.recorder.active:
-            self.recorder.row([time.strftime("%Y-%m-%dT%H:%M:%S"), f"{r.t:.3f}",
+        if self.recording:
+            self.record([time.strftime("%Y-%m-%dT%H:%M:%S"), f"{r.t:.3f}",
                                self.name_edit.text(), self.cfg.function, value, r.unit,
                                int(r.overload)])
 

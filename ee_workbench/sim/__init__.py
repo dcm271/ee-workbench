@@ -4,6 +4,18 @@ from __future__ import annotations
 
 def open_sim(resource: str):
     name = resource.upper().split("::", 1)[-1]
+    if "GPIO" in name:
+        from .sgpio import SimGpio
+
+        return SimGpio()
+    if "FGEN" in name or "SDG" in name:
+        from .sfgen import SimFgen
+
+        return SimFgen(siglent="SDG" in name)
+    if "SIGROK" in name:
+        from .ssigrok import SimSigrokCli
+
+        return SimSigrokCli()
     if "SALEAE" in name:
         from .slogic import SimLogic2
 

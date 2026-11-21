@@ -16,7 +16,9 @@ from contextlib import contextmanager
 
 import numpy as np
 
+from ..clock import APP_T0
 from ..instruments.ppk2 import ADC_MULT, SAMPLE_RATE, Cmd
+from .shared import SHARED_CH, shared_level
 
 CAL = {
     "R": [1003.1, 101.2, 10.21, 0.957, 0.0512],
@@ -126,6 +128,7 @@ class SimPPK2:
         if n <= 0:
             return
         self._run_n = due
+        n_due = n
         n = min(n, SAMPLE_RATE * 2)            # like a full OS buffer
         idx = self.n + np.arange(n)
         self.n += n
@@ -138,6 +141,10 @@ class SimPPK2:
         ph = np.mod(t, 0.1)
         logic = ((ph < 2.5e-3).astype(np.uint32)
                  | ((np.floor(t / 0.01).astype(np.int64) % 2).astype(np.uint32) << 1))
+        # D7: the shared debug pin, at the app time these samples stand for
+        # (the device samples evenly from the start of the run)
+        t_app = self._t_last - APP_T0 + (due - n_due + np.arange(n)) / SAMPLE_RATE
+        logic |= shared_level(t_app).astype(np.uint32) << SHARED_CH
         cnt = (idx % 64).astype(np.uint32)
         words = raw | (r << 14) | (cnt << 18) | (logic << 24)
         if self.drop_next:

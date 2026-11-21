@@ -5,6 +5,8 @@ subtitle: What you need, how to cable it, and where the reference manuals are
 
 # Hardware & Resources
 
+Other chapters: [Installation](02-installation.md) · [User's Guide](03-users-guide.md) · [Technical Reference](04-technical-reference.md) · [Raspberry Pi](05-raspberry-pi.md) · [How-to guides](06-howtos.md) · [README](../README.md)
+
 This guide lists the hardware EE Workbench supports, what each instrument can do from software, how to set GPIB addresses and cables, and where to find the original manuals.
 
 ## At a glance
@@ -17,6 +19,9 @@ This guide lists the hardware EE Workbench supports, what each instrument can do
 | **HP 3456A** 6½-digit DMM | Precision voltage / resistance | GPIB only | Supported. Written from the manual and tested on the simulator |
 | **Nordic Power Profiler Kit II** (PPK2) | 100 kS/s current profiler and 0.8–5 V source | USB (ID `1915:c00a`, serial) | Supported. Tested on real hardware (HW 8682) |
 | **Saleae Logic 8 / Logic Pro 8 / Logic Pro 16** | Logic analyzer with analog inputs | USB, through the **Logic 2** software (automation API) | Supported. Written from Saleae's API and file-format docs and tested on the simulator; not yet tried on real hardware |
+| sigrok-supported logic analyzers (fx2lafw clones, DSLogic, …) | Logic analyzer | USB, through `sigrok-cli` | Supported, including on the Raspberry Pi. Tested on the simulator |
+| **Function generators**: Keysight 33500B/33600A/33210A/33220A, Rigol DG800/DG900/DG1000Z/DG4000, Siglent SDG800/1000X/2000X/6000X | Signal source, 1–2 channels | LAN (VXI-11 / socket), USB-TMC or GPIB | Supported (waveform, frequency, amplitude, offset, duty, output; profiles). Written from the programming guides and tested on simulators of both command sets |
+| **Raspberry Pi 40-pin GPIO header** | Relays, buttons, resets, "done" inputs | libgpiod (`/dev/gpiochip*`) | Supported on Pi 3/4/5/Zero 2 W. Tested on the simulator |
 | **Agilent E3610A** bench supply | Manual bench supply | **None** | Cannot be controlled. Monitor its output with the 3456A instead (see below) |
 | **NI GPIB-USB-HS** | USB-to-GPIB controller | USB 2.0 (ID `3923:709b`) | Supported through linux-gpib |
 | Linux PC | Runs the application | — | Ubuntu with kernel 7.0 tested |
@@ -102,7 +107,66 @@ Each unit stores its own calibration, which the app reads at connect. The PPK2 c
 
 Saleae doesn't publish the USB protocol of these analyzers. The only supported way to control them is **Logic 2's automation server**, so EE Workbench talks to a running copy of Logic 2 (on this computer, port 10430), and Logic 2 talks to the analyzer. Logic 2 runs on x86-64 Linux, Windows and macOS, **not on the Raspberry Pi**, so on the Pi only the simulator (`SIM::SALEAE`) is available.
 
-Older Saleae models (the original 8-channel Logic and the original Logic16) are not supported. Logic 2 doesn't drive them; sigrok does.
+Older Saleae models (the original 8-channel Logic and the original Logic16) aren't supported by Logic 2. Use them through sigrok instead (below).
+
+### sigrok-supported logic analyzers
+
+| | |
+|---|---|
+| Examples | 24 MHz 8-channel "Saleae Logic clones" (fx2lafw, a few dollars), original Saleae Logic and Logic16, DreamSourceLab DSLogic, Hantek 4032L, Kingst LA2016, … ([full list](https://sigrok.org/wiki/Supported_hardware)) |
+| Channels | Digital only, as many as the analyzer has |
+| Rates | As the analyzer allows (fx2lafw: 20 kHz to 24 MHz; at 24 MHz with many channels, USB 2 may not keep up) |
+| Triggers | Edges and levels, in software |
+
+These run through `sigrok-cli`, so they also work on the Raspberry Pi. A cheap fx2lafw clone is a good second analyzer just for the PPK2 shared signal.
+
+### Function generators
+
+| | |
+|---|---|
+| Keysight / Agilent | 33210A, 33220A, 33250A, 33500B series (33509B–33522B), 33600A series: **SCPI** (`SOUR1:FREQ 1000`, `OUTP1 ON`) |
+| Rigol | DG800, DG900, DG1000Z, DG4000/5000: the same **SCPI** commands |
+| Siglent | SDG800, SDG1000X, SDG2000X, SDG6000X (and their Owon / Teledyne LeCroy rebadges): **Siglent's** `C1:BSWV …` commands |
+| Others | Any SCPI generator that takes `SOUR{n}:FUNC / FREQ / VOLT / VOLT:OFFS` and `OUTP{n}` should work: choose model **Function generator** by hand. Tektronix AFG models use a different syntax and are not yet supported. |
+| Controlled | Waveform (sine, square, ramp, pulse, noise, DC), frequency, amplitude (Vpp), offset, square duty, output on/off, per channel; plus [profiles](03-users-guide.md#profiles-varying-a-setpoint-over-time) (frequency sweeps, amplitude steps) |
+| Not controlled | Arbitrary waveforms, modulation, sweep/burst modes on the generator itself (use the front panel or the Console tab), the output-load setting |
+
+Connect them by **LAN** (simplest: `TCPIP::192.168.1.50::INSTR`, nothing to install), **USB** (`USB0::0x1AB1::0x0642::DG1ZA…::INSTR`; needs a udev rule, see [Installation](02-installation.md#function-generators-optional)) or **GPIB** if the model has it. Give the generator a fixed IP address on its own front panel (Utility → I/O → LAN), or a DHCP reservation in your router.
+
+> **Amplitude is into the generator's load setting.** Most generators assume a 50 Ω load. Into a high-impedance input (a DUT's pin, a scope at 1 MΩ) the voltage is up to twice what the app shows. Set the generator's output load to **High Z** on its front panel if that's how you use it. Watch the offset too: a 3.3 V logic input driven with 5 Vpp around 0 V gets −2.5 V.
+
+### Raspberry Pi GPIO header
+
+On a Raspberry Pi (3, 4, 5, Zero 2 W; the 40-pin header of every Pi since the B+) the app can drive and read the header's GPIO pins: switch relays, press a DUT's buttons, pulse its reset, wait for a "done" pin. The 26 usable pins are:
+
+| GPIO | Pin | | GPIO | Pin | |
+|---|---|---|---|---|---|
+| 2 | 3 | I²C SDA (1.8 kΩ pull-up on the board) | 14 | 8 | serial console TX |
+| 3 | 5 | I²C SCL (1.8 kΩ pull-up on the board) | 15 | 10 | serial console RX |
+| 4 | 7 | | 18 | 12 | |
+| 17 | 11 | | 23 | 16 | |
+| 27 | 13 | | 24 | 18 | |
+| 22 | 15 | | 25 | 22 | |
+| 10 | 19 | SPI MOSI | 8 | 24 | SPI CE0 |
+| 9 | 21 | SPI MISO | 7 | 26 | SPI CE1 |
+| 11 | 23 | SPI SCLK | 12 | 32 | |
+| 5 | 29 | | 16 | 36 | |
+| 6 | 31 | | 20 | 38 | |
+| 13 | 33 | | 21 | 40 | |
+| 19 | 35 | | | | |
+| 26 | 37 | | | | |
+
+Ground is on pins 6, 9, 14, 20, 25, 30, 34 and 39; 3.3 V on 1 and 17; 5 V on 2 and 4. Pick pins with nothing in the third column first: they're free unless you've enabled I²C, SPI or the serial console (with those on, the app can't claim them and says so).
+
+**Electrical limits.** The pins are **3.3 V logic and not 5 V tolerant**: a 5 V signal on an input damages the Pi. An output drives about 3.3 V at a few mA (keep each under 8–16 mA, and the total small). So:
+
+- **A relay:** use a relay *board* with a driver transistor and flyback diode (the common 1/2/4/8-channel "5 V relay modules" with opto-isolators), powered from the Pi's 5 V or better its own supply, with IN wired to a GPIO. Most switch on when IN is *low*: tick **Active low** for that pin, so "on" means on and **Esc** (all outputs off) releases the relay. Never drive a bare relay coil from a pin.
+- **A DUT's button:** wire an NPN transistor or small N-MOSFET (2N7000, BSS138) across the button (drain to the button's signal side, source to DUT ground, gate to the GPIO through 100 Ω), with the Pi's and DUT's grounds joined. **Pulse** then "presses" it. An optocoupler (PC817) does the same with no shared ground.
+- **A DUT's reset or another logic input at 3.3 V:** connect directly through a 330 Ω–1 kΩ series resistor (it limits the current if both sides drive at once), grounds joined.
+- **Reading a DUT's 3.3 V output** ("done", "error"): directly, through 1 kΩ. From a **5 V or higher** signal: a resistor divider (10 kΩ over 20 kΩ to ground gives 3.3 V from 5 V) or a level shifter.
+- **A switch or e-stop button:** between the GPIO and ground, with **Pull = up** in the GPIO tab. It reads low when pressed (or tick Active low so pressed = 1). The [watchdog](03-users-guide.md#watchdog) can then stop a sequence on it.
+
+Off the Pi, a USB GPIO board isn't supported yet. On a PC, use the Pi as a [remote bench](03-users-guide.md#remote-api-python-and-jupyter) or a sigrok analyzer's inputs to read signals.
 
 ### Agilent E3610A: not remotely controllable
 
@@ -137,6 +201,11 @@ A typical bench needs one GPIB-USB-HS and two or three 1 m or 2 m GPIB cables.
 
 ## Bench wiring tips
 
+- **PPK2 + logic analyzer:** to line their timing up, connect one DUT signal to both: an analyzer channel and a PPK2 logic input (the 10-pin header's D0–D7, with its GND and its VCC tied to the DUT's I/O voltage). Use a signal that changes at irregular times, such as UART TX or a debug pin.
+
+- **Function generator into a DUT:** check the amplitude and offset with the output **off** first, and set the generator's load to High Z for a high-impedance input. A [watchdog](03-users-guide.md#watchdog) rule "*supply voltage < 2.9 → turn off* the generator" stops it driving a DUT pin while the DUT is unpowered (back-powering through its ESD diodes).
+- **GPIO and the DUT:** always join the grounds (unless through an optocoupler or relay), and see [the limits above](#raspberry-pi-gpio-header).
+
 - **Remote sense:** for accurate voltage at the device under test, use the 66321D's sense terminals (+S/−S) and set the output compensation to match your leads. With local sensing, the voltage reading is taken at the rear terminals.
 - **Pulsed loads (e.g. phone transmit bursts):** keep the leads short and twisted, set the current detector to ACDC, and use the pulse statistics.
 - **3456A ohms:** use 4-wire Ω for anything below about 100 Ω. Press **Null** with the leads shorted to remove lead resistance in 2-wire mode.
@@ -151,4 +220,9 @@ A typical bench needs one GPIB-USB-HS and two or three 1 m or 2 m GPIB cables.
 | Agilent 66311B/66321B/D User's Guide | Keysight website, search "66321D user's guide" |
 | Saleae Logic 2 automation API | [saleae.github.io/logic2-automation](https://saleae.github.io/logic2-automation/) |
 | Saleae binary export format | [support.saleae.com](https://support.saleae.com/faq/technical-faq/binary-export-format-logic-2) |
+| Keysight 33500B / 33600A programming (SCPI) | Keysight website, search "33500B series user's guide" (programming chapter) |
+| Rigol DG1000Z programming guide | Rigol website, search "DG1000Z programming guide" |
+| Siglent SDG programming guide (`C1:BSWV`) | Siglent website, search "SDG programming guide" |
+| Raspberry Pi GPIO and header | [raspberrypi.com/documentation](https://www.raspberrypi.com/documentation/computers/raspberry-pi.html#gpio) · [pinout.xyz](https://pinout.xyz/) |
+| libgpiod | [git.kernel.org libgpiod](https://git.kernel.org/pub/scm/libs/libgpiod/libgpiod.git/about/) |
 | linux-gpib project | [linux-gpib.sourceforge.io](https://linux-gpib.sourceforge.io/) |

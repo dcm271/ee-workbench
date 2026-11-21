@@ -18,6 +18,8 @@ from PyQt6.QtWidgets import (QAbstractSpinBox, QDialog, QGridLayout, QHBoxLayout
 
 from .widgets import C_MUTED, C_WARN, MONO
 
+from . import theme as _theme  # noqa: E402
+
 TOUCH = False
 HIT = 52  # minimum touch target, px (~9 mm at 150 dpi)
 
@@ -61,7 +63,7 @@ TOUCH_STYLE = f"""
     QScrollBar:horizontal {{ height: 22px; }}
     QPushButton#key {{ font: bold 22px '{MONO}'; min-height: 52px; min-width: 64px; }}
     QPushButton#keyok {{ font: bold 18px; min-height: 52px; background: #2e7d32; color: white; }}
-"""
+""" + _theme.touch_extra(HIT)
 
 
 def kinetic(area: QScrollArea) -> QScrollArea:

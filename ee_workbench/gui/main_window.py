@@ -8,19 +8,27 @@ import time
 import pyqtgraph as pg
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QKeySequence, QShortcut
-from PyQt6.QtWidgets import (QApplication, QComboBox, QFrame, QHBoxLayout, QLabel,
-                             QMainWindow, QMessageBox, QPushButton, QStatusBar, QTabWidget, QToolButton,
-                             QVBoxLayout, QWidget)
+from PyQt6.QtWidgets import (QApplication, QComboBox, QFileDialog, QFrame, QHBoxLayout,
+                             QInputDialog, QLabel, QMainWindow, QMenu, QMessageBox, QPushButton,
+                             QStatusBar, QTabWidget, QToolButton, QVBoxLayout, QWidget)
 
+from ..clock import now
 from ..config import Config, Entry, Session, load_config, norm_model, startup_entries
 from ..instruments import MODELS, model_for
+from ..session import SUFFIX
+from ..session import recorder as session
 from ..transport import describe, gpib_ready, list_resources, scan_gpib
 from . import touch
 from .connect_dialog import ConnectDialog
 from .dmm_panel import DmmPanel
+from .fgen_panel import FgenPanel
+from .gpio_panel import GpioPanel
+from .hub import hub
 from .logic_panel import LogicPanel
 from .ppk2_panel import Ppk2Panel
+from .session_viewer import open_viewer
 from .supply_panel import SupplyPanel
+from .theme import PLOT_BG, set_role
 from .widgets import C_MUTED, dark_palette
 
 
@@ -39,7 +47,7 @@ class MainWindow(QMainWindow):
         self._save_timer.timeout.connect(self.save_session)
         self.setWindowTitle("EE Workbench")
         self.resize(1440, 900)
-        pg.setConfigOptions(antialias=True, background="#121417", foreground="#c9ccd1")
+        pg.setConfigOptions(antialias=True, background=PLOT_BG, foreground="#c9ccd1")
 
         central = QWidget()
         root = QVBoxLayout(central)
@@ -58,9 +66,9 @@ class MainWindow(QMainWindow):
             "Pick a resource and model above, then Connect.\n\n"
             "Tip: ⌕ scans the GPIB bus. The HP 3456A has no ID query, "
             "so select it by model.\nA Nordic PPK2 appears as PPK2::… when plugged in; a Saleae "
-            "analyzer as SALEAE::… while Logic 2 runs with its automation server on.\n"
-            "Try SIM::66321D, SIM::6632A, SIM::3456A, SIM::PPK2 or SIM::SALEAE to explore "
-            "without hardware.")
+            "analyzer as SALEAE::… while Logic 2 runs with its automation server on; "
+            "sigrok analyzers as SIGROK::….\nTry the SIM::… entries to explore without "
+            "hardware.")
         self.empty.setWordWrap(True)
         self.empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.empty.setStyleSheet(f"color:{C_MUTED}; font-size:14px;")
@@ -75,6 +83,13 @@ class MainWindow(QMainWindow):
         sc.activated.connect(self.all_outputs_off)
         fs = QShortcut(QKeySequence(Qt.Key.Key_F11), self)
         fs.activated.connect(self.toggle_fullscreen)
+        nt = QShortcut(QKeySequence("Ctrl+M"), self)
+        nt.activated.connect(self.add_note)
+        hub.tripped.connect(self._on_trip)
+        self._load_bench_state()
+        self._sess_timer = QTimer(self)
+        self._sess_timer.setInterval(1000)
+        self._sess_timer.timeout.connect(self._session_tick)
 
         if not touch.TOUCH:
             self.refresh_resources()
@@ -86,6 +101,42 @@ class MainWindow(QMainWindow):
             QTimer.singleShot(0, self._restore)
         if self.config.warning:
             self.status.showMessage("Config: " + self.config.warning, 20000)
+        if self.config.api:
+            QTimer.singleShot(0, lambda: self.api_action.setChecked(True))
+        if hub.math.channels:
+            from .math_window import MathWindow
+            self.math_win = MathWindow(self)     # computes (and records) while hidden
+
+    # ---------------------------------------------------------------- bench state
+    def _bench_file(self):
+        from ..config import config_dir
+        return config_dir() / "bench.json"
+
+    def _load_bench_state(self):
+        """Watchdog rules and math channels from last time."""
+        import json
+        try:
+            d = json.loads(self._bench_file().read_text())
+        except (OSError, ValueError):
+            return
+        from ..mathchannels import Channel
+        hub.watchdog.load(d.get("watchdog", []))
+        hub.watchdog.armed = bool(d.get("watchdog_armed", True))
+        hub.math.channels = [Channel.from_dict(c) for c in d.get("math", [])]
+
+    def save_bench_state(self):
+        import json
+        import os
+        d = {"watchdog": hub.watchdog.to_list(), "watchdog_armed": hub.watchdog.armed,
+             "math": [c.to_dict() for c in hub.math.channels]}
+        p = self._bench_file()
+        try:
+            p.parent.mkdir(parents=True, exist_ok=True)
+            tmp = p.with_suffix(".tmp")
+            tmp.write_text(json.dumps(d, indent=1))
+            os.replace(tmp, p)
+        except OSError:
+            pass
 
     # ---------------------------------------------------------------- bars
     def _build_touch_bar(self):
@@ -95,12 +146,14 @@ class MainWindow(QMainWindow):
         lay.setContentsMargins(6, 4, 6, 4)
         add = QPushButton("＋ Add instrument")
         add.clicked.connect(self.add_dialog)
+        set_role(add, "primary")
         lay.addWidget(add)
+        self._build_session_buttons(lay, True)
         lay.addStretch(1)
         off = QPushButton("ALL OUTPUTS OFF")
         off.setMinimumWidth(220)
-        off.setStyleSheet("QPushButton { background:#8e1c1c; color:white; font-weight:bold; "
-                          "font-size:16px; }")
+        set_role(off, "danger-solid")
+        off.setStyleSheet("QPushButton { font-size:16px; }")
         off.clicked.connect(self.all_outputs_off)
         lay.addWidget(off)
         lay.addWidget(self._build_fs_button(56))
@@ -111,6 +164,199 @@ class MainWindow(QMainWindow):
         self.quit_btn.setVisible(False)   # shown in full-screen mode (no title bar)
         lay.addWidget(self.quit_btn)
         return w
+
+    def _build_session_buttons(self, lay, wide: bool):
+        self.sess_btn = QPushButton("⏺ Record")
+        self.sess_btn.setCheckable(True)
+        self.sess_btn.setToolTip("Record every open instrument, logic capture and note into one "
+                                 f"session file ({SUFFIX}), to look through later on one time axis")
+        self.sess_btn.toggled.connect(self.toggle_session)
+        lay.addWidget(self.sess_btn)
+        self.note_btn = QPushButton("✎ Note")
+        self.note_btn.setToolTip("Put a note into the session at this moment (Ctrl+M)")
+        self.note_btn.clicked.connect(self.add_note)
+        self.note_btn.setEnabled(False)
+        lay.addWidget(self.note_btn)
+        tools = QPushButton("Tools ▾")
+        menu = QMenu(tools)
+        menu.addAction("Sequencer…  (steps or a script, with pass / fail limits)",
+                       self.show_sequencer)
+        menu.addAction("Watchdog…  (switch outputs off when a limit is crossed)",
+                       self.show_watchdog)
+        menu.addAction("Math channels…  (efficiency, power, energy, averages)", self.show_math)
+        menu.addSeparator()
+        menu.addAction("Setups…  (save / recall the whole bench by name)", self.show_setups)
+        menu.addAction("Open session…  (view a recording, cursors, report)",
+                       lambda: open_viewer(self))
+        menu.addAction("Session report…  (HTML / PDF of a recording)", self.session_report)
+        menu.addSeparator()
+        self.api_action = menu.addAction("Remote API  (drive the bench from Python / Jupyter)")
+        self.api_action.setCheckable(True)
+        self.api_action.toggled.connect(self.toggle_api)
+        tools.setMenu(menu)
+        self.tools_btn = tools
+        lay.addWidget(tools)
+        if wide:
+            for b in (self.sess_btn, self.note_btn, tools):
+                b.setMinimumHeight(44)
+
+    def toggle_session(self, on: bool):
+        if on and not session.active:
+            path, _ = QFileDialog.getSaveFileName(
+                self, "Record session", time.strftime("session_%Y%m%d_%H%M%S") + SUFFIX,
+                f"EE Workbench session (*{SUFFIX})")
+            if not path:
+                self.sess_btn.setChecked(False)
+                return
+            if not path.endswith(SUFFIX):
+                path += SUFFIX
+            try:
+                session.start(path)
+            except Exception as e:    # noqa: BLE001
+                QMessageBox.warning(self, "Record session", f"Can't write {path}:\n{e}")
+                self.sess_btn.setChecked(False)
+                return
+            self._sess_timer.start()
+            self.sess_btn.setText("■ Stop session")
+            set_role(self.sess_btn, "recording")
+            self.note_btn.setEnabled(True)
+            self.status.showMessage(f"Recording session to {path}", 5000)
+        elif not on and session.active:
+            path = session.path
+            session.stop()
+            self._sess_timer.stop()
+            self.sess_btn.setText("⏺ Record")
+            set_role(self.sess_btn, "")
+            self.note_btn.setEnabled(False)
+            box = QMessageBox(QMessageBox.Icon.Information, "Session saved",
+                              f"Saved {path}", parent=self)
+            show = box.addButton("Open in viewer", QMessageBox.ButtonRole.AcceptRole)
+            box.addButton(QMessageBox.StandardButton.Close)
+            box.exec()
+            if box.clickedButton() is show:
+                open_viewer(self, path)
+
+    def _session_tick(self):
+        try:
+            session.flush()
+        except Exception as e:    # noqa: BLE001 - a full disk etc.
+            self.sess_btn.setChecked(False)
+            QMessageBox.warning(self, "Session", f"Recording stopped: {e}")
+            return
+        mins, secs = divmod(int(now() - session.started), 60)
+        self.sess_btn.setText(f"■ Stop  {mins}:{secs:02d}")
+
+    def _show(self, attr, factory):
+        w = getattr(self, attr, None)
+        if w is None:
+            w = factory()
+            setattr(self, attr, w)
+        w.show()
+        w.raise_()
+        w.activateWindow()
+        return w
+
+    def show_sequencer(self):
+        from .sequencer_window import SequencerWindow
+        return self._show("seq_win", lambda: SequencerWindow(self))
+
+    def sequencer(self):
+        """The sequencer window, created (hidden) if needed."""
+        from .sequencer_window import SequencerWindow
+        if getattr(self, "seq_win", None) is None:
+            self.seq_win = SequencerWindow(self)
+        return self.seq_win
+
+    def show_watchdog(self):
+        from .watchdog_window import WatchdogWindow
+        return self._show("wd_win", lambda: WatchdogWindow(self))
+
+    def show_math(self):
+        from .math_window import MathWindow
+        return self._show("math_win", lambda: MathWindow(self))
+
+    def show_setups(self):
+        from .setups_dialog import SetupsDialog
+        SetupsDialog(self).exec()
+
+    def session_report(self):
+        from .report_dialog import report_for_session
+        report_for_session(self)
+
+    # ---------------------------------------------------------------- watchdog
+    def _on_trip(self, rule, name):
+        what = f"Watchdog: {name} {rule.quantity} = {rule.trip_value:.6g} " \
+               f"({rule.op} {rule.limit:g})"
+        if rule.action == "all outputs off":
+            self.all_outputs_off()
+            what += " → all outputs OFF"
+        elif rule.action == "turn off":
+            hits = [p for p in self.panels() if rule.target and
+                    rule.target.lower() in p.display_name().lower()]
+            for p in hits:
+                p.output_off()
+            what += f" → {', '.join(p.display_name() for p in hits) or 'nothing matched'} OFF"
+        elif rule.action == "stop sequence":
+            seq = getattr(self, "seq_win", None)
+            if seq is not None:
+                seq.stop()
+            what += " → sequence stopped"
+        if session.active:
+            session.note(what)
+        self.status.showMessage(what, 30000)
+        wd = getattr(self, "wd_win", None)
+        if wd is not None:
+            wd.on_trip(rule, name, what)
+        if rule.action != "note only":
+            QMessageBox.warning(self, "Watchdog tripped", what + "\n\nRe-arm it in Tools ▾ → "
+                                "Watchdog once the cause is fixed.")
+
+    # ---------------------------------------------------------------- remote API
+    def toggle_api(self, on: bool):
+        from ..api import ApiServer
+        srv = getattr(self, "api", None)
+        if on and (srv is None or not srv.running):
+            from ..sequencer import Bench
+            from .sequencer_window import Invoker, PanelInst, kind_of
+            from .panel_base import open_panels
+            import threading
+            self._api_invoke = Invoker()
+            self._api_stop = threading.Event()
+
+            def make_bench():
+                stop = self._api_stop
+                insts = [PanelInst(p, self._api_invoke, stop) for p in open_panels()
+                         if kind_of(p)]
+                seq = self.sequencer()
+                b = Bench(insts, now, log=lambda s: None, on_row=seq.sig.row.emit,
+                          on_note=seq.sig.note.emit, stop=stop)
+                return b
+            self.api = ApiServer(make_bench, port=self.config.api_port,
+                                 on_call=lambda s: None)
+            try:
+                self.api.start()
+            except OSError as e:
+                QMessageBox.warning(self, "Remote API", f"Can't listen on port "
+                                    f"{self.config.api_port}: {e}")
+                self.api_action.setChecked(False)
+                return
+            self.status.showMessage(f"Remote API on at http://127.0.0.1:{self.api.port} "
+                                    "(from Python: from ee_workbench.client import connect)",
+                                    10000)
+        elif not on and srv is not None:
+            srv.stop()
+            self.status.showMessage("Remote API off", 4000)
+
+    def add_note(self):
+        if not session.active:
+            self.status.showMessage("Notes go into a session: start ⏺ Record first",
+                                    5000)
+            return
+        t = now()
+        text, ok = QInputDialog.getText(self, "Note", "Note at this moment:")
+        if ok and text.strip():
+            session.note(text.strip(), t)
+            self.status.showMessage(f"Note added: {text.strip()}", 4000)
 
     def add_dialog(self):
         dlg = ConnectDialog(self, {p.resource for p in self.panels()})
@@ -161,7 +407,7 @@ class MainWindow(QMainWindow):
         lay.addWidget(QLabel("Resource"))
         self.res_combo = QComboBox()
         self.res_combo.setEditable(True)
-        self.res_combo.setMinimumWidth(240)
+        self.res_combo.setMinimumWidth(220)
         self.res_combo.currentTextChanged.connect(self._resource_changed)
         lay.addWidget(self.res_combo)
         rb = QToolButton()
@@ -191,10 +437,13 @@ class MainWindow(QMainWindow):
         self.connect_btn.clicked.connect(
             lambda: self.open_instrument(self.res_combo.currentText().strip(),
                                          self.model_combo.currentData()))
+        set_role(self.connect_btn, "primary")
         lay.addWidget(self.connect_btn)
         lay.addStretch(1)
+        self._build_session_buttons(lay, False)
+        lay.addSpacing(12)
         off = QPushButton("All outputs OFF (Esc)")
-        off.setStyleSheet("QPushButton { color:#ef9a9a; font-weight:bold; }")
+        set_role(off, "danger")
         off.clicked.connect(self.all_outputs_off)
         lay.addWidget(off)
         lay.addWidget(self._build_fs_button())
@@ -299,7 +548,8 @@ class MainWindow(QMainWindow):
                 self.status.showMessage(f"{resource} is already open", 4000)
                 return
         model = model_for(resource, model)
-        cls = {"3456A": DmmPanel, "PPK2": Ppk2Panel, "SALEAE": LogicPanel}.get(model, SupplyPanel)
+        cls = {"3456A": DmmPanel, "PPK2": Ppk2Panel, "SALEAE": LogicPanel,
+               "SIGROK": LogicPanel, "FGEN": FgenPanel, "GPIO": GpioPanel}.get(model, SupplyPanel)
         baud = int(self.baud_combo.currentText()) if hasattr(self, "baud_combo") else 9600
         panel = cls(resource, model, baud)
         if settings:
@@ -353,16 +603,32 @@ class MainWindow(QMainWindow):
         self.empty.setVisible(not has)
 
     def all_outputs_off(self):
+        seq = getattr(self, "seq_win", None)
+        if seq is not None and seq.running():
+            seq.stop()
+        stop = getattr(self, "_api_stop", None)
+        if stop is not None:            # end any remote-API call in progress
+            stop.set()
+            import threading
+            self._api_stop = threading.Event()
         n = 0
         for p in self.panels():
-            if isinstance(p, (SupplyPanel, Ppk2Panel)) and p.connected:
+            if p.KIND in ("supply", "ppk2", "fgen", "gpio") and p.connected:
                 p.output_off()
                 n += 1
-        self.status.showMessage(f"Output OFF sent to {n} supply(s)", 5000)
+        self.status.showMessage(f"Output OFF sent to {n} instrument(s)", 5000)
 
     def closeEvent(self, e):
+        seq = getattr(self, "seq_win", None)
+        if seq is not None:
+            seq.stop()
+            seq.close()
+        session.stop()
+        if getattr(self, "api", None) is not None:
+            self.api.stop()
         self._save_timer.stop()
         self.save_session()
+        self.save_bench_state()
         for p in self.panels():
             p.shutdown()
         super().closeEvent(e)
@@ -372,16 +638,25 @@ def parse_target(s: str) -> tuple[str, str]:
     """'GPIB0::22::INSTR' or '3456A@GPIB0::22::INSTR' -> (model, resource)."""
     if s.upper().startswith("SALEAE::"):
         return "SALEAE", s                 # its own '@host:port' is not MODEL@
+    if s.upper().startswith("SIGROK::"):
+        return "SIGROK", s
+    if s.upper().startswith("GPIO::"):
+        return "GPIO", s
     if "@" in s:
         model, res = s.split("@", 1)
         model = {"66321D": "663xx", "66321B": "663xx", "66311B": "663xx",
-                 "6633A": "6632A", "6634A": "6632A", "ppk2": "PPK2"}.get(model, model)
+                 "6633A": "6632A", "6634A": "6632A", "ppk2": "PPK2", "fgen": "FGEN",
+                 "gpio": "GPIO"}.get(model, model)
         if model == "PPK2" and not res.upper().startswith(("PPK2::", "SIM")):
             res = "PPK2::" + res           # PPK2@/dev/ttyACM0
         if model.upper() == "SALEAE":
             model = "SALEAE"
             if not res.upper().startswith(("SALEAE::", "SIM")):
                 res = "SALEAE::" + res     # SALEAE@F4241 (SALEAE@ = the first one)
+        if model.upper() == "SIGROK":
+            model = "SIGROK"
+            if not res.upper().startswith(("SIGROK::", "SIM")):
+                res = "SIGROK::" + (res or "fx2lafw")   # SIGROK@fx2lafw
         return model, res
     return "auto", s
 
@@ -392,7 +667,10 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description="EE Workbench instrument control")
     ap.add_argument("targets", nargs="*",
                     help="resources to open, optionally MODEL@RESOURCE, e.g. "
-                         "GPIB0::5::INSTR 3456A@GPIB0::22::INSTR PPK2@/dev/ttyACM0 SALEAE@ SIM::6632A")
+                         "GPIB0::5::INSTR 3456A@GPIB0::22::INSTR PPK2@/dev/ttyACM0 SALEAE@ "
+                         "FGEN@TCPIP::192.168.1.50::INSTR GPIO:: SIM::6632A")
+    ap.add_argument("--api", action="store_true",
+                    help="start the remote API (Python / Jupyter control) at start-up")
     mode = ap.add_mutually_exclusive_group()
     mode.add_argument("--touch", dest="touch", action="store_true", default=None,
                       help="force the touch-screen layout")
@@ -416,6 +694,8 @@ def main(argv=None):
     cfg = load_config(Path(args.config).expanduser() if args.config else None)
     if cfg.warning:
         print("ee-workbench:", cfg.warning, file=sys.stderr)
+    if args.api:
+        cfg.api = True
     win = MainWindow([parse_target(t) for t in args.targets], cfg, Session(), args.open)
     if args.hide_cursor:
         app.setOverrideCursor(Qt.CursorShape.BlankCursor)

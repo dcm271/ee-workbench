@@ -1,12 +1,13 @@
-"""Tab for a Saleae logic analyzer (Logic 8 / Pro 8 / Pro 16) driven through
-Logic 2's automation server.
+"""Tab for a logic analyzer: a Saleae (Logic 8 / Pro 8 / Pro 16) through Logic
+2's automation server, or anything sigrok supports through sigrok-cli.
 
-Unlike the other instruments nothing is polled: each Capture runs one Logic 2
-capture (timed, triggered or manual), brings the samples back and shows them
-here: digital lanes, analog traces, measurements over the view or a region,
-and the decoded protocol data from Logic 2's analyzers. The capture stays open
-in Logic 2, so decoders can be changed and re-run, or the capture saved as a
-.sal file, without capturing again.
+Unlike the other instruments nothing is polled: each Capture runs one capture
+(timed, triggered or manual), brings the samples back and shows them here:
+digital lanes, analog traces, measurements over the view or a region, and the
+decoded protocol data. The capture stays with the driver, so decoders can be
+changed and re-run, or the capture saved (.sal / .sr), without capturing again.
+What differs between analyzers (triggers, decoders, file type) comes from
+their LogicCaps.
 """
 from __future__ import annotations
 
@@ -26,21 +27,21 @@ from PyQt6.QtWidgets import (QAbstractItemView, QButtonGroup, QCheckBox, QComboB
                              QPushButton, QSpinBox, QSplitter, QTableWidget, QTableWidgetItem,
                              QTabWidget, QVBoxLayout, QWidget)
 
-from ..instruments.saleae import (DECODERS, MODES, LogicCapture, LogicCaps,
-                                  LogicConfig, analog_stats, digital_envelope, digital_stats,
-                                  fmt_rate)
+from ..align import align, edges_from_samples
+from ..instruments.logic import (MODES, TRIGGER_LABELS, LogicCapture, LogicCaps, LogicConfig,
+                                 analog_stats, digital_envelope, digital_stats, fmt_rate)
+from ..session import recorder as session
 from ..worker import now
 from . import touch
-from .panel_base import PanelBase
-from .widgets import C_MUTED, C_WARN, MONO, SafeSpin, fmt_si
+from .panel_base import PanelBase, open_panels
+from .theme import set_role
+from .widgets import C_CURR, C_MUTED, C_WARN, MONO, SafeSpin, fmt_si
 
 COLORS = ["#ffb347", "#7ee787", "#c39bff", "#ef9a9a", "#4fc3f7", "#fff176", "#80cbc4",
           "#bcaaa4", "#f48fb1", "#aed581", "#90caf9", "#ffcc80", "#b39ddb", "#80deea",
           "#e6ee9c", "#ffab91"]
 LANE = 1.5                      # vertical pitch of the digital lanes
 MAX_TABLE_ROWS = 50_000
-TRIGGER_LABELS = {"rising": "Rising edge", "falling": "Falling edge",
-                  "pulse_high": "High pulse", "pulse_low": "Low pulse"}
 MODE_LABELS = {"timed": "Timed", "trigger": "Trigger", "manual": "Manual"}
 
 
@@ -59,18 +60,20 @@ def _span(lo, hi, unit="s"):
 
 # ---------------------------------------------------------------- decoder dialog
 class DecoderDialog(QDialog):
-    """Pick a Logic 2 analyzer and its channels / settings."""
+    """Pick one of the analyzer's protocol decoders and its channels / settings."""
 
-    def __init__(self, parent, n_digital: int, existing: dict | None = None):
+    def __init__(self, parent, caps: LogicCaps, existing: dict | None = None):
         super().__init__(parent)
         self.setWindowTitle("Protocol decoder")
-        self.n = n_digital
+        self.caps = caps
+        self.specs = caps.decoders
+        self.sigrok = caps.model == "sigrok"
         v = QVBoxLayout(self)
         form = QFormLayout()
         self.kind = QComboBox()
-        self.kind.addItems(list(DECODERS) + ["Other…"])
+        self.kind.addItems(list(self.specs) + ["Other…"])
         self.kind.currentTextChanged.connect(self._rebuild)
-        form.addRow("Analyzer", self.kind)
+        form.addRow("Decoder", self.kind)
         self.label = QLineEdit()
         self.label.setPlaceholderText("Name shown in the table (optional)")
         form.addRow("Label", self.label)
@@ -79,9 +82,12 @@ class DecoderDialog(QDialog):
         self.box_form = QFormLayout(self.box)
         self.box_form.setContentsMargins(0, 0, 0, 0)
         v.addWidget(self.box)
-        hint = QLabel("Logic 2 fills in any setting not listed here with its default. "
-                      "For “Other…”, the analyzer name and setting names must match Logic 2's "
-                      "Add Analyzer panel exactly.")
+        hint = QLabel(
+            "Settings not listed here keep the decoder's defaults. For “Other…”, give a sigrok "
+            "decoder ID (see  sigrok-cli -L) and its options, channels as names, e.g. "
+            '{"data": "D2", "speed": "standard"}.' if self.sigrok else
+            "Settings not listed here keep Logic 2's defaults. For “Other…”, the analyzer name "
+            "and setting names must match Logic 2's Add Analyzer panel exactly.")
         hint.setWordWrap(True)
         hint.setStyleSheet(f"color:{C_MUTED}; font-size:11px;")
         v.addWidget(hint)
@@ -94,12 +100,12 @@ class DecoderDialog(QDialog):
         self.result_dict: dict | None = None
         if existing:
             name = existing["name"]
-            self.kind.setCurrentText(name if name in DECODERS else "Other…")
+            self.kind.setCurrentText(name if name in self.specs else "Other…")
             self._rebuild(self.kind.currentText(), existing)
             self.label.setText(existing.get("label", ""))
         else:
             self._rebuild(self.kind.currentText())
-        self.resize(420, 0)
+        self.resize(440, 0)
 
     def _rebuild(self, kind: str, existing: dict | None = None):
         while self.box_form.rowCount():
@@ -108,26 +114,31 @@ class DecoderDialog(QDialog):
         current = (existing or {}).get("settings", {})
         if kind == "Other…":
             self.other_name = QLineEdit((existing or {}).get("name", ""))
-            self.other_name.setPlaceholderText("e.g. CAN, 1-Wire, Manchester")
-            self.box_form.addRow("Logic 2 name", self.other_name)
-            self.other_settings = QPlainTextEdit(json.dumps(current, indent=1) if current else
-                                                 '{"Input Channel": 0}')
+            self.other_name.setPlaceholderText("e.g. can, onewire_link, dht11" if self.sigrok
+                                               else "e.g. CAN, 1-Wire, Manchester")
+            self.box_form.addRow("Decoder ID" if self.sigrok else "Logic 2 name", self.other_name)
+            example = '{"data": "D0"}' if self.sigrok else '{"Input Channel": 0}'
+            self.other_settings = QPlainTextEdit(json.dumps(current, indent=1) if current
+                                                 else example)
             self.other_settings.setFont(QFont(MONO, 10))
             self.other_settings.setMinimumHeight(110)
             self.box_form.addRow("Settings (JSON)", self.other_settings)
             return
-        for key, default in DECODERS[kind].items():
+        n = max(1, self.caps.digital)
+        for key, default, kind_ in self.specs[kind]:
             value = current.get(key, default)
-            if "Rate" in key:
+            if kind_ == "int":
                 w = QSpinBox()
                 w.setRange(1, 100_000_000)
                 w.setValue(int(value))
-                w.setSuffix(" bit/s")
-            else:
+                touch.attach_keypad(w, key)
+            elif kind_ == "ch":
                 w = QComboBox()
-                for ch in range(self.n):
-                    w.addItem(f"D{ch}", ch)
-                w.setCurrentIndex(min(int(value), self.n - 1))
+                for ch in range(n):
+                    w.addItem(self.caps.channel_name(ch), ch)
+                w.setCurrentIndex(min(int(value), n - 1))
+            else:
+                w = QLineEdit(str(value))
             self.widgets[key] = w
             self.box_form.addRow(key, w)
 
@@ -143,23 +154,29 @@ class DecoderDialog(QDialog):
                 QMessageBox.warning(self, "Settings", f"Not valid JSON settings: {e}")
                 return
             if not name:
-                QMessageBox.warning(self, "Analyzer", "Give the Logic 2 analyzer name.")
+                QMessageBox.warning(self, "Decoder", "Give the decoder's name.")
                 return
         else:
             name = kind
-            settings = {k: (w.value() if isinstance(w, QSpinBox) else w.currentData())
-                        for k, w in self.widgets.items()}
+            settings = {}
+            for k, w in self.widgets.items():
+                if isinstance(w, QSpinBox):
+                    settings[k] = w.value()
+                elif isinstance(w, QComboBox):
+                    settings[k] = w.currentData()
+                else:
+                    settings[k] = w.text()
         self.result_dict = {"name": name, "label": self.label.text().strip(),
                             "settings": settings}
         self.accept()
 
 
-def describe_decoder(d: dict) -> str:
-    s = d.get("settings", {})
+def describe_decoder(d: dict, caps: LogicCaps | None = None) -> str:
+    spec = {k: kind for k, _, kind in (caps.decoders.get(d["name"], []) if caps else [])}
     parts = []
-    for k, v in s.items():
-        if isinstance(v, int) and "Rate" not in k and not isinstance(v, bool):
-            parts.append(f"{k} D{v}")
+    for k, v in d.get("settings", {}).items():
+        if spec.get(k) == "ch":
+            parts.append(f"{k} {caps.channel_name(int(v))}")
         else:
             parts.append(f"{k} {v}")
     label = f"{d['label']}: " if d.get("label") else ""
@@ -168,6 +185,8 @@ def describe_decoder(d: dict) -> str:
 
 # ---------------------------------------------------------------- panel
 class LogicPanel(PanelBase):
+    KIND = "logic"
+
     def __init__(self, resource: str, model: str, baud: int):
         super().__init__(resource, model, baud)
         self.caps = LogicCaps()
@@ -200,18 +219,20 @@ class LogicPanel(PanelBase):
             lay.addWidget(self._build_idn())
         lay.addWidget(self._build_name_edit())
         lay.addWidget(self._build_capture_group())
+        # decoders near the top: they are what most captures are for
+        lay.addWidget(self._build_decoder_group())
         lay.addWidget(self._build_channel_group())
         if touch.TOUCH:
             setup = QWidget()
             sv = QVBoxLayout(setup)
             sv.addWidget(self._build_idn())
             sv.addWidget(self._build_sampling_group())
-            sv.addWidget(self._build_decoder_group())
+            sv.addWidget(self._build_align_group())
             sv.addStretch(1)
             self.tabs.addTab(touch.scroll(setup), "Setup")
         else:
             lay.addWidget(self._build_sampling_group())
-            lay.addWidget(self._build_decoder_group())
+            lay.addWidget(self._build_align_group())
         lay.addStretch(1)
         sa = touch.scroll(inner)
         sa.setMinimumWidth(420 if touch.TOUCH else 400)
@@ -265,8 +286,6 @@ class LogicPanel(PanelBase):
             b = QPushButton(MODE_LABELS[key])
             b.setCheckable(True)
             b.setToolTip(tip)
-            b.setStyleSheet("QPushButton:checked { background:#3d6fb4; color:white; "
-                            "font-weight:bold; }")
             b.clicked.connect(lambda _, k=key: self._set_mode(k))
             self.mode_group.addButton(b)
             self.mode_btns[key] = b
@@ -355,17 +374,119 @@ class LogicPanel(PanelBase):
         for prefix, n, chks, grid in (("D", nd, self.dig_chks, self.dig_grid),
                                       ("A", na, self.an_chks, self.an_grid)):
             for k in range(n):
-                c = QCheckBox(f"{prefix}{k}")
+                c = QCheckBox(self.caps.channel_name(k) if prefix == "D" else f"A{k}")
                 c.setStyleSheet(f"QCheckBox {{ color:{COLORS[k % len(COLORS)]}; }}")
                 c.toggled.connect(self._channels_changed)
                 grid.addWidget(c, k // per_row, k % per_row)
                 chks.append(c)
         self.an_title.setVisible(na > 0)
+        if hasattr(self, "align_ch"):
+            keep = self.align_ch.currentData()
+            self.align_ch.blockSignals(True)
+            self.align_ch.clear()
+            for k in range(nd):
+                self.align_ch.addItem(self.caps.channel_name(k), k)
+            self.align_ch.setCurrentIndex(max(0, self.align_ch.findData(keep)))
+            self.align_ch.blockSignals(False)
         self.trig_ch.blockSignals(True)
         self.trig_ch.clear()
         for k in range(nd):
-            self.trig_ch.addItem(f"D{k}", k)
+            self.trig_ch.addItem(self.caps.channel_name(k), k)
         self.trig_ch.blockSignals(False)
+
+    def _build_align_group(self):
+        g = QGroupBox("Align with PPK2")
+        form = QFormLayout(g)
+        form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
+        row = QHBoxLayout()
+        self.align_ppk = QComboBox()
+        self.align_ppk.setToolTip("Wire one DUT signal to a channel here and to a PPK2 logic "
+                                  "input. Each capture is then lined up with the PPK2 to "
+                                  "within a few µs, and its current drawn under the lanes.")
+        self.align_ppk.currentIndexChanged.connect(lambda *_: self.settings_changed.emit())
+        row.addWidget(self.align_ppk, 1)
+        ref = QPushButton("⟳")
+        ref.setToolTip("Look for open PPK2 tabs again")
+        ref.setFixedWidth(52 if touch.TOUCH else 34)
+        ref.setStyleSheet("padding:0;")
+        ref.clicked.connect(self._fill_ppk_choices)
+        row.addWidget(ref)
+        form.addRow("PPK2", row)
+        pair = QHBoxLayout()
+        self.align_ch = QComboBox()
+        self.align_bit = QComboBox()
+        for k in range(8):
+            self.align_bit.addItem(f"PPK2 D{k}", k)
+        for c in (self.align_ch, self.align_bit):
+            c.currentIndexChanged.connect(lambda *_: self.settings_changed.emit())
+        pair.addWidget(self.align_ch, 1)
+        pair.addWidget(QLabel("↔"))
+        pair.addWidget(self.align_bit, 1)
+        form.addRow("Shared signal", pair)
+        self.align_btn = QPushButton("Align now")
+        self.align_btn.setToolTip("Line up the last capture again (the PPK2 keeps 10 s)")
+        self.align_btn.clicked.connect(lambda: self.capture and self._align(self.capture, True))
+        form.addRow(self.align_btn)
+        self.align_note = QLabel("Use an irregular signal (a UART line, a debug pin): a steady "
+                                 "square wave fits every period equally well.")
+        self.align_note.setWordWrap(True)
+        self.align_note.setStyleSheet(f"color:{C_MUTED}; font-size:11px;")
+        form.addRow(self.align_note)
+        self._fill_ppk_choices()
+        return g
+
+    def _fill_ppk_choices(self):
+        from .ppk2_panel import Ppk2Panel
+        keep = self.align_ppk.currentData() or (self._pending or {}).get("align_ppk")
+        self.align_ppk.blockSignals(True)
+        self.align_ppk.clear()
+        self.align_ppk.addItem("Off", None)
+        for p in open_panels():
+            if isinstance(p, Ppk2Panel):
+                self.align_ppk.addItem(p.display_name(), p.resource)
+        i = self.align_ppk.findData(keep) if keep else 0
+        self.align_ppk.setCurrentIndex(max(0, i))
+        self.align_ppk.blockSignals(False)
+
+    def _ppk_panel(self):
+        from .ppk2_panel import Ppk2Panel
+        res = self.align_ppk.currentData()
+        for p in open_panels():
+            if isinstance(p, Ppk2Panel) and p.resource == res and p.connected:
+                return p
+        return None
+
+    def _align(self, res: LogicCapture, report: bool = False):
+        """Line the capture up with the chosen PPK2 and keep its current."""
+        ppk = self._ppk_panel()
+        if ppk is None:
+            if report:
+                self.on_error("Choose a connected PPK2 to align with")
+            return
+        ch, bit = self.align_ch.currentData(), self.align_bit.currentData()
+        tr = res.digital.get(ch)
+        if tr is None:
+            res.offset_note = f"{self.caps.channel_name(ch)} wasn't in this capture"
+        else:
+            a, b = res.span
+            start = res.t_armed if res.t_armed is not None else res.t_app - res.elapsed
+            t_lo, t_hi = start - 2.0, res.t_app + 0.5
+            pt, pi, plg = ppk.ring.between(t_lo, t_hi)
+            pe_t, pe_d = edges_from_samples(pt, (plg >> bit) & 1)
+            lt = tr.t[1:]
+            ld = np.where(tr.level[1:] == 1, 1, -1)
+            r = align(lt, ld, pe_t, pe_d, t_lo - a, t_hi - a)
+            res.offset, res.offset_note = r.offset, r.note
+            if r.offset is not None:
+                keep = (pt >= a + r.offset) & (pt <= b + r.offset)
+                res.extra["ppk2"] = {"name": ppk.display_name(), "t": pt[keep] - r.offset,
+                                     "i": pi[keep].astype(np.float64)}
+        self.align_note.setText(("✓ " if res.offset is not None else "⚠ ") + res.offset_note)
+        self.align_note.setStyleSheet(
+            f"color:{'#7ee787' if res.offset is not None else C_WARN}; font-size:11px;")
+        self.console(f"PPK2 alignment: {res.offset_note}")
+        if report and res is self.capture:
+            self._show_capture(fit=False)
 
     def _build_sampling_group(self):
         g = QGroupBox("Sampling")
@@ -388,7 +509,7 @@ class LogicPanel(PanelBase):
         return g
 
     def _build_decoder_group(self):
-        g = QGroupBox("Protocol decoders (Logic 2 analyzers)")
+        g = QGroupBox("Protocol decoders")
         v = QVBoxLayout(g)
         self.dec_list = QListWidget()
         self.dec_list.setMaximumHeight(140 if touch.TOUCH else 100)
@@ -430,8 +551,9 @@ class LogicPanel(PanelBase):
         self.region_chk.toggled.connect(self._region_toggled)
         bar.addWidget(self.region_chk)
         bar.addStretch(1)
-        self.save_btn = QPushButton("Save .sal…")
-        self.save_btn.setToolTip("Save the capture in Logic 2's own format, to open in Logic 2")
+        self.save_btn = QPushButton("Save capture…")
+        self.save_btn.setToolTip("Save the capture in the analyzer software's own format "
+                                 "(.sal for Logic 2, .sr for sigrok / PulseView)")
         self.save_btn.clicked.connect(self.save_sal)
         bar.addWidget(self.save_btn)
         self.csv_btn = QPushButton("Export CSV…")
@@ -457,8 +579,18 @@ class LogicPanel(PanelBase):
         self.p_an.getAxis("left").setWidth(44)
         self.p_an.setXLink(self.p_dig)
         self.an_legend = self.p_an.addLegend(offset=(-10, 10), brush=pg.mkBrush(20, 22, 26, 200))
+        self.p_cur = self.glw.addPlot(row=2, col=0)
+        self.p_cur.showGrid(x=True, y=True, alpha=0.15)
+        self.p_cur.setLabel("left", "PPK2", units="A", color=C_CURR)
+        self.p_cur.getAxis("left").setWidth(44)
+        self.p_cur.setXLink(self.p_dig)
+        self.c_cur = self.p_cur.plot(pen=pg.mkPen(C_CURR, width=1))
+        self.c_cur.setClipToView(True)
+        self.c_cur.setDownsampling(auto=True, method="peak")
+        self.p_cur.setVisible(False)
         self.glw.ci.layout.setRowStretchFactor(0, 3)
         self.glw.ci.layout.setRowStretchFactor(1, 2)
+        self.glw.ci.layout.setRowStretchFactor(2, 2)
         self.p_dig.sigXRangeChanged.connect(self._view_changed)
         self.region = pg.LinearRegionItem(brush=pg.mkBrush(255, 255, 255, 28))
         self.region.setZValue(10)
@@ -466,7 +598,7 @@ class LogicPanel(PanelBase):
         self.trig_lines = []
         self.dig_curves: dict[int, pg.PlotDataItem] = {}
         self.an_curves: dict[int, pg.PlotDataItem] = {}
-        touch.plots(self.p_dig, self.p_an)
+        touch.plots(self.p_dig, self.p_an, self.p_cur)
         v.addWidget(self.glw, 1)
         self.meas_title = QLabel("Measurements: view")
         self.meas_title.setStyleSheet(f"color:{C_MUTED};")
@@ -496,6 +628,11 @@ class LogicPanel(PanelBase):
         self.filter_edit = QLineEdit()
         self.filter_edit.setPlaceholderText("Filter rows, e.g. 0x41 or error")
         self.filter_edit.textChanged.connect(self._fill_table)
+        add = QPushButton("＋ Add decoder…")
+        add.setToolTip("Add a protocol decoder (UART, I2C, SPI, …); the list is in the "
+                       "Protocol decoders box on the left")
+        add.clicked.connect(self._add_decoder)
+        bar.addWidget(add)
         bar.addWidget(self.filter_edit, 1)
         save = QPushButton("Save…")
         save.setToolTip("Write the decoded table to CSV")
@@ -540,6 +677,10 @@ class LogicPanel(PanelBase):
     def _name_changed(self, text):
         self.title_changed.emit(self._title())
         self.settings_changed.emit()
+
+    def display_name(self) -> str:
+        text = self.name_edit.text().strip()
+        return f"Logic · {text}" if text else f"Logic {self.caps.model or ''} ({self.resource})"
 
     def _title(self):
         name = self.name_edit.text()
@@ -587,6 +728,8 @@ class LogicPanel(PanelBase):
 
     def session_settings(self) -> dict:
         return {"name": self.name_edit.text(), "repeat": self.repeat_chk.isChecked(),
+                "align_ppk": self.align_ppk.currentData(),
+                "align_ch": self.align_ch.currentData(), "align_bit": self.align_bit.currentData(),
                 "capture": asdict(self.collect()) if self.connected else
                 (self._pending or {}).get("capture", asdict(self.cfg))}
 
@@ -594,6 +737,8 @@ class LogicPanel(PanelBase):
         self.name_edit.setText(str(s.get("name", "")))
         self.repeat_chk.setChecked(bool(s.get("repeat", False)))
         self._pending = dict(s)
+        self.align_bit.setCurrentIndex(max(0, self.align_bit.findData(s.get("align_bit", 0))))
+        self._fill_ppk_choices()
 
     @staticmethod
     def _config_from(d: dict) -> LogicConfig | None:
@@ -609,10 +754,10 @@ class LogicPanel(PanelBase):
     def _fill_decoders(self):
         self.dec_list.clear()
         for d in self.cfg.decoders:
-            self.dec_list.addItem(QListWidgetItem(describe_decoder(d)))
+            self.dec_list.addItem(QListWidgetItem(describe_decoder(d, self.caps)))
 
     def _add_decoder(self):
-        dlg = DecoderDialog(self, max(1, len(self.dig_chks)))
+        dlg = DecoderDialog(self, self.caps)
         if dlg.exec() and dlg.result_dict:
             self.cfg.decoders.append(dlg.result_dict)
             self._decoders_changed()
@@ -621,7 +766,7 @@ class LogicPanel(PanelBase):
         i = self.dec_list.currentRow()
         if i < 0:
             return
-        dlg = DecoderDialog(self, max(1, len(self.dig_chks)), self.cfg.decoders[i])
+        dlg = DecoderDialog(self, self.caps, self.cfg.decoders[i])
         if dlg.exec() and dlg.result_dict:
             self.cfg.decoders[i] = dlg.result_dict
             self._decoders_changed()
@@ -687,8 +832,8 @@ class LogicPanel(PanelBase):
         if self.capture is None:
             return
         path, _ = QFileDialog.getSaveFileName(
-            self, "Save capture", time.strftime("logic_%Y%m%d_%H%M%S.sal"),
-            "Logic 2 capture (*.sal)")
+            self, "Save capture", time.strftime("logic_%Y%m%d_%H%M%S") + self.caps.capture_suffix,
+            self.caps.capture_filter)
         if path:
             self.worker.submit_result("save", lambda d, p: (d.save(p), p)[1], path)
 
@@ -718,6 +863,15 @@ class LogicPanel(PanelBase):
         self.idn_label.setText(f"{caps.idn}\n{caps.note}")
         self.idn_label.setStyleSheet("color:#c9ccd1;")
         self._make_channel_boxes(caps.digital, caps.analog)
+        want = (self._pending or {}).get("align_ch")
+        if want is not None:
+            self.align_ch.setCurrentIndex(max(0, self.align_ch.findData(want)))
+        self._fill_ppk_choices()
+        self.trig_type.blockSignals(True)
+        self.trig_type.clear()
+        for k in caps.trigger_types:
+            self.trig_type.addItem(TRIGGER_LABELS.get(k, k), k)
+        self.trig_type.blockSignals(False)
         for combo, rates in ((self.d_rate, caps.digital_rates), (self.a_rate, caps.analog_rates)):
             combo.blockSignals(True)
             combo.clear()
@@ -747,6 +901,8 @@ class LogicPanel(PanelBase):
                         restored.analog_rate = st.analog_rate
                     if restored.threshold not in self.caps.thresholds:
                         restored.threshold = st.threshold
+                    if restored.trig_type not in self.caps.trigger_types:
+                        restored.trig_type = st.trig_type
                     st = restored
         self.show_config(st)
 
@@ -767,6 +923,10 @@ class LogicPanel(PanelBase):
     def _on_capture(self, res: LogicCapture):
         res.t_app = now()
         self.capture = res
+        if self.align_ppk.currentData():
+            self._align(res)
+        if session.active:
+            session.capture(res, self.display_name())
         for e in res.errors:
             self.on_error(e)
         self._show_capture(fit=True)
@@ -817,15 +977,13 @@ class LogicPanel(PanelBase):
         self.run_btn.setEnabled(self.connected and self._busy != "transferring")
         if not busy:
             self.run_btn.setText("▶ Capture")
-            self.run_btn.setStyleSheet("QPushButton { font-weight:bold; font-size:15px; }")
+            set_role(self.run_btn, "primary")
         elif self._busy_mode == "manual":
             self.run_btn.setText("■ Stop")
-            self.run_btn.setStyleSheet(f"QPushButton {{ color:{C_WARN}; font-weight:bold; "
-                                       "font-size:15px; }")
+            set_role(self.run_btn, "recording")
         else:
             self.run_btn.setText("✕ Abort")
-            self.run_btn.setStyleSheet(f"QPushButton {{ color:{C_WARN}; font-weight:bold; "
-                                       "font-size:15px; }")
+            set_role(self.run_btn, "recording")
         self.abort_btn.setVisible(busy and self._busy_mode == "manual")
 
     def set_enabled(self, on: bool):
@@ -841,13 +999,23 @@ class LogicPanel(PanelBase):
         pass
 
     # ================================================================ drawing
-    def _layout_plots(self, digital: bool, analog: bool):
-        self.p_dig.setVisible(digital or not analog)
-        self.p_an.setVisible(analog)
-        # one time axis: under the analog plot when there is one
-        ax = self.p_dig.getAxis("bottom")
-        ax.setStyle(showValues=not analog)
-        self.p_dig.setLabel("bottom", "" if analog else "Time", units=None if analog else "s")
+    def _layout_plots(self, digital: bool, analog: bool, current: bool = False):
+        shown = [p for p, on in ((self.p_dig, digital or not analog), (self.p_an, analog),
+                                 (self.p_cur, current)) if on]
+        lay = self.glw.ci.layout
+        for row, (p, weight) in enumerate(((self.p_dig, 3), (self.p_an, 2), (self.p_cur, 2))):
+            on = p in shown
+            p.setVisible(on)
+            # a hidden plot must give up its row, or it leaves a gap
+            p.setMaximumHeight(16_777_215 if on else 0)
+            lay.setRowStretchFactor(row, weight if on else 0)
+            lay.setRowMaximumHeight(row, 16_777_215 if on else 0)
+            lay.setRowSpacing(row, 0)
+        for p in shown:
+            last = p is shown[-1]
+            # one time axis, under the bottom plot
+            p.getAxis("bottom").setStyle(showValues=last)
+            p.setLabel("bottom", "Time" if last else "", units="s" if last else None)
         self.an_table.setVisible(analog)
         self.dig_table.setVisible(digital)
 
@@ -869,7 +1037,13 @@ class LogicPanel(PanelBase):
         for p, ln in self.trig_lines:
             p.removeItem(ln)
         self.trig_lines = []
-        self._layout_plots(bool(res.digital), bool(res.analog))
+        ppk = res.extra.get("ppk2")
+        self._layout_plots(bool(res.digital), bool(res.analog), ppk is not None)
+        if ppk is not None:
+            self.c_cur.setData(ppk["t"], ppk["i"])
+            self.p_cur.setLabel("left", "PPK2", units="A", color=C_CURR)
+        else:
+            self.c_cur.setData([], [])
         small = touch.TOUCH          # 800 px tall: keep room for the lanes
         self._fit_table(self.dig_table, len(res.digital), (2 if small else 4) if res.analog
                         else (3 if small else 8))
@@ -878,7 +1052,7 @@ class LogicPanel(PanelBase):
         ticks = []
         for lane, ch in enumerate(chans):
             y0 = -lane * LANE
-            ticks.append((y0 + 0.5, f"D{ch}"))
+            ticks.append((y0 + 0.5, self.caps.channel_name(ch)))
             self.dig_curves[ch] = self.p_dig.plot(pen=pg.mkPen(COLORS[ch % len(COLORS)], width=1))
         self.p_dig.getAxis("left").setTicks([ticks])
         if chans:
@@ -890,7 +1064,7 @@ class LogicPanel(PanelBase):
             c.setDownsampling(auto=True, method="peak")
             self.an_curves[ch] = c
         if res.cfg.mode == "trigger":
-            for p in (self.p_dig, self.p_an):
+            for p in (self.p_dig, self.p_an, self.p_cur):
                 ln = pg.InfiniteLine(0, angle=90, pen=pg.mkPen("#ffffff", width=1,
                                                                style=Qt.PenStyle.DashLine))
                 p.addItem(ln)
@@ -904,6 +1078,8 @@ class LogicPanel(PanelBase):
         if res.analog:
             what.append(f"A{','.join(map(str, res.analog))} at {fmt_rate(res.cfg.analog_rate)}")
         trig = "   trigger at 0 s" if res.cfg.mode == "trigger" else ""
+        if res.offset is not None:
+            trig += f"   t = 0 at app time {res.offset:.6f} s (aligned to PPK2)"
         self.info.setText(f"Captured {when} (app time {res.t_app:.1f} s)   "
                           f"{fmt_si(dur, 's')}   " + "   ".join(what) + trig)
         if fit:
@@ -947,9 +1123,18 @@ class LogicPanel(PanelBase):
             s = digital_stats(tr, a, b)
             duty = "—" if s["duty"] is None else f"{s['duty'] * 100:.2f} %"
             hi, lo = _span(s["high_min"], s["high_max"]), _span(s["low_min"], s["low_max"])
-            vals = [f"D{ch}", _si(s["freq"], "Hz", 6), _si(s["period"], "s"), duty, hi, lo,
+            vals = [self.caps.channel_name(ch), _si(s["freq"], "Hz", 6), _si(s["period"], "s"), duty, hi, lo,
                     str(s["edges"]) if s["edges"] else f"none ({'high' if s['level'] else 'low'})"]
             self._set_row(self.dig_table, r, vals, COLORS[ch % len(COLORS)])
+        ppk = res.extra.get("ppk2")
+        if ppk is not None:
+            m = (ppk["t"] >= a) & (ppk["t"] <= b)
+            if m.sum() >= 2:
+                i = ppk["i"][m]
+                q = float(i.mean()) * (b - a)
+                self.meas_title.setText(
+                    self.meas_title.text() + f"      PPK2: mean {fmt_si(i.mean(), 'A')}   "
+                    f"peak {fmt_si(i.max(), 'A')}   charge {fmt_si(q, 'C')}")
         self.an_table.setRowCount(len(res.analog))
         for r, (ch, tr) in enumerate(res.analog.items()):
             s = analog_stats(tr, a, b) or {}

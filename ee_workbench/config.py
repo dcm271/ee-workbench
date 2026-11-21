@@ -17,10 +17,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 OPEN_MODES = ("last", "list", "scan", "none")
-MODEL_KEYS = ("auto", "663xx", "6632A", "3456A", "PPK2", "SALEAE")
+MODEL_KEYS = ("auto", "663xx", "6632A", "3456A", "PPK2", "SALEAE", "SIGROK", "FGEN", "GPIO")
 MODEL_ALIASES = {"66321D": "663xx", "66321B": "663xx", "66311B": "663xx",
                  "6633A": "6632A", "6634A": "6632A", "ppk2": "PPK2",
-                 "saleae": "SALEAE", "Saleae": "SALEAE"}
+                 "saleae": "SALEAE", "Saleae": "SALEAE",
+                 "sigrok": "SIGROK", "fgen": "FGEN", "gpio": "GPIO", "SDG": "FGEN",
+                 "33500": "FGEN", "DG1000Z": "FGEN"}
 
 
 def config_dir() -> Path:
@@ -45,13 +47,21 @@ open = "last"
 # many seconds for it before opening GPIB instruments.
 wait_for_gpib = 30
 
+# Start the remote API (drive the bench from Python / Jupyter: see
+# docs/03-users-guide.md) automatically. It only listens on 127.0.0.1.
+api = false
+api_port = 8765
+
 # Instruments for open = "list" (also tells "scan" which model is where).
-# model: "auto" (supplies identify themselves), "663xx", "6632A", "3456A", "PPK2"
-# or "SALEAE".
+# model: "auto" (supplies and function generators identify themselves), "663xx",
+# "6632A", "3456A", "PPK2", "SALEAE", "SIGROK", "FGEN" or "GPIO".
 # The 3456A cannot identify itself, so always give its model.
 # A Nordic PPK2 is a serial port: resource = "PPK2::/dev/ttyACM0".
 # A Saleae logic analyzer goes through a running Logic 2 (automation server on):
 # resource = "SALEAE::<device id>" (or "SALEAE::" for the first one it sees).
+# Anything sigrok supports: resource = "SIGROK::fx2lafw" (driver[:conn=bus.addr]).
+# A LAN function generator: resource = "TCPIP::192.168.1.50::INSTR", model = "FGEN".
+# The Raspberry Pi's GPIO header: resource = "GPIO::" (or "GPIO::/dev/gpiochip0").
 # Optional for a 3456A: name, function, range, nplc, autozero, filter.
 #
 # [[instrument]]
@@ -82,6 +92,8 @@ class Config:
     instruments: list[Entry] = field(default_factory=list)
     path: Path | None = None
     warning: str = ""          # problem found while reading, shown in the status bar
+    api: bool = False
+    api_port: int = 8765
 
 
 def norm_model(m: str) -> str:
@@ -112,6 +124,11 @@ def load_config(path: Path | None = None) -> Config:
         cfg.warning = f'{path}: open = "{mode}" is not one of {", ".join(OPEN_MODES)}.'
     try:
         cfg.wait_for_gpib = max(0.0, float(st.get("wait_for_gpib", 30)))
+    except (TypeError, ValueError):
+        pass
+    cfg.api = bool(st.get("api", False))
+    try:
+        cfg.api_port = int(st.get("api_port", 8765))
     except (TypeError, ValueError):
         pass
     for item in data.get("instrument", []):

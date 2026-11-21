@@ -13,12 +13,23 @@ from PyQt6.QtWidgets import (QCheckBox, QComboBox, QHBoxLayout, QLabel, QLineEdi
 from ..worker import InstrumentWorker
 from ..worker import now as app_time
 from . import touch
-from .widgets import C_WARN, MONO, CsvRecorder, SteadyY
+from ..session import recorder as session
+from .hub import hub
+from .theme import set_role
+from .widgets import MONO, CsvRecorder, SteadyY
 
 SPANS = {"10 s": 10, "30 s": 30, "2 min": 120, "10 min": 600, "1 h": 3600, "All": None}
+_OPEN: list = []          # every instrument tab, so tools can find each other
+
+
+def open_panels() -> list:
+    """The instrument tabs currently open (the sequencer, the session recorder
+    and the logic analyzer's PPK2 alignment use this)."""
+    return list(_OPEN)
 
 
 class PanelBase(QWidget):
+    KIND = ""                          # supply | ppk2 | dmm | logic | gpio | fgen
     title_changed = pyqtSignal(str)
     settings_changed = pyqtSignal()    # something worth remembering for next start
     message = pyqtSignal(str)
@@ -31,6 +42,8 @@ class PanelBase(QWidget):
         self.connected = False
         self.caps = None
         self.recorder = CsvRecorder()
+        self.last_reading = None
+        self.readings = 0
         self._stamps: list[float] = []
         self._dirty = False
         self._redrawn = 0.0
@@ -43,6 +56,7 @@ class PanelBase(QWidget):
         self._x_plot = None                   # the plot whose X range scrolls (others link to it)
         self._steady: list[SteadyY] = []
 
+        _OPEN.append(self)
         self.worker = InstrumentWorker(resource, model, baud)
         self.worker.connected.connect(self._on_connected)
         self.worker.connect_failed.connect(self._on_connect_failed)
@@ -75,6 +89,9 @@ class PanelBase(QWidget):
         return {}
 
     def restore_settings(self, settings: dict): ...
+
+    def output_off(self):
+        """Esc / ALL OUTPUTS OFF (tabs with outputs override this)."""
     def csv_name(self) -> str: return "reading_%Y%m%d_%H%M%S.csv"
 
     # ---- worker callbacks ----------------------------------------------------
@@ -95,6 +112,8 @@ class PanelBase(QWidget):
         while self._stamps and now - self._stamps[0] > 5:
             self._stamps.pop(0)
         self.on_reading(r)
+        self.last_reading, self.readings = r, self.readings + 1   # the sequencer reads these
+        hub.feed(self, r)                  # watchdog rules, math channels
         t = getattr(r, "t", None)
         if t is not None:
             self._t_last, self._t_seen = t, app_time()
@@ -237,12 +256,12 @@ class PanelBase(QWidget):
                 self.rec_btn.setChecked(False)
                 return
             self.rec_btn.setText("■ Stop recording")
-            self.rec_btn.setStyleSheet(f"QPushButton {{ color:{C_WARN}; font-weight:bold; }}")
+            set_role(self.rec_btn, "recording")
             self.message.emit(f"Recording to {self.recorder.path}")
         else:
             self.recorder.stop()
             self.rec_btn.setText("● Record CSV")
-            self.rec_btn.setStyleSheet("")
+            set_role(self.rec_btn, "")
             self.message.emit("Recording stopped")
 
     def build_console_tab(self, placeholder: str, read_button: bool = False) -> QWidget:
@@ -281,6 +300,31 @@ class PanelBase(QWidget):
         self.worker.request_raw(cmd, read)
         self.raw_line.clear()
 
+    @property
+    def recording(self) -> bool:
+        """Is anything (CSV or a session file) taking readings?"""
+        return self.recorder.active or session.active
+
+    def record(self, row: list):
+        """One reading, laid out like csv_header(): to the CSV file and the session."""
+        self.recorder.row(row)
+        if session.active:
+            hdr = self.csv_header()
+            skip = ("timestamp", "t_s")
+            session.stream(self, self.display_name(), self.model, self.resource,
+                           [c for c in hdr if c not in skip])
+            session.add(self, float(row[hdr.index("t_s")]),
+                        [v for c, v in zip(hdr, row) if c not in skip])
+
+    def display_name(self) -> str:
+        """How the tab is known in the sequencer and session files."""
+        name = getattr(self, "name_edit", None)
+        text = name.text().strip() if name is not None else ""
+        model = getattr(self.caps, "model", "") or self.model
+        return f"{model} · {text}" if text else f"{model} ({self.resource})"
+
     def shutdown(self):
+        if self in _OPEN:
+            _OPEN.remove(self)
         self.recorder.stop()
         self.worker.stop()

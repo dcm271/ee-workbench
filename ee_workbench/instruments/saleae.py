@@ -34,9 +34,12 @@ import tempfile
 import threading
 import time
 from contextlib import contextmanager
-from dataclasses import dataclass, field
 
 import numpy as np
+
+from ..clock import now as app_now
+from .logic import (MODES, AnalogTrace, DigitalTrace, LogicCapture, LogicCaps,  # noqa: F401
+                    LogicConfig, analog_stats, digital_envelope, digital_stats, fmt_rate)
 
 DEFAULT_HOST, DEFAULT_PORT = "127.0.0.1", 10430
 MAGIC = b"<SALEAE>"
@@ -62,16 +65,15 @@ ANALOG_RATES = {
 }
 MAX_ANALOG_POINTS = 2_000_000          # per channel, after Logic 2's downsampling
 
-MODES = ("timed", "trigger", "manual")
 TRIGGER_TYPES = {"rising": "RISING", "falling": "FALLING",
                  "pulse_high": "PULSE_HIGH", "pulse_low": "PULSE_LOW"}
 
 # Protocol decoders: the analyzer name in Logic 2 and the settings each one needs.
 # Setting names must match Logic 2's analyzer settings exactly.
 DECODERS = {
-    "Async Serial": {"Input Channel": 0, "Bit Rate (Bits/s)": 115200},
-    "I2C": {"SCL": 0, "SDA": 1},
-    "SPI": {"Clock": 0, "MOSI": 1, "MISO": 2, "Enable": 3},
+    "Async Serial": [("Input Channel", 0, "ch"), ("Bit Rate (Bits/s)", 115200, "int")],
+    "I2C": [("SCL", 0, "ch"), ("SDA", 1, "ch")],
+    "SPI": [("Clock", 0, "ch"), ("MOSI", 1, "ch"), ("MISO", 2, "ch"), ("Enable", 3, "ch")],
 }
 
 
@@ -92,40 +94,7 @@ def parse_resource(resource: str) -> tuple[str, str, int]:
     return r.strip(), host, port
 
 
-def fmt_rate(hz: float) -> str:
-    for div, unit in ((1e6, "MS/s"), (1e3, "kS/s")):
-        if hz >= div:
-            return f"{hz / div:g} {unit}"
-    return f"{hz:g} S/s"
-
-
 # ---------------------------------------------------------------- binary export
-@dataclass
-class DigitalTrace:
-    """One channel as edges: level[i] holds from t[i] until t[i+1]
-    (the last one until `end`). t[0] is the start of the data."""
-    channel: int
-    t: np.ndarray
-    level: np.ndarray            # uint8 0/1
-    end: float
-
-    def level_at(self, x: float) -> int:
-        i = int(np.searchsorted(self.t, x, side="right")) - 1
-        return int(self.level[max(i, 0)])
-
-
-@dataclass
-class AnalogTrace:
-    channel: int
-    t0: float
-    dt: float
-    v: np.ndarray                # float32, volts
-
-    @property
-    def t(self) -> np.ndarray:
-        return self.t0 + np.arange(self.v.size) * self.dt
-
-
 def _header(buf: bytes) -> tuple[int, int, int]:
     if len(buf) < 16 or buf[:8] != MAGIC:
         raise ValueError("not a Saleae binary export file")
@@ -217,133 +186,6 @@ def read_table(path: str) -> tuple[list[str], list[list[str]]]:
     with open(path, newline="") as fh:
         rows = list(csv.reader(fh))
     return (rows[0], rows[1:]) if rows else ([], [])
-
-
-# ---------------------------------------------------------------- measurements
-def digital_stats(tr: DigitalTrace, a: float | None = None, b: float | None = None) -> dict:
-    """Edge count, frequency, duty cycle and pulse widths between a and b."""
-    a = tr.t[0] if a is None else max(a, tr.t[0])
-    b = tr.end if b is None else min(b, tr.end)
-    out = {"edges": 0, "rising": 0, "freq": None, "period": None, "duty": None,
-           "high_min": None, "high_max": None, "low_min": None, "low_max": None,
-           "level": tr.level_at(a)}
-    if b <= a:
-        return out
-    i0 = int(np.searchsorted(tr.t, a, side="right"))
-    i1 = int(np.searchsorted(tr.t, b, side="right"))
-    et, el = tr.t[i0:i1], tr.level[i0:i1]           # edges inside (a, b]
-    out["edges"] = int(et.size)
-    rises = et[el == 1]
-    out["rising"] = int(rises.size)
-    if rises.size >= 2:
-        out["period"] = float((rises[-1] - rises[0]) / (rises.size - 1))
-        out["freq"] = 1.0 / out["period"]
-    # Duty cycle over the window: time high / total
-    bounds = np.concatenate(([a], et, [b]))
-    lv = np.concatenate(([tr.level_at(a)], el))
-    dur = np.diff(bounds)
-    out["duty"] = float(dur[lv == 1].sum() / (b - a))
-    # Pulse widths: only pulses with both edges inside the window
-    if et.size >= 2:
-        w = np.diff(et)
-        hi, lo = w[el[:-1] == 1], w[el[:-1] == 0]
-        if hi.size:
-            out["high_min"], out["high_max"] = float(hi.min()), float(hi.max())
-        if lo.size:
-            out["low_min"], out["low_max"] = float(lo.min()), float(lo.max())
-    return out
-
-
-def analog_stats(tr: AnalogTrace, a: float | None = None, b: float | None = None) -> dict | None:
-    v = tr.v
-    if a is not None or b is not None:
-        i0 = 0 if a is None else max(0, int(math.ceil((a - tr.t0) / tr.dt)))
-        i1 = v.size if b is None else min(v.size, int(math.floor((b - tr.t0) / tr.dt)) + 1)
-        v = v[i0:i1]
-    v = v[np.isfinite(v)]
-    if not v.size:
-        return None
-    return {"min": float(v.min()), "max": float(v.max()), "mean": float(v.mean()),
-            "rms": float(np.sqrt(np.mean(v.astype(np.float64) ** 2))),
-            "pp": float(v.max() - v.min())}
-
-
-def digital_envelope(tr: DigitalTrace, x0: float, x1: float, bins: int = 2000):
-    """Points to draw a channel between x0 and x1. With few edges: the exact
-    steps. With more edges than bins: one column per bin, full height where
-    the bin has any transition, so a fast clock reads as a solid band and no
-    glitch disappears at any zoom."""
-    t, lv = tr.t, tr.level
-    x0, x1 = max(x0, t[0]), min(x1, tr.end)
-    if x1 <= x0:
-        return np.empty(0), np.empty(0)
-    i0 = max(0, int(np.searchsorted(t, x0, side="right")) - 1)
-    i1 = int(np.searchsorted(t, x1, side="right"))
-    if i1 - i0 <= bins:
-        et = np.concatenate(([x0], t[i0 + 1:i1], [x1]))   # segment boundaries
-        return np.repeat(et, 2)[1:-1], np.repeat(lv[i0:i1], 2).astype(float)
-    edges = np.linspace(x0, x1, bins + 1)
-    idx = np.searchsorted(t, edges, side="right")       # transitions up to each bin edge
-    start_lv = lv[np.maximum(idx[:-1] - 1, 0)].astype(float)
-    busy = np.diff(idx) > 0
-    lo = np.where(busy, 0.0, start_lv)
-    hi = np.where(busy, 1.0, start_lv)
-    x = np.repeat(edges[:-1], 2)
-    y = np.column_stack((lo, hi)).ravel()
-    return np.append(x, x1), np.append(y, float(lv[idx[-1] - 1]))
-
-
-# ---------------------------------------------------------------- data types
-@dataclass
-class LogicCaps:
-    idn: str = ""
-    model: str = "Saleae"
-    note: str = ""
-    device_id: str = ""
-    digital: int = 8
-    analog: int = 8
-    thresholds: list = field(default_factory=list)
-    digital_rates: list = field(default_factory=list)
-    analog_rates: list = field(default_factory=list)
-    info: dict = field(default_factory=dict)
-
-
-@dataclass
-class LogicConfig:
-    digital: list = field(default_factory=lambda: [0, 1, 2, 3])
-    analog: list = field(default_factory=list)
-    digital_rate: float = 10e6
-    analog_rate: float = 1.5625e6
-    threshold: float | None = None
-    mode: str = "timed"              # timed | trigger | manual
-    duration: float = 0.1            # s, timed
-    trig_channel: int = 0
-    trig_type: str = "rising"        # rising | falling | pulse_high | pulse_low
-    pulse_min: float | None = None   # s, pulse triggers
-    pulse_max: float | None = None
-    after_trigger: float = 0.05      # s recorded after the trigger
-    pre_trigger: float = 0.01        # s kept before it (Logic 2 trims the rest)
-    decoders: list = field(default_factory=list)   # [{"name", "label", "settings"}]
-
-
-@dataclass
-class LogicCapture:
-    cfg: LogicConfig
-    digital: dict                    # channel -> DigitalTrace
-    analog: dict                     # channel -> AnalogTrace
-    t_app: float = 0.0               # app time the capture finished
-    wall: float = 0.0                # time.time() of the same moment
-    elapsed: float = 0.0
-    table_header: list = field(default_factory=list)
-    table_rows: list = field(default_factory=list)
-    errors: list = field(default_factory=list)
-
-    @property
-    def span(self) -> tuple[float, float]:
-        lo = [d.t[0] for d in self.digital.values()] + [a.t0 for a in self.analog.values()]
-        hi = [d.end for d in self.digital.values()] + \
-             [a.t0 + a.v.size * a.dt for a in self.analog.values()]
-        return (min(lo), max(hi)) if lo else (0.0, 0.0)
 
 
 # ---------------------------------------------------------------- transport
@@ -544,7 +386,9 @@ class SaleaeLogic:
             note=f"via Logic 2 {info['app_version']}, automation API {info['api']}",
             device_id=dev["id"], digital=nd, analog=na, thresholds=list(thr),
             digital_rates=list(DIGITAL_RATES[fam]), analog_rates=list(ANALOG_RATES[fam]),
-            info={**info, "device_type": dev["type"]})
+            info={**info, "device_type": dev["type"]},
+            trigger_types=list(TRIGGER_TYPES), decoders=DECODERS,
+            capture_filter="Logic 2 capture (*.sal)", capture_suffix=".sal")
         s = self.state
         s.digital = [c for c in s.digital if c < nd] or [0]
         s.analog = [c for c in s.analog if c < na]
@@ -576,7 +420,7 @@ class SaleaeLogic:
         self._log(f"start {cfg.mode} capture: D{cfg.digital} A{cfg.analog} "
                   f"{fmt_rate(cfg.digital_rate)} / {fmt_rate(cfg.analog_rate)}")
         self.t.start(self.device_id, cfg)
-        run = {"cfg": cfg, "t0": time.monotonic(), "done": threading.Event(),
+        run = {"cfg": cfg, "t0": time.monotonic(), "t_armed": app_now(), "done": threading.Event(),
                "error": None, "aborted": False}
         if cfg.mode != "manual":
             def waiter():
@@ -649,7 +493,8 @@ class SaleaeLogic:
             digital, analog = read_export(tmp)
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
-        res = LogicCapture(cfg, digital, analog, t_app=t_app, wall=time.time(), elapsed=elapsed)
+        res = LogicCapture(cfg, digital, analog, t_app=t_app or app_now(), wall=time.time(),
+                           elapsed=elapsed, t_armed=run["t_armed"])
         if cfg.decoders:
             try:
                 res.table_header, res.table_rows = self.decode(cfg.decoders)

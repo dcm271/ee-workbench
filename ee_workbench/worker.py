@@ -8,15 +8,9 @@ import traceback
 
 from PyQt6.QtCore import QThread, pyqtSignal
 
+from .clock import APP_T0, now  # noqa: F401  (one time base for every instrument)
 from .instruments import make_driver, model_for
 from .transport import open_transport
-
-# One time base for every instrument so their traces line up.
-APP_T0 = time.monotonic()
-
-
-def now() -> float:
-    return time.monotonic() - APP_T0
 
 
 class InstrumentWorker(QThread):

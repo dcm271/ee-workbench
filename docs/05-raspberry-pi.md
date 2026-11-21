@@ -5,6 +5,8 @@ subtitle: Running EE Workbench full screen on a 10-inch 1280×800 panel
 
 # Raspberry Pi & Touch Screen
 
+Other chapters: [Hardware](01-hardware-and-resources.md) · [Installation](02-installation.md) · [User's Guide](03-users-guide.md) · [Technical Reference](04-technical-reference.md) · [How-to guides](06-howtos.md) · [README](../README.md)
+
 EE Workbench runs on a Raspberry Pi with a touch screen as a dedicated bench controller. The layout is tuned for a **10-inch 1280×800** panel. A mouse and keyboard work alongside touch.
 
 ## What you need
@@ -32,8 +34,8 @@ The SSH clone needs a GitHub key on the Pi. For read-only use, `https://github.c
 
 The script is safe to re-run. It does the following:
 
-1. Installs the system packages. PyQt6 and numpy come from apt, because building them with pip on a Pi takes hours. It also installs `qt6-wayland` for the Bookworm desktop.
-2. Creates `.venv` and installs pyqtgraph, pyvisa-py and gpib-ctypes into it.
+1. Installs the system packages. PyQt6 and numpy come from apt, because building them with pip on a Pi takes hours. It also installs `qt6-wayland` for the Bookworm desktop, plus `sigrok-cli` and the fx2lafw firmware for USB logic analyzers. Saleae's Logic 2 doesn't run on ARM, so on the Pi a sigrok analyzer takes its place. It adds you to `dialout` (PPK2) and `plugdev` (logic analyzers).
+2. Creates `.venv` and installs `requirements.txt` into it (pyqtgraph, pyvisa-py, gpib-ctypes, …).
 3. Runs the test suite against the simulators.
 4. Builds the GPIB driver with `scripts/install-gpib-driver.sh`. It uses the Pi's `linux-headers-$(uname -r)` package, and skips the kernel-module build if the running kernel already provides `ni_usb_gpib`.
 5. Adds **EE Workbench** to the application menu and to `~/.config/autostart`, so it starts full screen at every login.
@@ -101,13 +103,42 @@ What's different from the desktop layout:
   ![Capture tab on the touch screen](images/touch-capture.png)
 
 - **Plots don't pan or zoom** under a finger. The **Span** selector sets the time window, and Y always autoscales. Scroll areas scroll by dragging.
-- **＋ Add instrument** replaces the connection toolbar. It scans the GPIB bus when it opens and lists what it finds plus the simulators. Pick one (or enter an address with the keypad), choose the model, then tap **Connect**. For the 3456A, tap the **3456A DMM** model button, because the meter can't identify itself.
+- **＋ Add instrument** replaces the connection toolbar. It scans the GPIB bus when it opens and lists what it finds plus the simulators. Pick one (or enter a GPIB address with the keypad, or **Type a resource…** for a LAN or USB instrument such as a function generator), choose the model, then tap **Connect**. For the 3456A, tap the **3456A DMM** model button, because the meter can't identify itself.
 
   ![Add instrument](images/touch-connect.png)
 
 ![Touch layout, 3456A](images/touch-dmm.png)
 
 Typing is still available where it makes sense: channel names and the console use the keyboard as usual.
+
+## The GPIO header
+
+On the Pi, the 40-pin header is an instrument too: it appears in the resource list (and **＋ Add instrument**) as `GPIO::/dev/gpiochip0`. Open it and the [GPIO tab](03-users-guide.md#gpio-panel-raspberry-pi-header) lists every usable pin by GPIO number and physical pin. Set the pins you use to Output or Input, give them names (`relay`, `reset`, `done`), and the sequencer, the watchdog, scripts and the Remote API can use them by name. It's how a Pi bench controller power-cycles a DUT with a relay board, presses its buttons, and waits for it to finish booting.
+
+`setup-pi.sh` installs `python3-libgpiod` and adds you to the `gpio` group; nothing else is needed. The pin map, electrical limits (**3.3 V only, never 5 V**) and wiring for relays, buttons and resets are in [Hardware → Raspberry Pi GPIO header](01-hardware-and-resources.md#raspberry-pi-gpio-header); a worked example is in [How-to guides](06-howtos.md#power-cycle-a-dut-with-a-relay-and-check-it-boots).
+
+- Pins left **Off** aren't touched, so a pin used by a HAT, the touch screen or I²C stays theirs. A pin something else already holds can't be claimed; the tab says which.
+- On a touch screen, **ON / off** in the State column switches an output with one tap (no confirmation: GPIO pins are low-power), and the **Pulse** button presses-and-releases.
+- **Esc** sets every output to its inactive level; closing the tab releases the pins (they go back to inputs). Pin settings are remembered with the instrument.
+- The Pi 5's header is on the RP1 chip (`pinctrl-rp1`); the app finds the right `/dev/gpiochip*` by its label, whatever its number.
+
+## Remote API from your desk
+
+With **Tools ▾ → Remote API** on (or `api = true` in `config.toml` for a Pi that starts the app at login), a notebook on your desktop can drive the Pi's bench through an SSH tunnel:
+
+```bash
+ssh -L 8765:127.0.0.1:8765 pi@bench-pi      # leave this open
+scp pi@bench-pi:.config/ee-workbench/api.json ~/bench-pi-api.json
+```
+
+```python
+import json
+from ee_workbench.client import connect
+d = json.load(open("/home/me/bench-pi-api.json"))
+bench = connect("http://127.0.0.1:8765", d["token"])
+```
+
+See [Remote API](03-users-guide.md#remote-api-python-and-jupyter).
 
 ## Other screen sizes
 
@@ -127,4 +158,7 @@ The touch layout needs about 1180×460 pixels. Smaller screens (an 800×480 pane
 | Touches land in the wrong place | Use the Pi's **Screen Configuration → Touchscreen** to map the touch device to the right display. |
 | `cannot execute binary file: Exec format error` | Something built on a PC (x86) was copied to the Pi. Re-run `./scripts/setup-pi.sh`: it detects and rebuilds a copied `.venv` and GPIB build. Cloning with git instead of copying the folder avoids this. |
 | "gpib_ctypes … could not locate the gpib library", or "GPIB library is installed but can't be loaded" | The linux-gpib library is missing, or is an x86 copy from a PC. Run `rm -rf vendor && ./scripts/install-gpib-driver.sh`; its last step checks that the library loads. |
+| GPIO tab: "No GPIO chip found" | `python3-libgpiod` missing or no `/dev/gpiochip*` (not a Pi?). `ls /dev/gpiochip*`; re-run `setup-pi.sh`. |
+| GPIO: "Permission denied" | Log out and back in after setup, for the `gpio` group. |
+| GPIO: a pin is "busy" | I²C, SPI, the serial console, 1-Wire or a HAT's overlay uses it (`gpioinfo` shows the owner). Pick another pin or turn that interface off in `raspi-config`. |
 | App doesn't start at login | Run `~/ee-workbench/run.sh --fullscreen` from a terminal to see the error. Check `~/.config/autostart/ee-workbench.desktop` points at the right folder. |

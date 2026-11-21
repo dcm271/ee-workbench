@@ -2,17 +2,20 @@
 from __future__ import annotations
 
 from PyQt6.QtCore import Qt
-from PyQt6.QtWidgets import (QButtonGroup, QDialog, QHBoxLayout, QLabel, QListWidget,
-                             QListWidgetItem, QPushButton, QSpinBox, QVBoxLayout)
+from PyQt6.QtWidgets import (QButtonGroup, QDialog, QGridLayout, QHBoxLayout, QInputDialog,
+                             QLabel, QListWidget, QListWidgetItem, QPushButton, QSpinBox,
+                             QVBoxLayout)
 
 from ..instruments import MODELS, model_for
 from ..transport import list_resources
 from . import touch
+from .theme import set_role
 from .widgets import C_MUTED
 
 SHORT_MODELS = {"auto": "Auto\n(supplies)", "663xx": "66321D\n66311B/21B",
                 "6632A": "6632A\n33A/34A", "3456A": "3456A\nDMM", "PPK2": "PPK2\nNordic",
-                "SALEAE": "Saleae\nLogic"}
+                "SALEAE": "Saleae\nLogic", "SIGROK": "sigrok\nlogic",
+                "FGEN": "Function\ngenerator", "GPIO": "Pi GPIO\nheader"}
 
 
 class ConnectDialog(QDialog):
@@ -51,6 +54,11 @@ class ConnectDialog(QDialog):
         use = QPushButton("Use")
         use.clicked.connect(self._use_addr)
         other.addWidget(use)
+        typed = QPushButton("Type a resource…")
+        typed.setToolTip("Any VISA resource, e.g. a LAN function generator: "
+                         "TCPIP::192.168.1.50::INSTR")
+        typed.clicked.connect(self._type_resource)
+        other.addWidget(typed)
         left.addLayout(other)
         body.addLayout(left, 3)
 
@@ -60,15 +68,17 @@ class ConnectDialog(QDialog):
         right.addWidget(lab)
         self.models = QButtonGroup(self)
         self.model_btns = {}
-        for key in MODELS:
-            b = QPushButton(SHORT_MODELS[key])
+        grid = QGridLayout()
+        for n, key in enumerate(MODELS):
+            b = QPushButton(SHORT_MODELS.get(key, key))
             b.setCheckable(True)
             b.setMinimumHeight(56)
             b.setToolTip(MODELS[key])
             b.clicked.connect(lambda _, k=key: setattr(self, "model", k))
             self.models.addButton(b)
             self.model_btns[key] = b
-            right.addWidget(b)
+            grid.addWidget(b, n // 2, n % 2)
+        right.addLayout(grid)
         self.model_btns["auto"].setChecked(True)
         right.addStretch(1)
         body.addLayout(right, 2)
@@ -82,8 +92,7 @@ class ConnectDialog(QDialog):
         cancel.clicked.connect(self.reject)
         bottom.addWidget(cancel)
         self.ok = QPushButton("Connect")
-        self.ok.setStyleSheet("QPushButton { background:#2e7d32; color:white; font-weight:bold; }"
-                              "QPushButton:disabled { background:#2b2f36; color:#6b7079; }")
+        set_role(self.ok, "primary")
         self.ok.setEnabled(False)
         self.ok.clicked.connect(self.accept)
         bottom.addWidget(self.ok)
@@ -105,6 +114,13 @@ class ConnectDialog(QDialog):
 
     def _use_addr(self):
         self._select(f"GPIB0::{self.addr.value()}::INSTR")
+
+    def _type_resource(self):
+        text, ok = QInputDialog.getText(
+            self, "Resource", "VISA resource, e.g. TCPIP::192.168.1.50::INSTR\n"
+            "(a LAN instrument), USB0::…::INSTR, ASRL/dev/ttyUSB0::INSTR:", text=self.resource)
+        if ok and text.strip():
+            self._select(text.strip())
 
     def _select(self, resource: str):
         self.resource = resource

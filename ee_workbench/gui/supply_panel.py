@@ -20,6 +20,7 @@ from .forms import select
 from .system_tab import SystemTab
 from .tests_tab import TestsTab
 from .panel_base import PanelBase
+from .profile_box import ProfileBox
 from .widgets import (C_CURR, C_DVM, C_MUTED, C_ON, C_POW, C_VOLT, C_WARN, MONO,
                       Readout, SafeSpin, TraceBuffer, fmt_current, fmt_si)
 
@@ -32,7 +33,27 @@ SPEED_PRESETS = [
 ]
 
 
+
+def _profile_page(box):
+    """The Profile tab: the box plus what it is for."""
+    from PyQt6.QtWidgets import QLabel, QVBoxLayout, QWidget
+    w = QWidget()
+    v = QVBoxLayout(w)
+    v.addWidget(box)
+    hint = QLabel("Steps the setpoint in software, so the supply acts as a slow function "
+                  "generator: battery discharge curves, brown-out tests, ripple on a rail. "
+                  "GPIB supplies take ~20–50 commands/s, so keep rate= at 10–20 and periods "
+                  "above ~1 s for a clean shape. Switch the output on yourself; the profile only "
+                  "moves the setpoint. Esc stops it. The Trend tab shows the result.")
+    hint.setWordWrap(True)
+    hint.setStyleSheet("color:#8a93a0;")
+    v.addWidget(hint)
+    v.addStretch(1)
+    return w
+
 class SupplyPanel(PanelBase):
+    KIND = "supply"
+
     def __init__(self, resource: str, model: str, baud: int):
         super().__init__(resource, model, baud)
         self.caps = SupplyCaps()
@@ -60,6 +81,10 @@ class SupplyPanel(PanelBase):
         self.tabs = QTabWidget()
         self.tabs.addTab(self._build_trend_tab(), "Trend")
         self.tabs.addTab(self.tests_tab, "Tests")
+        self.profile_box = ProfileBox(self, {"voltage": lambda d, v: d.set_voltage(v),
+                                             "current": lambda d, v: d.set_current(v)},
+                                      {"voltage": "V", "current": "A"})
+        self.tabs.addTab(touch.scroll(_profile_page(self.profile_box)), "Profile")
         if touch.TOUCH:
             # Touch (1280x800): the left column holds only readouts + output
             # controls so they never need scrolling; setup gets its own tab.
@@ -213,12 +238,23 @@ class SupplyPanel(PanelBase):
         self.ovt_chk.clicked.connect(lambda on: self.cmd(lambda d, x: d.set_ovp_tracking(x), on))
         self.ovt_chk.setVisible(False)
         row.addWidget(self.ovt_chk)
+        self.sense_chk = QCheckBox("Open-sense detect")
+        self.sense_chk.setToolTip(
+            "Turn the output off if a remote-sense lead (+S / −S) comes disconnected.\n"
+            "Use it when the sense leads run to the DUT. With the local-sense jumpers\n"
+            "fitted it never trips. Off after *RST and at power-on, unless you save it\n"
+            "into the power-on state (System tab).")
+        self.sense_chk.clicked.connect(
+            lambda on: self.cmd(lambda d, x: d.set_sense_protect(x), on))
+        self.sense_chk.setVisible(False)
         row.addStretch(1)
         self.clr_btn = QPushButton("Clear trip")
-        self.clr_btn.setToolTip("Reset a latched OV/OCP trip (remove the cause first)")
+        self.clr_btn.setToolTip("Reset a latched OV / OCP / open-sense trip (remove the cause "
+                                "first)")
         self.clr_btn.clicked.connect(lambda: self.cmd(lambda d: d.clear_protection()))
         row.addWidget(self.clr_btn)
         v.addLayout(row)
+        v.addWidget(self.sense_chk)     # own row: keeps the column narrow on a touch screen
         self.note_label = QLabel("")
         self.note_label.setWordWrap(True)
         self.note_label.setStyleSheet(f"color:{C_MUTED}; font-size:11px;")
@@ -374,6 +410,7 @@ class SupplyPanel(PanelBase):
 
     def output_off(self):
         self._armed = False
+        self.profile_box.stop()
         self.tests_tab.abort()
         if self.capture_tab.busy or self.capture_tab.running:
             self.capture_tab.stop()
@@ -444,6 +481,7 @@ class SupplyPanel(PanelBase):
         self.ovp_label.setToolTip(caps.ovp_tip)
         self.sp_ovp.setToolTip(caps.ovp_tip)
         self.ovt_chk.setVisible(caps.has_ovp_tracking)
+        self.sense_chk.setVisible(caps.has_sense_protect)
         if caps.has_waveform and self.tabs.indexOf(self.capture_tab) < 0:
             self.tabs.insertTab(1, self.capture_tab, "Capture")
         self.tabs.setTabVisible(self.tabs.indexOf(self.system_scroll), caps.has_system)
@@ -465,6 +503,8 @@ class SupplyPanel(PanelBase):
         self.ocp_chk.setChecked(bool(sp.ocp))
         if sp.ovp_tracking is not None:
             self.ovt_chk.setChecked(sp.ovp_tracking)
+        if sp.sense_protect is not None:
+            self.sense_chk.setChecked(sp.sense_protect)
         self.system_tab.on_state(sp)
         self.capture_tab.on_state(sp)
         self._style_output_button()
@@ -494,11 +534,16 @@ class SupplyPanel(PanelBase):
                 lab.setText(fmt_current(getattr(r, k)))
         self.mode_badge.setText(r.mode)
         self._style_badge(r.mode)
-        trip = {"OV", "OCP"} & set(r.flags)
-        self.flags_label.setText("  ".join(r.flags) + ("  (press Clear trip)" if trip else ""))
+        trip = {"OV", "OCP", "SENSE-OPEN"} & set(r.flags)
+        hint = ""
+        if "SENSE-OPEN" in r.flags:
+            hint = "  (a sense lead is open: reconnect +S / −S, then Clear trip)"
+        elif trip:
+            hint = "  (press Clear trip)"
+        self.flags_label.setText("  ".join(r.flags) + hint)
         self.buf.append([r.t, r.voltage, r.current, r.i_max, r.dvm])
-        if self.recorder.active:
-            self.recorder.row([time.strftime("%Y-%m-%dT%H:%M:%S"), f"{r.t:.3f}", r.voltage,
+        if self.recording:
+            self.record([time.strftime("%Y-%m-%dT%H:%M:%S"), f"{r.t:.3f}", r.voltage,
                                r.current, r.power, r.mode, "|".join(r.flags), r.dvm,
                                r.i_max, r.i_min, r.i_high, r.i_low, r.i_rms])
 
@@ -568,6 +613,7 @@ class SupplyPanel(PanelBase):
         for w in (self.span_combo, self.freeze_chk, self.trace_chk):
             w.setEnabled(True)
         self.capture_tab._buttons()
+        self.profile_box.set_enabled(on)
         if on:
             self.system_tab.set_enabled(on)
         else:

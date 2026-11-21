@@ -5,6 +5,10 @@ subtitle: Command sets, measured timings, architecture and extending the app
 
 # Technical Reference
 
+Other chapters: [Hardware](01-hardware-and-resources.md) · [Installation](02-installation.md) · [User's Guide](03-users-guide.md) · [Raspberry Pi](05-raspberry-pi.md) · [How-to guides](06-howtos.md) · [README](../README.md)
+
+**Contents:** [Architecture](#architecture) · [66321D](#agilent-66321d-scpi) · [6632A](#hp-6632a--6633a--6634a) · [3456A](#hp-3456a) · [PPK2](#nordic-ppk2) · [Saleae](#saleae-logic-2-automation) · [sigrok](#sigrok-sigrok-cli) · [Alignment](#lining-up-a-logic-capture-with-a-ppk2-alignpy) · [Sessions](#session-files-sessionpy) · [Sequencer](#sequencer-sequencerpy) · [Function generators](#function-generators-instrumentsfgenpy) · [GPIO](#gpio-instrumentsgpiopy) · [Profiles](#profiles-profilepy) · [Watchdog, events, math](#signals-watchdog-events-math) · [Reports](#reports-reportpy) · [Setups](#setups-and-bench-state-setupspy) · [Remote API](#remote-api-apipy-clientpy) · [Files](#files-the-app-writes) · [Simulators](#simulators) · [Tests](#tests) · [Adding an instrument](#adding-an-instrument)
+
 ## Architecture
 
 ```
@@ -18,6 +22,13 @@ MainWindow
 
  └─ Ppk2Panel   (PPK2)   ── worker thread ── PPK2 ── SerialStream (pyserial + reader thread)
  └─ LogicPanel  (Saleae) ── worker thread ── SaleaeLogic ── Logic2Link ── gRPC ── Logic 2 ── USB
+ └─ LogicPanel  (sigrok) ── worker thread ── SigrokLogic ── sigrok-cli subprocess ── USB
+ └─ FgenPanel   (FGEN)   ── worker thread ── FunctionGenerator ── VisaTransport (LAN / USB-TMC / GPIB)
+ └─ GpioPanel   (GPIO)   ── worker thread ── GpioDriver ── GpioLink ── libgpiod ── /dev/gpiochipN
+
+ every panel's readings ─► hub ─► Watchdog (rules ─► trip ─► MainWindow actions)
+                              └─► LiveMath (channels ─► MathWindow, session "Math" stream)
+ SequencerWindow / ApiServer ─► Bench ─► PanelInst ─► each panel's worker queue
 ```
 
 - **One I/O thread per instrument** (`worker.py`). The GUI never blocks on the bus. Commands from the GUI go into a queue and run before the next poll.
@@ -41,7 +52,23 @@ MainWindow
 | `gui/capture_tab.py`, `tests_tab.py`, `system_tab.py` | The 663xx Capture, Tests and System tabs |
 | `gui/ppk2_panel.py` | PPK2 tab: binning, ring buffer, min/max envelope plots, region statistics |
 | `instruments/saleae.py` | Saleae through Logic 2: `Logic2Link`, binary-export parser, edge measurements, lane envelope |
-| `gui/logic_panel.py` | Saleae tab: capture modes, lanes, measurements, decoders and their table |
+| `gui/logic_panel.py` | Logic-analyzer tab: capture modes, lanes, measurements, decoders and their table, PPK2 alignment |
+| `instruments/sigrok.py` | sigrok analyzers through `sigrok-cli`: scan, capture, `.sr` reading, decoder output parsing |
+| `instruments/fgen.py` | Function generators: SCPI and Siglent dialects |
+| `instruments/gpio.py` | Raspberry Pi header through libgpiod v1/v2 |
+| `align.py` | Matching a logic capture's edges to the PPK2's logic inputs |
+| `session.py` | Session files: recorder and reader |
+| `sequencer.py` | Steps, plans, limits, `Bench`, `run_plan`, `run_script` (no Qt) |
+| `profile.py` | Setpoint profiles: parsing and timed running |
+| `signals.py` | Readings as named signals; identifiers for expressions |
+| `watchdog.py`, `events.py`, `mathchannels.py` | Watchdog rules, PPK2 event finding, math expressions (no Qt) |
+| `report.py` | HTML / PDF reports with SVG plots |
+| `setups.py` | Named bench setups (JSON) |
+| `api.py`, `client.py` | Remote API server, and its stdlib-only client |
+| `gui/hub.py` | Where readings meet the watchdog and live math |
+| `gui/sequencer_window.py`, `session_viewer.py` | Sequencer window; session viewer (cursors, math, export) |
+| `gui/fgen_panel.py`, `gpio_panel.py`, `profile_box.py`, `events_tab.py` | Generator and GPIO tabs; the Profile and PPK2 Events tabs |
+| `gui/watchdog_window.py`, `math_window.py`, `setups_dialog.py`, `report_dialog.py` | Tools-menu windows |
 
 ## Agilent 66321D (SCPI)
 
@@ -193,6 +220,9 @@ I = UG[r] · ( x · (GS[r]·x + GI[r]) + S[r]·VDD/1000 + I[r] )
 
 ## Saleae (Logic 2 automation)
 
+What both logic-analyzer drivers share lives in `instruments/logic.py`: `LogicConfig`, `LogicCaps` (which also says which trigger types and decoders an analyzer has, its channel names, and its file type), `LogicCapture`, `DigitalTrace` / `AnalogTrace`, and the measurement and drawing helpers. The panel reads everything that differs from the caps.
+
+
 Saleae's current analyzers have an undocumented USB protocol, so the driver uses Logic 2's gRPC automation API (`logic2-automation` package, API 1.x, port 10430). `Logic2Link` wraps it in a few blocking calls (`start`, `wait`, `stop`, `close_capture`, `export_binary`, `add_analyzer`, `export_table`, `save`), which `SimLogic2` also implements.
 
 ### A capture
@@ -220,6 +250,150 @@ A digital channel becomes edge times plus levels (they alternate from the initia
 - **Lanes:** with no more edges in view than the plot is wide, the exact steps; otherwise one column per pixel, full height where that column has any edge. Recomputed (throttled to 20/s) when the view changes.
 - **Frequency** is from the first to the last rising edge in the window; **duty** is time high ÷ window; pulse widths count only pulses with both edges inside the window.
 
+## sigrok (sigrok-cli)
+
+`SigrokLogic` runs `sigrok-cli` (0.7 / libsigrok 0.5) as a subprocess instead of binding libsigrok: the bindings aren't packaged for Python 3 on Ubuntu, and a separate process keeps a misbehaving USB driver away from the GUI. `SigrokLink` has two calls, `run(args)` (wait for it, return code and output) and `spawn(args)` (a capture in the background). `SimSigrokCli` answers the same two calls by reading the argument list.
+
+- **Finding devices:** `sigrok-cli -d <driver> --scan` for each USB driver in `SCAN_DRIVERS` (fx2lafw, saleae-logic16, dreamsourcelab-dslogic, hantek-4032l, …), side by side. Serial-port drivers are deliberately not scanned, because probing would send bytes to whatever sits on `/dev/ttyACM*`, such as a PPK2. `--show` gives the sample rates (a list or a range), the trigger types (`0 1 r f e`) and whether `captureratio` (pre-trigger %) is supported.
+- **A capture** is one run: `--config samplerate=N[:captureratio=P] -d <spec> --channels D0,D3 -o capture.sr` plus `--samples N [--triggers D3=f]`, or `--continuous` for Manual. That run is stopped with SIGINT. stdin must stay an open pipe, because a continuous capture ends as soon as its stdin reaches end-of-file.
+- **The .sr file** is a zip: `metadata` (INI: `samplerate`, `probeN = name`, `unitsize`) and raw chunks `logic-1-1`, `logic-1-2`, … Channel `probeN` is bit N−1 of each sample word even when other channels are off. `read_sr` joins the chunks into one numpy array, and `traces_from_samples` turns each bit into edge times.
+- **Trigger position:** the file doesn't record it. libsigrok's software trigger fires on the first matching sample, so t = 0 is put at the first sample in the data that meets the condition (`trigger_index`).
+- **Decoding** is one more run per decoder on the saved file: `-i capture.sr -P uart:rx=D0:baudrate=115200 -A uart=rx-data:… --protocol-decoder-samplenum`, whose lines `509-579 uart-1: 48` become table rows. A wrong channel name only prints `No channel with name …` to stderr and still exits 0, so stderr is checked.
+
+## Lining up a logic capture with a PPK2 (`align.py`)
+
+The PPK2's samples are timed on the app clock (anchored at the start of a run, then counted at exactly 10 µs). A logic capture is timed on the analyzer's clock, from its own start or trigger. The host only knows roughly when the capture started (`t_armed`, within a few ms, worse for a triggered capture). Both see one shared signal.
+
+`align()` takes the analyzer's edges on that channel (dropping any closer than 20 µs to a neighbour, which the PPK2 can't resolve) and the PPK2's edges on its input. Each PPK2 edge of the same direction within the search window (the PPK2's record from 2 s before arming to 0.5 s after the capture arrived) is tried as the match for the first analyzer edge. Each candidate offset is scored by how many analyzer edges then land within 16 µs of a same-direction PPK2 edge. The best candidate is refined with the median of its matched differences. The result is rejected if fewer than half the edges match, and flagged as ambiguous if a candidate more than four tolerances away scores ≥ 90 % as well, which is what a periodic signal does. Scoring uses at most 400 edges and 6000 candidates (~20 ms).
+
+The result is `LogicCapture.offset`, the app time of the capture's t = 0. Its accuracy is set by the PPK2's 10 µs sampling (±5–10 µs). The PPK2's samples for the capture's span are stored in `LogicCapture.extra["ppk2"]` on the capture's own time axis.
+
+## Session files (`session.py`)
+
+A session is one SQLite file (WAL mode) written from the GUI thread. Rows are buffered and committed once a second.
+
+| Table | Contents |
+|---|---|
+| `meta(key, value)` | `format` (1), `created`, `wall_t0` (Unix time of app t = 0) |
+| `streams(id, name, model, resource, columns, tbl)` | one per instrument (or sequencer layout); `columns` is JSON |
+| `s_<id>(t, …)` | that stream's rows: `t` = app time (s), then its columns, the same as its CSV without `timestamp` and `t_s` |
+| `notes(t, text)` | |
+| `captures(id, t_app, t0, aligned, name, cfg, data, table_header, table_rows, note)` | `t0` = app time of the capture's t = 0 (PPK2-aligned if `aligned`, else the host's arming time); `cfg` = the LogicConfig as JSON; `data` = a compressed `.npz` of the traces (`d<ch>_t`, `d<ch>_l`, `d<ch>_end`, `a<ch>_v`, `a<ch>_td`, `x_ppk2_t`, `x_ppk2_i`) |
+
+Panels feed it through `PanelBase.record(row)`, the same row as their CSV, so a new instrument gets session recording by laying out its CSV row. Recording into an existing file shifts the new run's times by the difference in `wall_t0`, so one file keeps one time base. `SessionReader` loads it back for the viewer.
+
+## Sequencer (`sequencer.py`)
+
+The engine doesn't import Qt. `Bench` holds one `Inst` per instrument tab and offers `set`, `measure`, `capture`, `wait`, `note`, `record`. Every wait goes through the stop event. `run_plan` runs a `Plan` (steps + once/repeat/sweep), and `run_script` runs Python with `bench` in scope. The window (`gui/sequencer_window.py`) runs either on its own thread and supplies `PanelInst`:
+
+- driver calls are queued on that tab's `InstrumentWorker` (`submit(job, refresh=True)`), and the thread waits on an event, so a sequence never talks to an instrument at the same time as its polling;
+- readings come from the tab's `last_reading`, and a measurement waits for one timed after it was asked for;
+- PPK2 averages come from its sample ring, and captures from the logic tab's own Capture, both through a queued call onto the GUI thread (`Invoker`).
+
+## Function generators (`instruments/fgen.py`)
+
+`FunctionGenerator` (kind `"fgen"`) speaks one of two dialects, chosen from `*IDN?`: Siglent (`SDG` in the model) or SCPI (everything else). Settings are read back after every change, so the panel shows what the generator really took (it may round frequency or clamp amplitude to its limits).
+
+| | SCPI (Keysight 33xxx, Rigol DG) | Siglent SDG |
+|---|---|---|
+| Waveform | `SOUR1:FUNC SIN` (`SQU RAMP PULS NOIS DC`) | `C1:BSWV WVTP,SINE` (`SQUARE RAMP PULSE NOISE DC`) |
+| Frequency | `SOUR1:FREQ 1000` | `C1:BSWV FRQ,1000` |
+| Amplitude (Vpp) | `SOUR1:VOLT 1.0` | `C1:BSWV AMP,1.0` |
+| Offset | `SOUR1:VOLT:OFFS 0` | `C1:BSWV OFST,0` |
+| Duty | `SOUR1:FUNC:SQU:DCYC 50` | `C1:BSWV DUTY,50` |
+| Output | `OUTP1 ON` / `OUTP1?` | `C1:OUTP ON` / `C1:OUTP?` |
+| Read back | each query: `SOUR1:FUNC?` … | one `C1:BSWV?`, parsed as `key,value` pairs |
+| Channels | 2 if `SOUR2:FUNC?` answers without error | from the model number (`SDG…2…X` = 2) |
+
+`set_output(False)` (**Esc**) turns every channel off. `poll_enabled` is false: a generator has nothing to measure, so the worker only reads state after commands. Model numbers in `KNOWN` make auto-detect pick this driver; `looks_like_fgen(idn)` is the test.
+
+## GPIO (`instruments/gpio.py`)
+
+`GpioDriver` (kind `"gpio"`) uses **libgpiod** (`/dev/gpiochip*`, the kernel's character-device API; not the deprecated sysfs interface or RPi.GPIO), through `GpioLink`, which supports both the v1 (`gpiod.Chip.get_line`) and v2 (`gpiod.request_lines`) Python bindings. Each pin in use is one requested line, with direction, bias (pull) and active-low set by the kernel, so "on" is always the logical level and the hardware inversion happens below. Pins in mode *off* aren't requested at all.
+
+- `find_chip()` picks the chip whose label is one of `pinctrl-rp1` (Pi 5), `pinctrl-bcm2712`, `pinctrl-bcm2711` (Pi 4), `pinctrl-bcm2835` (Pi 3 and earlier); `HEADER` maps the 26 header GPIOs to physical pins.
+- `configure(pins)` re-requests the lines; outputs start inactive. `set_pin`, `pulse(gpio, seconds)` (invert, sleep on the worker thread, restore), `get_pin`.
+- `poll()` reads every in/out line at once (20 Hz) into `GpioReading.levels` (logical 0/1), which the trend, CSV, session, watchdog (`gpio17`) and math (`jig.gpio17`) use.
+- `set_output(False)` makes every output inactive; `close()` releases the lines.
+
+## Profiles (`profile.py`)
+
+`parse(text) → Profile` with `times`, `values` and the update `rate`; `Profile.points()` lists `(t, value)` pairs (periodic shapes are sampled at `rate`, default 10/s; step shapes give one point per step). `run(profile, setter, stop, clock, on_point)` sends each point at `t0 + t`: it sleeps until the point is due (waking on `stop`), calls `setter(value)`, and if the setter took so long that later points are already due, skips to the latest due one. So timing never drifts, and a slow instrument sees a coarser shape rather than a slower one. `stop.set()` raises `ProfileStopped`. The GUI's `ProfileBox` runs it on a thread with the setter going through the panel's worker (`submit(…).wait()`); the sequencer's **Profile** step and `bench.profile()` call the same `run`.
+
+## Signals, watchdog, events, math
+
+**`signals.py`** turns any panel's reading into named arrays: `signals_of(kind, reading) → {quantity: (t, values)}`; for a PPK2 that's every 10 µs sample of the block (`t0 + k·10 µs`). `slug(name)` makes the identifiers used in expressions. `gui/hub.py` is the one place readings arrive: `PanelBase._on_reading` calls `hub.feed(panel, reading)`, which feeds the watchdog and the live math.
+
+**`watchdog.py`**: `Rule(source, quantity, op, limit, hold_ms, action, target, enabled)`. `Watchdog.feed(name, kind, reading)` checks each enabled, un-tripped rule on that instrument's signals, vectorised over the block: it finds the runs of samples past the limit (carrying a run that's still going across blocks), and trips when a run has lasted `hold_ms` (for one-reading-per-block instruments, from the first past-limit reading's time to the current one's). A trip latches (`rule.tripped`, `rule.trip_t`, `rule.trip_value`) and is returned; the main window carries out the action through the same paths as Esc. Rules serialise with `to_list()` / `from_list()`.
+
+**`events.py`**: `find_events(t, i, threshold, min_gap, min_len, hysteresis)`: a Schmitt trigger (rise above `threshold`, fall below `threshold × (1 − hysteresis)`), done with numpy over the whole buffer; events closer than `min_gap` are merged, shorter than `min_len` dropped. Each `Event` has `t0, t1, duration, peak, mean, charge` (trapezoidal integral). `summary(events, t, i)` gives the counts, rate and the mean current outside events. `attach_bus(events, rows, offset, pad)` fills each event's `bus` with the decoded rows (from an aligned capture, times shifted by its `offset`) within `pad` of it. `histogram(events, field, bins)`.
+
+**`mathchannels.py`**: `evaluate(expr, series, grid)`: each `inst.quantity` series is first put on the evaluation `grid` by `resample()`: bin-averaged when the series has several samples per grid step (a PPK2), else linearly interpolated, so a 50 µs burst counts in proportion to its charge rather than depending on whether a grid point happened to land on it. The expression is evaluated with numpy functions only (`__builtins__` empty) and `inst.quantity` attribute access via `_Inst` objects, which name the missing signal in the error if one doesn't exist. `avg(x, s)` is a rolling mean over `s` seconds of grid. `integrate(t, y)` is the cumulative trapezoid. `LiveMath` keeps 60 s of each signal (a PPK2 reduced to 1 ms means as it arrives) and `tick(now)` evaluates every channel on a 50 ms grid; integrated channels keep their running total across ticks.
+
+## Reports (`report.py`)
+
+`sequence_report(title, rows, columns, plan, log, instruments, …)` and `session_report(path, title, t_range, columns)` return one self-contained HTML string: inline CSS, plots as inline SVG made by `svg_plot()` (each series cut into ≤ 800 x-buckets drawn as a min/max envelope, so spikes survive), tables, the sequence. `save(html, path)` writes HTML, or PDF through WeasyPrint (`HTML(string=…).write_pdf`) when the path ends in `.pdf`. Nothing loads from the network, so a report renders the same offline, years later.
+
+## Setups and bench state (`setups.py`)
+
+A setup is a JSON file in `~/.config/ee-workbench/setups/<name>.json`:
+
+```json
+{"version": 1, "name": "nRF52 sleep current", "description": "…", "saved": "2026-11-20 14:02:11",
+ "instruments": [{"resource": "PPK2::/dev/serial/by-id/…", "model": "PPK2", "settings": {…}}, …],
+ "sequence": {"steps": [{"action": "Measure", "target": "PPK2", "what": "current", "value": "2",
+                         "label": "I_sleep", "lo": "", "hi": "10e-6"}, …],
+              "loop": "once", "count": 1, "start": 0.0, "stop": 1.0, "step": 0.1,
+              "off_at_end": true, "stop_on_fail": true, "script": "…", "use_script": false},
+ "watchdog": [{"source": "PPK2", "quantity": "current", "op": ">", "limit": 0.05, "hold_ms": 10,
+               "action": "all outputs off", "target": "", "enabled": true}],
+ "watchdog_armed": true,
+ "math": [{"name": "P", "expr": "…", "unit": "W", "integrate": false, "enabled": true}]}
+```
+
+`settings` is each panel's `session_settings()` (what `last-session.json` keeps too). Recall (`gui/setups_dialog.apply_bench`) closes the tabs, opens the listed instruments through the normal connect path (which reads each instrument's state and never writes setpoints or outputs), applies the settings, then the sequence, rules and channels. The current watchdog rules and math channels are also kept in `~/.config/ee-workbench/bench.json`, saved whenever they change.
+
+## Remote API (`api.py`, `client.py`)
+
+JSON over HTTP on `127.0.0.1:<api_port>` (default 8765), served by a `ThreadingHTTPServer` thread in the app.
+
+| Request | Reply |
+|---|---|
+| `GET /` | `{"app": "ee-workbench", "methods": [...]}`, no token needed |
+| `POST /call` with `Authorization: Bearer <token>` and body `{"method": "measure", "args": ["PPK2", "current", 1.0], "kwargs": {}}` | `200 {"result": 0.000123}` |
+| bad token | `401 {"error": …}` |
+| unknown method | `404 {"error": "no method …"}` |
+| a sequencer error (no such instrument, bad value) | `400 {"error": …, "type": "SequenceError"}` |
+| Esc / All outputs OFF during the call | `409 {"error": "stopped …", "type": "Stopped"}` |
+| anything else | `500 {"error": …, "type": …, "trace": …}` |
+
+Methods (`METHODS`): `instruments set measure capture wait note record gpio read_pin wait_for profile expect outputs_off log`, the [Script-tab](03-users-guide.md#script-tab) `bench` calls. Each request gets a fresh `Bench` over the open tabs (`PanelInst`, as the sequencer uses), so calls are queued on each instrument's worker thread like any other command; concurrent requests are allowed but queue per instrument. Results go through `to_json()`: a capture becomes `{header, rows, offset, span, channels}`, numpy scalars become floats. `record()` and `expect()` rows go to the sequencer window's results (and the session).
+
+The token is 24 random bytes (`secrets.token_urlsafe(24)`), checked with `hmac.compare_digest`, and written with the URL, port and PID to `~/.config/ee-workbench/api.json`, created with mode 600 and removed when the API stops. `client.connect(url=None, token=None, timeout=600)` reads that file, and the returned `RemoteBench` turns `bench.anything(*a, **k)` into a call; errors raise `BenchError`. A raw call with curl:
+
+```bash
+TOKEN=$(python3 -c 'import json,os;print(json.load(open(os.path.expanduser("~/.config/ee-workbench/api.json")))["token"])')
+curl -s -H "Authorization: Bearer $TOKEN" -d '{"method":"instruments"}' http://127.0.0.1:8765/call
+```
+
+## Files the app writes
+
+| File | What |
+|---|---|
+| `~/.config/ee-workbench/config.toml` | Start-up settings (created with comments on first run) |
+| `~/.config/ee-workbench/last-session.json` | The open instruments and their panel settings, for the next start |
+| `~/.config/ee-workbench/bench.json` | Watchdog rules (and whether armed) and math channels |
+| `~/.config/ee-workbench/sequence.json` | The sequencer's steps and script as last run |
+| `~/.config/ee-workbench/setups/*.json` | Named [setups](#setups-and-bench-state-setupspy) |
+| `~/.config/ee-workbench/api.json` | Remote API address and token (mode 600), only while it runs |
+| `*.csv`, `*.eewb`, `*.html` / `*.pdf` | Wherever you save recordings, sessions and reports |
+
+`$XDG_CONFIG_HOME` moves `~/.config`.
+
+## Look and feel (`gui/theme.py`)
+
+Colours are tokens in `theme.py`, and one application stylesheet uses them. Buttons get a role instead of a colour (`set_role(button, "primary" | "danger" | "danger-solid" | "recording")`). Check-box and arrow icons are small SVGs in `gui/icons/`. Touch mode adds `theme.touch_extra()` on top of `touch.TOUCH_STYLE`. The instrument colours (volts amber, amps blue, DVM violet, DMM green) stay in `widgets.py`.
+
 ## Simulators
 
 | Resource | Model |
@@ -229,6 +403,12 @@ A digital channel becomes edge times plus levels (they alternate from the initia
 | `SIM::3456A` | DCV 5 V with slow drift, Ω ~1 kΩ, ACV 120 mV; noise scales with integration time; null; syntax-error status |
 | `SIM::SALEAE` | A Logic Pro 16 behind a fake Logic 2: UART text on D0, square waves on D1/D2, clock bursts on D3, analog sine and RC-filtered square. Edges fall on the sample grid; the trigger finds the real first edge and times everything from it. It writes real version 0 or 1 binary files, rejects invalid sample rates like Logic 2, and decodes Async Serial on D0 at 115200. Its `speed` lets tests finish captures faster than real time |
 | `SIM::PPK2` | The real byte stream: a BLE-style DUT encoded through its own calibration (with range switching and a spike on each switch), metadata, mode, voltage and DUT power commands, counter, logic D0/D1, and a hook to drop samples. Its clock can be injected, so tests run without waiting |
+| `SIM::FGEN` | A two-channel Keysight 33522B: SCPI `SOUR{n}:…` / `OUTP{n}` with read-back and the error queue |
+| `SIM::SDG` | A two-channel Siglent SDG2042X: `C{n}:BSWV` / `C{n}:OUTP` |
+| `SIM::GPIO` | A Pi header with 26 lines, honouring direction, pull and active-low, wired as a small jig: GPIO21 follows GPIO20, GPIO12 is GPIO16 inverted, GPIO26 a button (low 0.2 s every 2 s); the rest float to their pull |
+| `SIM::SIGROK` | A fake `sigrok-cli` with an 8-channel 24 MHz fx2lafw analyzer: answers `--scan` / `--show` like the real program, writes real `.sr` files with the Saleae simulator's signals, triggers in software like libsigrok, ends a continuous capture on SIGINT, and decodes UART |
+
+All three logic/power simulators share a **debug pin** (`sim/shared.py`): an irregular signal on app time, toggling about every 1 ms, that appears on the simulated analyzers' D7 and the simulated PPK2's D7, as if one DUT pin were wired to both. Use it to try PPK2 alignment without hardware: D7 ↔ PPK2 D7.
 
 ## Tests
 
@@ -236,18 +416,19 @@ A digital channel becomes edge times plus levels (they alternate from the initia
 .venv/bin/python -m pytest tests
 ```
 
-The tests run each driver against its simulator: identification, CV/CC, protection trips and events, error decoding, every 663xx setting, saved setups, immediate/level/segmented/output-step captures with pre-trigger, abort, capture validation, the waveform measurements in `analysis.py`, the config files, and the 3456A reading formats. PPK2 tests cover metadata captured from a real unit, word decoding, the calibration formula, the spike filter against a sample-by-sample reference (across chunk boundaries), and the driver against the simulator: sample count, timing, levels, logic, lost samples, modes, and stop/start. Saleae tests cover both binary-format versions (including multi-chunk files), the edge measurements and lane envelope, resource parsing, and timed, triggered, manual and aborted captures, decoding and save/export through the simulator and the real worker thread.
+The tests run each driver against its simulator: identification, CV/CC, protection trips and events, error decoding, every 663xx setting, saved setups, immediate/level/segmented/output-step captures with pre-trigger, abort, capture validation, the waveform measurements in `analysis.py`, the config files, and the 3456A reading formats. PPK2 tests cover metadata captured from a real unit, word decoding, the calibration formula, the spike filter against a sample-by-sample reference (across chunk boundaries), and the driver against the simulator: sample count, timing, levels, logic, lost samples, modes, and stop/start. `test_bench_features.py` covers profiles (parsing, timing, skipping), GPIO and both generator dialects against their simulators, limits and stop-on-fail, Wait for, the watchdog's hold logic across blocks, event finding and bus attachment, math evaluation and resampling, reports (HTML, and PDF when WeasyPrint is present), setups, and the Remote API end to end over HTTP. Saleae tests cover both binary-format versions (including multi-chunk files), the edge measurements and lane envelope, resource parsing, and timed, triggered, manual and aborted captures, decoding and save/export through the simulator and the real worker thread.
 
 ## Adding an instrument
 
-1. **Driver:** write a class in `instruments/` with `kind = "supply"` or `"dmm"`, plus `family`, `identify()`, `poll(t, cfg)`, `errors()`, and the setters the panel calls. Return the shared data types from `base.py`. A streaming device brings its own panel and data types instead; see the PPK2 (`kind = "ppk2"`, a `cfg` property for the worker to re-read, and `close()` to stop the stream).
+1. **Driver:** write a class in `instruments/` with `kind = "supply"` or `"dmm"` (or a new kind with its own panel, like `"fgen"` and `"gpio"`), plus `family`, `identify()`, `poll(t, cfg)`, `errors()`, and the setters the panel calls. Return the shared data types from `base.py`. A streaming device brings its own panel and data types instead; see the PPK2 (`kind = "ppk2"`, a `cfg` property for the worker to re-read, and `close()` to stop the stream).
 2. **Capabilities:** fill in `SupplyCaps`. The supply panel hides what's unsupported (DVM, digitizer, waveform, resistance) and handles `setpoint_readback=False`.
 3. **Register it:** add it to `MODELS` and `_CLASSES` in `instruments/__init__.py`, and teach `detect()` its ID string if it has one.
 4. **Simulator:** subclass `sim.base.SimBase`, implement `write()`, and add it to `sim.open_sim` and `SIM_RESOURCES`.
-5. **Tests:** add `tests/test_<model>.py`.
+5. **Panel:** a new kind needs a `PanelBase` subclass with `KIND` set (so Esc, the sequencer and the watchdog know what it is), `output_off()` if it has outputs, `csv_header()` and `self.record(row)` from `on_reading` for CSV and sessions, `session_settings()` / `restore_settings()`, and a mapping in `MainWindow`. To use it from the sequencer, add its settings to `sequencer.SET_WHAT` / `MEASURE_WHAT` (and `PROFILE_WHAT`) and handle them in `PanelInst`; for the watchdog and math, add its quantities to `signals.py`.
+6. **Tests:** add `tests/test_<model>.py`.
 
 ## Licences and third-party code
 
 - **linux-gpib** (GPL): built from `vendor/linux-gpib` (not committed; fetched by the install script).
-- **pyvisa, pyvisa-py** (MIT), **pyqtgraph** (MIT), **PyQt6** (GPL v3), **gpib-ctypes** (GPL v2), **pyserial** (BSD).
+- **pyvisa, pyvisa-py** (MIT), **pyqtgraph** (MIT), **PyQt6** (GPL v3), **gpib-ctypes** (GPL v2), **pyserial** (BSD), **pyusb** (BSD), **libgpiod** Python bindings (LGPL), **WeasyPrint** (BSD; optional), **sigrok-cli** (GPL; run as a separate program), **logic2-automation** (Apache 2.0; optional).
 - **PPK2 protocol and calibration:** our own implementation, following the behaviour of Nordic's open-source nRF Connect Power Profiler (`pc-nrfconnect-ppk`); no code is copied from it.

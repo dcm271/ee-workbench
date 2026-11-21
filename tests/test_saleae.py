@@ -176,7 +176,7 @@ def test_timed_capture(drv):
     s1, s2 = digital_stats(res.digital[1]), digital_stats(res.digital[2])
     assert s1["freq"] == pytest.approx(1000, rel=1e-6) and s1["duty"] == pytest.approx(0.25, abs=0.02)
     assert s2["freq"] == pytest.approx(10_000, rel=1e-6)
-    assert digital_stats(res.digital[7])["edges"] == 0
+    assert digital_stats(res.digital[7])["edges"] == pytest.approx(20, abs=1)   # shared pin
     a = analog_stats(res.analog[0])
     assert a["min"] == pytest.approx(0, abs=0.1) and a["max"] == pytest.approx(3.3, abs=0.1)
     assert res.span == pytest.approx((0.0, 0.02))

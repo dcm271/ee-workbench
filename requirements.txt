@@ -1,0 +1,13 @@
+# Python packages for the project's .venv (made with --system-site-packages).
+# PyQt6 and numpy come from apt (python3-pyqt6, python3-numpy): see
+# scripts/setup-ubuntu.sh / scripts/setup-pi.sh, which install all of this.
+pyqtgraph>=0.13
+pyvisa>=1.13
+pyvisa-py>=0.7
+gpib-ctypes>=0.3
+pyserial>=3.5
+pyusb>=1.2          # USB-TMC instruments (function generators) through pyvisa-py
+pytest>=7
+# Saleae analyzers (through Logic 2, x86-64 only) also need:  logic2-automation>=1.0
+# PDF test reports need:  weasyprint   (HTML reports need nothing extra)
+# GPIO (Raspberry Pi header) needs the apt package python3-libgpiod
