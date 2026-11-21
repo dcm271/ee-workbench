@@ -5,13 +5,13 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (QButtonGroup, QDialog, QHBoxLayout, QLabel, QListWidget,
                              QListWidgetItem, QPushButton, QSpinBox, QVBoxLayout)
 
-from ..instruments import MODELS, SIM_MODELS
+from ..instruments import MODELS, model_for
 from ..transport import list_resources
 from . import touch
 from .widgets import C_MUTED
 
 SHORT_MODELS = {"auto": "Auto\n(supplies)", "663xx": "66321D\n66311B/21B",
-                "6632A": "6632A\n33A/34A", "3456A": "3456A\nDMM"}
+                "6632A": "6632A\n33A/34A", "3456A": "3456A\nDMM", "PPK2": "PPK2\nNordic"}
 
 
 class ConnectDialog(QDialog):
@@ -107,10 +107,10 @@ class ConnectDialog(QDialog):
 
     def _select(self, resource: str):
         self.resource = resource
-        sim = SIM_MODELS.get(resource.upper())
-        if sim:
-            self.model = sim
-            self.model_btns[sim].setChecked(True)
+        implied = model_for(resource)
+        if implied != "auto":
+            self.model = implied
+            self.model_btns[implied].setChecked(True)
         self.chosen.setText(resource)
         self.chosen.setStyleSheet("font-weight:bold;")
         self.ok.setEnabled(True)

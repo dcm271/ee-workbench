@@ -4,6 +4,10 @@ from __future__ import annotations
 
 def open_sim(resource: str):
     name = resource.upper().split("::", 1)[-1]
+    if "PPK2" in name:
+        from .sppk2 import SimPPK2
+
+        return SimPPK2()
     if "3456" in name:
         from .s3456a import Sim3456A
 

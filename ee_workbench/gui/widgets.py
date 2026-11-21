@@ -30,32 +30,57 @@ def fmt_current(a: float | None) -> str:
     return f"{a:+.4f} A"
 
 
-def fmt_si(x: float | None, unit: str, digits: int = 4) -> str:
-    if x is None or math.isnan(x):
-        return "—"
-    ax = abs(x)
-    for scale, prefix in ((1e9, "G"), (1e6, "M"), (1e3, "k"), (1, ""), (1e-3, "m"),
-                          (1e-6, "µ"), (1e-9, "n")):
-        if ax >= scale:
-            break
-    return f"{x / scale:.{digits}g} {prefix}{unit}"
+_PREFIXES = ((1e9, "G"), (1e6, "M"), (1e3, "k"), (1, ""), (1e-3, "m"), (1e-6, "µ"), (1e-9, "n"))
 
 
-def fmt_fixed(x: float, unit: str, sig: int) -> str:
-    """Engineering notation with a fixed number of significant digits,
-    keeping trailing zeros (meter-style)."""
+def fmt_si(x: float | None, unit: str, digits: int = 4, signed: bool = False) -> str:
+    """SI prefix with a fixed `digits - 1` decimals, trailing zeros kept, so a
+    changing value doesn't grow and shrink (1.200 mA, 12.345 mA, 123.400 mA).
+    `signed` always shows the sign, so the digits don't shift when it flips."""
     if x is None or math.isnan(x):
         return "—"
+    dec = max(0, digits - 1)
     ax = abs(x)
+    i = 3 if ax == 0 else next((k for k, (scale, _) in enumerate(_PREFIXES) if ax >= scale),
+                               len(_PREFIXES) - 1)
+    # 999.9996 m would round up to "1000.000 m": show it as 1.000 instead.
+    if i > 0 and round(ax / _PREFIXES[i][0], dec) >= 1000:
+        i -= 1
+    scale, prefix = _PREFIXES[i]
+    return f"{x / scale:{'+' if signed else ''}.{dec}f} {prefix}{unit}"
+
+
+def _eng_exp(ax: float, unit: str) -> int:
     exp = 0 if ax == 0 else int(math.floor(math.log10(ax) / 3) * 3)
     if unit == "V":
         exp = min(max(exp, -3), 0)
-    exp = max(min(exp, 9), -9)
+    return max(min(exp, 9), -9)
+
+
+def fmt_fixed(x: float, unit: str, sig: int, full_scale: float | None = None) -> str:
+    """Meter-style engineering notation with `sig` significant digits, keeping
+    trailing zeros.  With a `full_scale` (a fixed meter range) the prefix and
+    the decimals come from the range, as on the meter's own display, so they
+    stay put as the reading changes; without one they follow the value."""
+    if x is None or math.isnan(x):
+        return "—"
+    exp = _eng_exp(abs(full_scale if full_scale else x), unit)
     prefix = {9: "G", 6: "M", 3: "k", 0: "", -3: "m", -6: "µ", -9: "n"}[exp]
     m = x / 10 ** exp
-    int_digits = 1 if abs(m) < 1 else int(math.log10(abs(m))) + 1
+    ref = abs(full_scale / 10 ** exp) if full_scale else abs(m)
+    int_digits = 1 if ref < 1 else int(math.log10(ref) + 1e-9) + 1
     dec = max(0, sig - int_digits)
     return f"{m:+.{dec}f} {prefix}{unit}"
+
+
+def range_full_scale(label: str | None) -> float | None:
+    """'100 mV' → 0.1, '10 kΩ' → 1e4; None for AUTO or anything unparsed."""
+    try:
+        num, unit = (label or "").split()
+        mult = {"m": 1e-3, "k": 1e3, "M": 1e6, "G": 1e9}.get(unit[0], 1) if len(unit) > 1 else 1
+        return float(num) * mult
+    except ValueError:
+        return None
 
 
 class SafeSpin(QDoubleSpinBox):
@@ -147,6 +172,24 @@ class TraceBuffer:
         self.data[self.n] = [np.nan if v is None else v for v in row]
         self.n += 1
 
+    def extend(self, rows: np.ndarray):
+        """Append many rows at once (an (n, ncols) array)."""
+        rows = np.asarray(rows, dtype=float)
+        if rows.size == 0:
+            return
+        if len(rows) >= self.max_rows:
+            rows = rows[-(self.max_rows // 2):]
+        while self.n + len(rows) > len(self.data):
+            if len(self.data) >= self.max_rows:
+                keep = max(0, min(self.n, self.max_rows // 2) - len(rows))
+                self.data[:keep] = self.data[self.n - keep:self.n]
+                self.n = keep
+            else:
+                grow = min(len(self.data), self.max_rows - len(self.data))
+                self.data = np.concatenate([self.data, np.full((grow, self.ncols), np.nan)])
+        self.data[self.n:self.n + len(rows)] = rows
+        self.n += len(rows)
+
     def view(self) -> np.ndarray:
         return self.data[: self.n]
 
@@ -208,3 +251,70 @@ def dark_palette(app: QApplication):
         QFrame#bar { background:#262a30; border-radius:6px; }
         QTabWidget#instruments::pane { border-top: 1px solid #33373e; }
     """)
+
+
+class SteadyY:
+    """Y autoscale for a scrolling strip chart that doesn't twitch.
+
+    pyqtgraph's autorange refits on every new point, so the axis jumps each
+    time a peak enters or scrolls out of the window.  This grows the range at
+    once (with some headroom) when data would go off-scale, but only shrinks
+    once the data has used under half of it, and then eases in over about a
+    second.  Zooming Y by hand turns it off; the plot's "A" button (or
+    "View all") turns it back on."""
+
+    HEADROOM = 0.10     # extra room added when growing, as a fraction of the data range
+    PAD = 0.05          # margin kept around the data
+    SHRINK_AT = 0.5     # start shrinking when the data fills less than this ...
+    SHRINK_TO = 0.85    # ... and keep easing in until it fills this much
+    EASE = 0.15         # fraction of the remaining shrink done per update
+
+    def __init__(self, plot):
+        self.vb = plot.getViewBox()
+        self.auto = True
+        self.range: list[float] | None = None
+        self._shrinking = False
+        self.vb.disableAutoRange(axis=self.vb.YAxis)
+        self.vb.sigRangeChangedManually.connect(self._manual)
+
+    def _manual(self, mask):
+        if mask[1]:
+            self.auto = False
+
+    def reset(self):
+        """Forget the current range (after Clear or a log/linear switch)."""
+        self.range = None
+        self._shrinking = False
+
+    def update(self):
+        if self.vb.autoRangeEnabled()[1]:      # "A" button / View all: take over again
+            self.vb.disableAutoRange(axis=self.vb.YAxis)
+            self.auto = True
+            self.reset()
+        if not self.auto or not self.vb.isVisible():
+            return
+        xr = self.vb.viewRange()[0]
+        b = self.vb.childrenBounds(orthoRange=(None, xr))[1]
+        if b is None or b[0] is None or not (math.isfinite(b[0]) and math.isfinite(b[1])):
+            return
+        lo, hi = b
+        size = (hi - lo) or max(abs(hi), 1e-12) * 1e-3
+        want = [lo - size * self.PAD, hi + size * self.PAD]
+        r = self.range
+        if r is None:
+            r = want
+        elif want[0] < r[0] or want[1] > r[1]:
+            # Data off-scale: grow straight away, only on the side that needs it.
+            r = [min(r[0], want[0] - size * self.HEADROOM), max(r[1], want[1] + size * self.HEADROOM)]
+            self._shrinking = False
+        else:
+            fill = (want[1] - want[0]) / (r[1] - r[0])
+            if fill < self.SHRINK_AT:
+                self._shrinking = True
+            elif fill > self.SHRINK_TO:
+                self._shrinking = False
+            if self._shrinking:
+                # Moving each end toward `want` never cuts off data inside it.
+                r = [r[0] + (want[0] - r[0]) * self.EASE, r[1] + (want[1] - r[1]) * self.EASE]
+        self.range = r
+        self.vb.setYRange(r[0], r[1], padding=0)

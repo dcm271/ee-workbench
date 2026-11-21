@@ -8,7 +8,7 @@ import traceback
 
 from PyQt6.QtCore import QThread, pyqtSignal
 
-from .instruments import make_driver
+from .instruments import make_driver, model_for
 from .transport import open_transport
 
 # One time base for every instrument so their traces line up.
@@ -87,14 +87,18 @@ class InstrumentWorker(QThread):
                 self._do_poll()
                 next_poll = time.monotonic() + self.interval_s
         try:
+            if hasattr(self.drv, "close"):
+                self.drv.close()        # e.g. stop a streaming device
             self.drv.t.close()
         except Exception:
             pass
 
     def _connect(self) -> bool:
+        t = None
         try:
             self.log.emit(f"Opening {self.resource} ...")
-            t = open_transport(self.resource, self.baud)
+            t = open_transport(self.resource, self.baud,
+                               model_for(self.resource, self.model))
             drv = make_driver(self.model, t, self.resource)
             caps = drv.identify()
             self.drv = drv
@@ -105,6 +109,11 @@ class InstrumentWorker(QThread):
             return True
         except Exception as e:
             self.log.emit(traceback.format_exc().rstrip())
+            if t is not None:
+                try:
+                    t.close()       # free the port for a retry
+                except Exception:
+                    pass
             self.connect_failed.emit(str(e))
             return False
 

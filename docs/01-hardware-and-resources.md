@@ -15,6 +15,7 @@ This guide lists the hardware EE Workbench supports, what each instrument can do
 | Agilent 66311B / 66321B | Same family without DVM | GPIB / RS-232 | Supported by the same driver; DVM hidden if absent |
 | **HP 6632A** System DC Power Supply (also 6633A, 6634A) | Second supply, 20 V / 5 A | GPIB only | Supported. Written from the manual and tested on the simulator |
 | **HP 3456A** 6½-digit DMM | Precision voltage / resistance | GPIB only | Supported. Written from the manual and tested on the simulator |
+| **Nordic Power Profiler Kit II** (PPK2) | 100 kS/s current profiler and 0.8–5 V source | USB (ID `1915:c00a`, serial) | Supported. Tested on real hardware (HW 8682) |
 | **Agilent E3610A** bench supply | Manual bench supply | **None** | Cannot be controlled. Monitor its output with the 3456A instead (see below) |
 | **NI GPIB-USB-HS** | USB-to-GPIB controller | USB 2.0 (ID `3923:709b`) | Supported through linux-gpib |
 | Linux PC | Runs the application | — | Ubuntu with kernel 7.0 tested |
@@ -73,6 +74,21 @@ These supplies use HP's command language from before SCPI (`VSET`, `ISET`, `VOUT
 | Factory GPIB address | **22** (set on the rear-panel switches) |
 
 The 3456A has **no identification query**, so it can't be auto-detected. You choose it by model when you connect. The app checks that it's there by taking a reading. Make sure the rear-panel **TALK ONLY** switch is off, otherwise it won't accept commands.
+
+### Nordic Power Profiler Kit II (PPK2)
+
+| Parameter | Value |
+|---|---|
+| Sample rate | 100 kS/s, streamed continuously |
+| Current | 200 nA to 1 A, five shunt ranges switched automatically by the PPK2 |
+| Source meter | Supplies the DUT from **VOUT**, 800 to 5000 mV |
+| Ampere meter | The DUT keeps its own supply; current flows **VIN → VOUT** through the PPK2 |
+| Logic inputs | D0–D7, sampled with every current sample |
+| Interface | USB (the **USB DATA/POWER** port). No GPIB or linux-gpib needed |
+
+The PPK2 shows up as **two** serial ports (`/dev/ttyACM0` and `/dev/ttyACM1`, say). Only the first carries data. The app lists just that one, as `PPK2::/dev/serial/by-id/usb-Nordic_Semiconductor_PPK2_<serial>-if01`. The by-id name keeps working when the `ttyACM` numbers change after replugging. You need to be in the `dialout` group to open it.
+
+Each unit stores its own calibration, which the app reads at connect. The PPK2 can't report whether DUT power is on, so the button shows **?** until you set it. Close nRF Connect Power Profiler first: only one program can read the stream.
 
 ### Agilent E3610A: not remotely controllable
 

@@ -7,8 +7,9 @@ A Linux desktop app (PyQt6) for controlling and logging GPIB bench instruments:
 | Agilent 66321D / 66321B / 66311B DC source | Setpoints, protection, output resistance, DVM, pulse statistics; triggered waveform capture with cursors and automatic measurements; battery-life, battery-emulator, sequencer and I-V tests; rear port, display, saved setups, self-test |
 | HP 6632A / 6633A / 6634A DC supply | Setpoints, OVP/OCP, readback, status |
 | HP 3456A 6½-digit DMM | Function, range, integration time, autozero, filter, null, statistics |
+| Nordic Power Profiler Kit II (USB) | Source or ampere meter at 100 kS/s; DUT power and voltage; live full-rate view with logic inputs D0–D7; trend with region average, charge and energy |
 
-Each instrument opens in its own tab with live readouts, trend plots on a shared time base, and CSV recording. **Esc turns every supply's output off.** Simulators (`SIM::66321D`, `SIM::6632A`, `SIM::3456A`) let you try everything without hardware.
+Each instrument opens in its own tab with live readouts, trend plots on a shared time base, and CSV recording. **Esc turns every supply's output off** (and a PPK2's DUT power). Simulators (`SIM::66321D`, `SIM::6632A`, `SIM::3456A`, `SIM::PPK2`) let you try everything without hardware.
 
 ![66321D panel](docs/images/supply-66321d.png)
 
@@ -17,6 +18,7 @@ Each instrument opens in its own tab with live readouts, trend plots on a shared
 ```bash
 ./scripts/install-gpib-driver.sh           # once: builds linux-gpib for the NI GPIB-USB-HS
 ./run.sh GPIB0::5::INSTR 3456A@GPIB0::22::INSTR
+./run.sh PPK2@/dev/ttyACM0                 # Nordic PPK2 (also listed as PPK2::… when plugged in)
 ./run.sh SIM::66321D                       # no hardware needed
 ```
 

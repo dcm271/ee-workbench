@@ -348,6 +348,7 @@ class SupplyPanel(PanelBase):
         self.c_d = self.p_d.plot(pen=pg.mkPen(C_DVM, width=1.5))
         self.p_d.setVisible(False)
         touch.plots(self.p_v, self.p_i, self.p_d)
+        self.scrolling_trend(self.p_v, self.p_v, self.p_i, self.p_d)
         v.addWidget(self.glw, 1)
         return w
 
@@ -534,8 +535,10 @@ class SupplyPanel(PanelBase):
         t = d[:, 0]
         span = self.span()
         start = int(np.searchsorted(t, t[-1] - span)) if span else 0
-        d = d[start:]
-        t, v, i, imax, dvm = d.T
+        # Plot one point past the window so the lines run to the left edge;
+        # the statistics below stay on the window itself.
+        t, v, i, imax, dvm = d[max(0, start - 1):].T
+        w = d[start:]
         self.c_v.setData(t, v, connect="finite")
         self.c_i.setData(t, i)
         if np.isfinite(imax).any():
@@ -544,10 +547,7 @@ class SupplyPanel(PanelBase):
             self.c_imax.setData([], [])
         if self.p_d.isVisible():
             self.c_d.setData(t, dvm, connect="finite")
-        if span:
-            self.p_v.setXRange(max(0, t[-1] - span), t[-1], padding=0)
-        else:
-            self.p_v.enableAutoRange(axis="x")
+        t, v, i = w[:, 0], w[:, 1], w[:, 2]
         charge = float(np.trapezoid(i, t)) / 3600 if t.size > 1 else float("nan")
         vtxt = f"   V avg {np.nanmean(v):.4f} V" if np.isfinite(v).any() else ""
         self.trend_stats.setText(
