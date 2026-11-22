@@ -27,7 +27,8 @@ import threading
 import time
 from dataclasses import asdict, dataclass, field
 
-# what Set / Measure can do with each kind of instrument (shown in the step editor)
+# what Set / Measure can do with each kind of instrument (shown in the step editor);
+# a generic SCPI tab and a scope tab list their own (Inst.set_names, …)
 SET_WHAT = {
     "supply": ["voltage", "current", "output", "ovp", "sense_protect"],
     "ppk2": ["voltage", "output"],
@@ -153,6 +154,12 @@ class Inst:
     """What the bench needs of an instrument tab (the window provides these)."""
     name = ""
     kind = ""
+    # Filled in for tabs whose abilities come from a definition (generic SCPI,
+    # scopes); None means "use the tables above for this kind".
+    set_names: list | None = None
+    setting_kinds: dict | None = None        # name -> "choice" (text values)
+    measure_names: list | None = None
+    profile_names: list | None = None
 
     def run(self, fn, timeout: float = 30.0):            # fn(driver) on its I/O thread
         raise NotImplementedError
@@ -211,10 +218,14 @@ class Bench:
 
     def inst(self, name: str) -> Inst:
         """By exact name, else the only one whose name contains `name`."""
+        from .signals import name_matches, slug
         for i in self._insts:
             if i.name == name:
                 return i
-        hits = [i for i in self._insts if name.lower() in i.name.lower()]
+        hits = [i for i in self._insts if name_matches(name, i.name)]
+        if len(hits) > 1:            # "PPK2" with "PPK2" and "PPK2 · DUT" open: the exact one
+            same = [i for i in hits if slug(i.name) == slug(name)]
+            hits = same or hits
         if len(hits) == 1:
             return hits[0]
         if not hits:
@@ -239,6 +250,19 @@ class Bench:
         inst = self.inst(name)
         if inst.kind == "gpio":
             return self.gpio(name, what, value)
+        if inst.kind in ("scpi", "scope"):
+            names = inst.set_names or []
+            hit = next((n for n in names if n.lower() == str(what).strip().lower()), None)
+            if hit is None:
+                raise SequenceError(f"{inst.name} can't set '{what}'" + (
+                    f" (it can set: {', '.join(names)})" if names else ""))
+            if (inst.setting_kinds or {}).get(hit) == "choice":
+                v = str(value).strip()
+            else:
+                v = value_of(value, {})
+            self._log(f"set {inst.name} {hit} = {value}")
+            inst.run(lambda d: d.set(hit, v))
+            return
         if inst.kind == "fgen" and what.lower() == "function":
             f = str(value).strip().lower()
             if f not in FGEN_FUNCS:
@@ -271,13 +295,26 @@ class Bench:
         readings over that long (for a PPK2: of every sample)."""
         self.check()
         inst = self.inst(name)
-        what = (what or MEASURE_WHAT.get(inst.kind, [""])[0]).lower()
-        if what not in MEASURE_WHAT.get(inst.kind, []):
+        can = inst.measure_names if inst.measure_names is not None else \
+            MEASURE_WHAT.get(inst.kind, [])
+        what = (what or (can[0] if can else "")).lower()
+        if what not in [c.lower() for c in can]:
             raise SequenceError(f"{inst.name} can't measure '{what}' (it can measure: "
-                                + ", ".join(MEASURE_WHAT.get(inst.kind, [])) + ")")
+                                + (", ".join(can) or "nothing") + ")")
         seconds = float(seconds or 0.0)
         t0 = self._clock()
-        if inst.kind == "ppk2":
+        if inst.kind == "scope":
+            # from the waveform on screen now (repeated for `seconds`, averaged)
+            vals = []
+            end = time.monotonic() + seconds
+            while True:
+                vals.append(float(inst.run(lambda d: d.measure(what), timeout=60.0)))
+                if time.monotonic() >= end:
+                    break
+                self.wait(0.2)
+            good = [x for x in vals if not math.isnan(x)]
+            v = sum(good) / len(good) if good else float("nan")
+        elif inst.kind == "ppk2":
             span = seconds if seconds > 0 else 0.1
             self.wait(span + 0.15)            # let the samples arrive
             mean, peak = inst.current_between(t0, t0 + span)
@@ -347,11 +384,12 @@ class Bench:
         from . import profile as prof
         self.check()
         inst = self.inst(name)
-        what = what.lower() or PROFILE_WHAT.get(inst.kind, ["voltage"])[0]
-        if what not in PROFILE_WHAT.get(inst.kind, []):
+        can = inst.profile_names if inst.profile_names is not None else \
+            PROFILE_WHAT.get(inst.kind, [])
+        what = what.lower() or (can[0] if can else "voltage")
+        if what not in can:
             raise SequenceError(f"{inst.name} can't run a profile on '{what}'"
-                                + (f" (it can: {', '.join(PROFILE_WHAT[inst.kind])})"
-                                   if inst.kind in PROFILE_WHAT else ""))
+                                + (f" (it can: {', '.join(can)})" if can else ""))
         try:
             p = prof.parse(text)
             p.points()
@@ -362,7 +400,7 @@ class Bench:
         def setter(v):
             if inst.kind == "ppk2":
                 inst.run(lambda d: d.set_voltage(int(round(v * 1000))))
-            elif inst.kind == "fgen":
+            elif inst.kind in ("fgen", "scpi"):
                 inst.run(lambda d: d.set(what, v))
             elif what == "voltage":
                 inst.run(lambda d: d.set_voltage(v))
@@ -395,6 +433,9 @@ class Bench:
     def _pick(inst, r, what):
         if inst.kind == "dmm":
             return r.value
+        if inst.kind == "scpi":
+            key = next((k for k in r.values if k.lower() == what), what)
+            return r.values.get(key)
         return {"voltage": r.voltage, "current": r.current, "dvm": r.dvm,
                 "power": getattr(r, "power", None) if getattr(r, "power", None) is not None
                 else (r.voltage or 0.0) * r.current}[what]
@@ -403,8 +444,8 @@ class Bench:
         """Run one capture with the analyzer tab's settings; returns it."""
         self.check()
         inst = self.inst(name)
-        if inst.kind != "logic":
-            raise SequenceError(f"{inst.name} isn't a logic analyzer")
+        if inst.kind not in ("logic", "scope"):
+            raise SequenceError(f"{inst.name} isn't a logic analyzer or an oscilloscope")
         self._log(f"capture on {inst.name}")
         res = inst.capture(timeout)
         if res is None:
@@ -441,14 +482,27 @@ class Bench:
                 self._log(f"{i.name}: output off failed: {e}")
 
 
-def run_plan(plan: Plan, bench: Bench):
-    """Run the steps; one results row per pass."""
+def run_plan(plan: Plan, bench: Bench, start: int = 0, extra: dict | None = None,
+             on_pass=None):
+    """Run the steps; one results row per pass.
+
+    start:   the first pass to run (0-based), to resume after a crash
+    extra:   more names for the steps: numbers can be used in values, and any
+             value replaces {name} in a Note (e.g. serial -> {serial})
+    on_pass: called with the pass index after each pass is recorded"""
     passes = plan.passes()
+    extra = dict(extra or {})
     for idx, x in passes:
-        env = {"i": idx, "n": len(passes)}
+        if idx < start:
+            continue
+        env = {k: v for k, v in extra.items() if isinstance(v, (int, float))}
+        env.update(i=idx, n=len(passes))
         if x is not None:
             env["x"] = x
         row: dict = {"pass": idx + 1}
+        for k, v in extra.items():
+            if k in ("serial",):
+                row[k] = v
         if x is not None:
             row["x"] = round(x, 12)
         for k, st in enumerate(plan.steps):
@@ -456,9 +510,11 @@ def run_plan(plan: Plan, bench: Bench):
             act = st.action
             try:
                 if act == "Set":
-                    kind = bench.inst(st.target).kind
+                    inst = bench.inst(st.target)
+                    kind = inst.kind
                     raw = kind == "gpio" and str(st.value).strip().lower().startswith("pulse") \
-                        or kind == "fgen" and st.what.lower() == "function"
+                        or kind == "fgen" and st.what.lower() == "function" \
+                        or (inst.setting_kinds or {}).get(st.what) == "choice"
                     bench.set(st.target, st.what, st.value if raw else value_of(st.value, env))
                 elif act == "Wait":
                     bench.wait(value_of(st.value, env))
@@ -470,14 +526,18 @@ def run_plan(plan: Plan, bench: Bench):
                     else:
                         secs = value_of(st.value, env) if str(st.value).strip() else 0.0
                         v = bench.measure(st.target, st.what, secs)
-                        unit = UNITS.get(st.what.lower(), "")
+                        unit = UNITS.get(st.what.lower(), "") or _unit_of(bench, st)
                         col = st.label or f"{st.target} {st.what}" + (f" ({unit})" if unit else "")
                     row[col] = v
                     _limits(bench, st, col, v, env)
                 elif act == "Capture":
                     res = bench.capture(st.target)
-                    col = st.label or f"{st.target} decoded"
-                    row[col] = len(res.table_rows)
+                    if bench.inst(st.target).kind == "scope":
+                        col = st.label or f"{st.target} capture"
+                        row[col] = sum(tr.v.size for tr in res.analog.values())
+                    else:
+                        col = st.label or f"{st.target} decoded"
+                        row[col] = len(res.table_rows)
                     if res.offset is not None:
                         row[f"{col} t0"] = round(res.offset, 6)
                     _limits(bench, st, col, row[col], env)
@@ -491,8 +551,11 @@ def run_plan(plan: Plan, bench: Bench):
                         row[st.label] = round(took, 6)
                         _limits(bench, st, st.label, took, env)
                 elif act == "Note":
-                    bench.note(str(st.value).replace("{x}", "" if x is None else f"{x:g}")
-                               .replace("{i}", str(idx + 1)))
+                    text = str(st.value).replace("{x}", "" if x is None else f"{x:g}") \
+                        .replace("{i}", str(idx + 1))
+                    for k, v in extra.items():
+                        text = text.replace("{" + k + "}", str(v))
+                    bench.note(text)
                 else:
                     raise SequenceError(f"Unknown action '{act}'")
             except (Stopped, SequenceError):
@@ -501,8 +564,18 @@ def run_plan(plan: Plan, bench: Bench):
                 raise SequenceError(f"Step {k + 1} ({act} {st.target} {st.what}): {e}") from e
         failing = bool(bench._fails)
         bench.record(**row)
+        if on_pass is not None:
+            on_pass(idx)
         if failing and plan.stop_on_fail:
             raise LimitFailed(f"pass {idx + 1} failed: {bench.rows[-1].get('failures', '')}")
+
+
+def _unit_of(bench: Bench, st: Step) -> str:
+    fn = getattr(bench.inst(st.target), "unit_of", None)
+    try:
+        return fn(st.what) if fn else ""
+    except Exception:      # noqa: BLE001
+        return ""
 
 
 def _limits(bench: Bench, st: Step, col: str, v, env: dict):

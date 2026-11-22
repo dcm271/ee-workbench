@@ -47,7 +47,51 @@ def t_capture():
     dlg.resize(1100, 700)
     dlg.show()
     t_at(800, lambda: (dlg.grab().save(str(OUT / "touch-connect.png")), dlg.close(),  # noqa: F821
-                       tw.close(), app.quit()))  # noqa: F821
+                       tw.close(), t_new()))  # noqa: F821
+
+
+def t_new():
+    """The generic SCPI and scope tabs, production test and safety on the Pi screen."""
+    global nw
+    nw = MainWindow([parse_target(t) for t in ("SIM::DP832", "SIM::SCOPE")])  # noqa: F821
+    nw.resize(1280, 800)
+    nw.show()
+
+    def setup():
+        sup, scope = nw.panels()
+        sup.name_edit.setText("rails")
+        for n, v in (("vset1", 3.3), ("out1", True), ("vset2", 5.0)):
+            sup._set(n, v)
+        scope.capture_now()
+
+    def shots():
+        for i, name in enumerate(("touch-scpi", "touch-scope")):
+            nw.tabs.setCurrentIndex(i)
+            app.processEvents()  # noqa: F821
+            nw.grab().save(str(OUT / f"{name}.png"))  # noqa: F821
+        import tempfile
+        nw.prefs["production"] = {"product": "Sensor board rev C", "operator": "DM",
+                                  "db": str(Path(tempfile.mkdtemp()) / "r.db")}  # noqa: F821
+        pw = nw.show_production()
+        pw.showNormal()                # the offscreen screen is 800 x 800: size it as the Pi's
+        pw.resize(1280, 800)
+        pw._show("FAIL", "FAIL  SB000103")
+        pw.detail.setText("I_load (A)=0.899994 (want 0.7 … 0.8)")
+        app.processEvents()  # noqa: F821
+        pw.grab().save(str(OUT / "touch-production.png"))  # noqa: F821
+        pw.close()
+        from ee_workbench.gui.safety_dialog import SafetyDialog
+        from ee_workbench.safety import Safety
+        d = SafetyDialog(nw, Safety(off_on_quit=True, auto_reconnect=True))
+        d.show()
+        app.processEvents()  # noqa: F821
+        d.grab().save(str(OUT / "touch-safety.png"))  # noqa: F821
+        d.close()
+        nw.all_outputs_off()
+        t_at(500, lambda: (nw.close(), app.quit()))  # noqa: F821
+
+    t_at(2500, setup)
+    t_at(6000, shots)
 
 
 t_at(1500, t_setup)

@@ -6,7 +6,7 @@ import sys
 import time
 
 import pyqtgraph as pg
-from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QKeySequence, QShortcut
 from PyQt6.QtWidgets import (QApplication, QComboBox, QFileDialog, QFrame, QHBoxLayout,
                              QInputDialog, QLabel, QMainWindow, QMenu, QMessageBox, QPushButton,
@@ -15,7 +15,7 @@ from PyQt6.QtWidgets import (QApplication, QComboBox, QFileDialog, QFrame, QHBox
 from .. import crash
 from ..clock import now
 from ..config import Config, Entry, Session, load_config, norm_model, startup_entries
-from ..instruments import MODELS, model_for
+from ..instruments import model_for
 from ..session import SUFFIX
 from ..session import recorder as session
 from ..transport import describe, gpib_ready, list_resources, scan_gpib
@@ -34,6 +34,8 @@ from .widgets import C_MUTED, dark_palette
 
 
 class MainWindow(QMainWindow):
+    _hw_note = pyqtSignal(str)        # from an I/O thread: what a supply was told
+
     def __init__(self, initial: list[tuple[str, str]] | None = None,
                  config: Config | None = None, session: Session | None = None,
                  open_mode: str | None = None):
@@ -87,7 +89,15 @@ class MainWindow(QMainWindow):
         nt = QShortcut(QKeySequence("Ctrl+M"), self)
         nt.activated.connect(self.add_note)
         hub.tripped.connect(self._on_trip)
+        self._hw_note.connect(self._hw_noted)
+        self.prefs: dict = {}              # bench.json: "recording", "safety"
+        self.hw_status: dict = {}          # id(rule) -> what the supply was told (or why not)
+        self._hw_done: dict = {}           # (panel id, rule key) already pushed
+        self._wd_timer = QTimer(self)
+        self._wd_timer.timeout.connect(self._wd_tick)
+        self._wd_timer.start(1000)
         self._load_bench_state()
+        self._init_safety()
         self._sess_timer = QTimer(self)
         self._sess_timer.setInterval(1000)
         self._sess_timer.timeout.connect(self._session_tick)
@@ -104,6 +114,7 @@ class MainWindow(QMainWindow):
             self.status.showMessage("Config: " + self.config.warning, 20000)
         elif getattr(self, "_bench_warning", ""):
             self.status.showMessage(self._bench_warning, 20000)
+        self._report_definition_problems()
         if self.config.api:
             QTimer.singleShot(0, lambda: self.api_action.setChecked(True))
         if hub.math.channels:
@@ -154,6 +165,9 @@ class MainWindow(QMainWindow):
             crash.write_log(self._bench_warning)
             return
         from ..mathchannels import Channel
+        prefs = {k: d.get(k) for k in ("recording", "safety", "production")
+                 if isinstance(d.get(k), dict)}
+        self.prefs.update(prefs)
         bad = hub.watchdog.load(d.get("watchdog", []))
         hub.watchdog.armed = bool(d.get("watchdog_armed", True))
         hub.math.channels = Channel.load_list(d.get("math", []))
@@ -165,7 +179,7 @@ class MainWindow(QMainWindow):
         import json
         import os
         d = {"watchdog": hub.watchdog.to_list(), "watchdog_armed": hub.watchdog.armed,
-             "math": [c.to_dict() for c in hub.math.channels]}
+             "math": [c.to_dict() for c in hub.math.channels], **self.prefs}
         from ..config import json_default
         p = self._bench_file()
         try:
@@ -222,6 +236,10 @@ class MainWindow(QMainWindow):
         menu.addAction("Watchdog…  (switch outputs off when a limit is crossed)",
                        self.show_watchdog)
         menu.addAction("Math channels…  (efficiency, power, energy, averages)", self.show_math)
+        menu.addAction("Production test…  (serial numbers, PASS / FAIL, yield)",
+                       self.show_production)
+        menu.addAction("Safety…  (outputs off on quit / crash, heartbeat, reconnect)",
+                       self.show_safety)
         menu.addSeparator()
         menu.addAction("Setups…  (save / recall the whole bench by name)", self.show_setups)
         menu.addAction("Open session…  (view a recording, cursors, report)",
@@ -240,6 +258,17 @@ class MainWindow(QMainWindow):
 
     def toggle_session(self, on: bool):
         if on and not session.active:
+            from .record_dialog import RecordDialog
+            rec = self.prefs.get("recording", {})
+            dlg = RecordDialog(self, bool(rec.get("gated")), float(rec.get("pre_s", 10)),
+                               float(rec.get("post_s", 10)))
+            if not dlg.exec():
+                self.sess_btn.setChecked(False)
+                return
+            gate = dlg.gate
+            self.prefs["recording"] = {"gated": gate is not None,
+                                       "pre_s": dlg.pre.value(), "post_s": dlg.post.value()}
+            self.save_bench_state()
             path, _ = QFileDialog.getSaveFileName(
                 self, "Record session", time.strftime("session_%Y%m%d_%H%M%S") + SUFFIX,
                 f"EE Workbench session (*{SUFFIX})")
@@ -249,7 +278,7 @@ class MainWindow(QMainWindow):
             if not path.endswith(SUFFIX):
                 path += SUFFIX
             try:
-                session.start(path)
+                session.start(path, gate=gate)
             except Exception as e:    # noqa: BLE001
                 QMessageBox.warning(self, "Record session", f"Can't write {path}:\n{e}")
                 self.sess_btn.setChecked(False)
@@ -285,7 +314,13 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Session", f"Recording stopped: {e}")
             return
         mins, secs = divmod(int(now() - session.started), 60)
-        self.sess_btn.setText(f"■ Stop  {mins}:{secs:02d}")
+        if session.gate is not None:
+            mark = "●" if session.gated_open else "○"
+            self.sess_btn.setText(f"■ Stop  {mins}:{secs:02d}  {mark} {session.events} ev")
+            self.sess_btn.setToolTip("Recording only around events: ● writing now, "
+                                     "○ waiting for an event")
+        else:
+            self.sess_btn.setText(f"■ Stop  {mins}:{secs:02d}")
 
     def _show(self, attr, factory):
         w = getattr(self, attr, None)
@@ -295,6 +330,13 @@ class MainWindow(QMainWindow):
         w.show()
         w.raise_()
         w.activateWindow()
+        return w
+
+    def show_production(self):
+        from .production_window import ProductionWindow
+        w = self._show("prod_win", lambda: ProductionWindow(self))
+        if touch.TOUCH:
+            w.showMaximized()        # a test station: the banner fills the screen
         return w
 
     def show_sequencer(self):
@@ -325,6 +367,59 @@ class MainWindow(QMainWindow):
         report_for_session(self)
 
     # ---------------------------------------------------------------- watchdog
+    def _wd_tick(self):
+        if hub.watchdog.auto_rearm():
+            self.status.showMessage("Watchdog: rule(s) re-armed after their re-arm time", 5000)
+            wd = getattr(self, "wd_win", None)
+            if wd is not None:
+                wd._refresh_state()
+
+    def apply_hw_limits(self, only=None):
+        """Push every enabled “In HW” rule into its supply (once per rule and
+        connection). Loosening or removing a rule doesn't undo what a supply
+        was told: change that on the supply's tab."""
+        from ..signals import name_matches
+        from ..watchdog import hw_plan
+        if not hub.watchdog.armed:
+            return
+        live = {id(r) for r in hub.watchdog.rules}
+        self.hw_status = {k: v for k, v in self.hw_status.items() if k in live}
+        for rule in hub.watchdog.rules:
+            if not (rule.enabled and rule.hw):
+                continue
+            panels = [p for p in self.panels() if name_matches(rule.source, p.display_name())]
+            if not panels:
+                self.hw_status[id(rule)] = "not set (instrument not open)"
+                continue
+            for p in panels:
+                if only is not None and p is not only:
+                    continue
+                job, text = hw_plan(rule, p.KIND, p.set_names() if p.KIND == "scpi" else None)
+                if job is None:
+                    self.hw_status[id(rule)] = f"not set: {text}"
+                    continue
+                if not p.connected:
+                    self.hw_status[id(rule)] = "not set yet (not connected)"
+                    continue
+                key = (id(p), id(p.worker), rule.quantity, rule.limit)
+                if self._hw_done.get(id(rule)) == key:
+                    continue
+                self._hw_done[id(rule)] = key
+                self.hw_status[id(rule)] = text
+
+                def push(d, job=job, name=p.display_name()):
+                    done = job(d)
+                    self._hw_note.emit(f"Watchdog → {name}: {done}")
+                p.worker.submit(push, refresh=True)
+        wd = getattr(self, "wd_win", None)
+        if wd is not None:
+            wd._refresh_state()
+
+    def _hw_noted(self, text):
+        self.status.showMessage(text, 8000)
+        if session.active:
+            session.note(text)
+
     def _on_trip(self, rule, name):
         what = f"Watchdog: {name} {rule.quantity} = {rule.trip_value:.6g} " \
                f"({rule.op} {rule.limit:g})"
@@ -332,8 +427,9 @@ class MainWindow(QMainWindow):
             self.all_outputs_off()
             what += " → all outputs OFF"
         elif rule.action == "turn off":
+            from ..signals import name_matches
             hits = [p for p in self.panels() if rule.target and
-                    rule.target.lower() in p.display_name().lower()]
+                    name_matches(rule.target, p.display_name())]
             for p in hits:
                 self._off(p)
             what += f" → {', '.join(p.display_name() for p in hits) or 'nothing matched'} OFF"
@@ -342,13 +438,25 @@ class MainWindow(QMainWindow):
             if seq is not None:
                 seq.stop()
             what += " → sequence stopped"
+        elif rule.action == "capture":
+            from ..signals import name_matches
+            hits = [p for p in self.panels() if p.KIND in ("logic", "scope") and p.connected
+                    and (not rule.target or name_matches(rule.target, p.display_name()))]
+            for p in hits:
+                try:
+                    p.capture_now()
+                except Exception:       # noqa: BLE001
+                    crash.report(*sys.exc_info(), where=f"capture: {p.resource}")
+            what += f" → capture on {', '.join(p.display_name() for p in hits) or 'nothing'}"
         if session.active:
             session.note(what)
+            session.trigger(rule.trip_t)      # "only around events" recording keeps this
         self.status.showMessage(what, 30000)
         wd = getattr(self, "wd_win", None)
         if wd is not None:
             wd.on_trip(rule, name, what)
-        if rule.action != "note only":
+        from ..watchdog import SAFETY_ACTIONS
+        if rule.action in SAFETY_ACTIONS:
             QMessageBox.warning(self, "Watchdog tripped", what + "\n\nRe-arm it in Tools ▾ → "
                                 "Watchdog once the cause is fixed.")
 
@@ -399,7 +507,10 @@ class MainWindow(QMainWindow):
         text, ok = QInputDialog.getText(self, "Note", "Note at this moment:")
         if ok and text.strip():
             session.note(text.strip(), t)
-            self.status.showMessage(f"Note added: {text.strip()}", 4000)
+            ev = session.trigger(t, text.strip())
+            self.status.showMessage(f"Note added: {text.strip()}" +
+                                    ("  (event: the seconds around it are kept)" if ev else ""),
+                                    4000)
 
     def add_dialog(self):
         dlg = ConnectDialog(self, {p.resource for p in self.panels()})
@@ -466,7 +577,8 @@ class MainWindow(QMainWindow):
         lay.addSpacing(12)
         lay.addWidget(QLabel("Model"))
         self.model_combo = QComboBox()
-        for key, label in MODELS.items():
+        from ..instruments import all_models
+        for key, label in all_models().items():
             self.model_combo.addItem(label, key)
         lay.addWidget(self.model_combo)
         self.baud_label = QLabel("Baud")
@@ -574,7 +686,7 @@ class MainWindow(QMainWindow):
     def save_session(self):
         if self.session is None or self._restoring:
             return
-        self.session.save([Entry(p.resource, norm_model(p.model), p.session_settings())
+        self.session.save([Entry(p.resource, norm_model(p.model), p.saved_settings())
                            for p in self.panels()])
 
     # ---------------------------------------------------------------- tabs
@@ -598,11 +710,18 @@ class MainWindow(QMainWindow):
                 self.status.showMessage(f"{resource} is already open", 4000)
                 return
         model = model_for(resource, model)
-        cls = {"3456A": DmmPanel, "PPK2": Ppk2Panel, "SALEAE": LogicPanel,
-               "SIGROK": LogicPanel, "FGEN": FgenPanel, "GPIO": GpioPanel}.get(model, SupplyPanel)
+        if model.startswith("SCPI:"):
+            from .scpi_panel import ScpiPanel as cls
+        elif model.startswith("SCOPE:"):
+            from .scope_panel import ScopePanel as cls
+        else:
+            cls = {"3456A": DmmPanel, "PPK2": Ppk2Panel, "SALEAE": LogicPanel,
+                   "SIGROK": LogicPanel, "FGEN": FgenPanel, "GPIO": GpioPanel
+                   }.get(model, SupplyPanel)
         baud = int(self.baud_combo.currentText()) if hasattr(self, "baud_combo") else 9600
         panel = cls(resource, model, baud)
         if settings:
+            panel.claim_instance(settings.get("instance"))
             panel.restore_settings(settings)
         where = describe(resource)
         if index is None:
@@ -617,10 +736,17 @@ class MainWindow(QMainWindow):
         panel.link_lost.connect(lambda m, p=panel: self._lost(p, m))
         panel.link_ok.connect(lambda p=panel: self._recovered(p))
         panel.settings_changed.connect(self.schedule_save)
+        panel.reopen_as.connect(lambda key, p=panel: self._reopen_as(p, key))
+        # a supply that (re)connects gets the watchdog's hardware limits again
+        panel.worker.connected.connect(
+            lambda *_a, p=panel: QTimer.singleShot(300, lambda: self.apply_hw_limits(p)))
+        panel.worker.connected.connect(lambda *_a, p=panel: self._panel_up(p))
+        self._update_marker()
         self._update_empty()
         self.schedule_save()
 
     def _failed(self, panel, msg):
+        self._maybe_reconnect(panel)
         self.status.showMessage(f"{panel.resource}: {msg}", 15000)
         i = self.tabs.indexOf(panel)
         if i >= 0:
@@ -644,6 +770,7 @@ class MainWindow(QMainWindow):
         i = self.tabs.indexOf(panel)
         if i < 0:
             return
+        self._maybe_reconnect(panel)
         self.status.showMessage(f"{panel.display_name()}: {msg}", 15000)
         text = self.tabs.tabText(i)
         if not text.startswith("⚠"):
@@ -659,11 +786,22 @@ class MainWindow(QMainWindow):
         self.tabs.tabBar().setTabButton(i, self.tabs.tabBar().ButtonPosition.LeftSide, None)
         self.tabs.setTabText(i, self.tabs.tabText(i).removeprefix("⚠ "))
 
+    def _reopen_as(self, panel, model: str):
+        """Auto-detect found a meter / load / scope: give it the right tab."""
+        i = self.tabs.indexOf(panel)
+        if i < 0:
+            return
+        res, settings = panel.resource, panel.saved_settings()
+        self._restoring = True
+        self.close_tab(i)
+        self._restoring = False
+        self.open_instrument(res, model, settings, index=i)
+
     def reconnect(self, panel):
         i = self.tabs.indexOf(panel)
         if i < 0:
             return
-        res, model, settings = panel.resource, panel.model, panel.session_settings()
+        res, model, settings = panel.resource, panel.model, panel.saved_settings()
         self._restoring = True          # don't save the brief gap as "closed"
         self.close_tab(i)
         self._restoring = False
@@ -679,6 +817,7 @@ class MainWindow(QMainWindow):
         p.deleteLater()
         self._update_empty()
         self.schedule_save()
+        self._update_marker()
 
     def _update_empty(self):
         has = self.tabs.count() > 0
@@ -696,7 +835,7 @@ class MainWindow(QMainWindow):
             self._api_stop = threading.Event()
         n, bad = 0, []
         for p in self.panels():
-            if p.KIND in ("supply", "ppk2", "fgen", "gpio") and p.connected:
+            if p.KIND in ("supply", "ppk2", "fgen", "gpio", "scpi", "scope") and p.connected:
                 if self._off(p):
                     n += 1
                 else:
@@ -737,9 +876,163 @@ class MainWindow(QMainWindow):
         self._save_timer.stop()
         step(self.save_session, "save last-session.json")
         step(self.save_bench_state, "save bench.json")
+        if self.safety.off_on_quit:
+            # queued before the threads are told to stop: they finish their
+            # queue first, so the OFF commands go out (see worker.stop)
+            for p in self.panels():
+                if p.KIND in ("supply", "ppk2", "fgen", "gpio", "scpi") and p.connected:
+                    step(lambda p=p: self._off(p), f"output off: {p.resource}")
         for p in self.panels():
             step(p.shutdown, f"close {p.resource}")
+        from .. import safety as sf
+        step(sf.clear_marker, "remove running.json")
         super().closeEvent(e)
+
+    # ---------------------------------------------------------------- safety
+    def _report_definition_problems(self):
+        """Instrument definition files that couldn't be loaded: say so once
+        (status bar and crash.log), so a typo in your own file isn't silent."""
+        from ..instruments.scpi_generic import PROBLEMS, definitions
+        definitions()
+        if not PROBLEMS:
+            return
+        crash.write_log("Instrument definitions not loaded:\n  " + "\n  ".join(PROBLEMS))
+        self.status.showMessage(
+            f"⚠ {len(PROBLEMS)} instrument definition file(s) not loaded: {PROBLEMS[0]}"
+            + "  (all in crash.log; check with python -m ee_workbench.check_instruments)",
+            30000)
+
+    def _init_safety(self):
+        from .. import safety as sf
+        self.safety = sf.Safety.from_dict(self.prefs.get("safety"))
+        self._backoff = sf.Backoff()
+        self._off_pending: set = set()
+        self._hb_on = False
+        self._hb_warned = False
+        self._hb_timer = QTimer(self)
+        self._hb_timer.timeout.connect(self._heartbeat)
+        self._apply_safety()
+        self._prev_run = sf.previous_run()
+        self._marker_ok = not sf.other_instance_running()
+        if self._marker_ok:
+            sf.write_marker([])
+        if self._prev_run is not None:
+            QTimer.singleShot(0, self._after_crash)
+
+    def _apply_safety(self):
+        if self.safety.heartbeat:
+            self._hb_timer.start(int(self.safety.heartbeat_period * 1000))
+        else:
+            self._hb_timer.stop()
+
+    def show_safety(self):
+        from .safety_dialog import SafetyDialog
+        dlg = SafetyDialog(self, self.safety)
+        if dlg.exec():
+            self.safety = dlg.result_settings()
+            self.prefs["safety"] = self.safety.to_dict()
+            self.save_bench_state()
+            self._hb_warned = False
+            self._apply_safety()
+
+    def _update_marker(self):
+        if not getattr(self, "_marker_ok", False):
+            return
+        from .. import safety as sf
+        sf.write_marker([{"resource": p.resource, "model": p.model,
+                          "settings": p.saved_settings()} for p in self.panels()])
+
+    def _after_crash(self):
+        """The last run ended without quitting."""
+        prev = self._prev_run
+        tabs = prev.get("open", [])
+        msg = "The last run ended unexpectedly" + (f" (started {prev['started']})"
+                                                   if prev.get("started") else "")
+        crash.write_log(msg + f"; open then: {', '.join(t['resource'] for t in tabs) or 'none'}")
+        if self.safety.off_after_crash and tabs:
+            self._off_pending = {t["resource"] for t in tabs}
+            msg += ": switching outputs off"
+            for p in self.panels():
+                if p.connected:
+                    self._panel_up(p)
+            # instruments the restore doesn't open are opened just for this
+            QTimer.singleShot(4000, lambda: [
+                self.open_instrument(t["resource"], t.get("model", "auto"),
+                                     t.get("settings") or {})
+                for t in tabs if t["resource"] in self._off_pending
+                and not any(p.resource == t["resource"] for p in self.panels())])
+        if self.safety.resume_sequence:
+            from .sequencer_window import SequencerWindow, read_checkpoint
+            ck = read_checkpoint(SequencerWindow.checkpoint_path())
+            if ck is not None and ck["next_pass"] < int(ck.get("total", 0) or 1 << 30):
+                msg += f"; resuming the sequence at pass {ck['next_pass'] + 1}"
+                self._resume_deadline = time.monotonic() + 90
+                QTimer.singleShot(5000, lambda: self._try_resume(ck))
+        self.status.showMessage(msg, 30000)
+
+    def _panel_up(self, panel):
+        self._backoff.reset(panel.resource)
+        if panel.resource in self._off_pending:
+            self._off_pending.discard(panel.resource)
+            if panel.KIND in ("supply", "ppk2", "fgen", "gpio", "scpi"):
+                self._off(panel)
+                self.status.showMessage(f"After the crash: {panel.display_name()} output OFF",
+                                        10000)
+                if session.active:
+                    session.note(f"After a crash: {panel.display_name()} output off")
+
+    def _try_resume(self, ck):
+        panels = self.panels()
+        ready = panels and all(p.connected for p in panels)
+        if not ready and time.monotonic() < self._resume_deadline:
+            QTimer.singleShot(1000, lambda: self._try_resume(ck))
+            return
+        win = self.show_sequencer()
+        win.set_state(ck["plan"])
+        if not win.run(start=int(ck["next_pass"])):
+            self.status.showMessage("Couldn't resume the sequence (see the Sequencer)", 15000)
+
+    def _heartbeat(self):
+        from ..signals import name_matches
+        s = self.safety
+        p = next((p for p in self.panels() if p.KIND == "gpio"
+                  and name_matches(s.heartbeat_tab, p.display_name())), None)
+        if p is None or not p.connected:
+            return
+        outs = {x.label.lower() for x in p.state.pins.values() if x.mode == "out"} | \
+            {f"gpio{x.gpio}" for x in p.state.pins.values() if x.mode == "out"}
+        if s.heartbeat_pin.lower() not in outs:
+            if not self._hb_warned:
+                self._hb_warned = True
+                self.status.showMessage(f"Heartbeat: {s.heartbeat_pin} isn't an output on "
+                                        f"{p.display_name()} (set it up on that tab)", 15000)
+            return
+        self._hb_on = not self._hb_on
+        p.worker.submit(lambda d, pin=s.heartbeat_pin, on=self._hb_on: d.set_pin(pin, on))
+
+    def _maybe_reconnect(self, panel):
+        if not self.safety.auto_reconnect:
+            return
+        res = panel.resource
+        delay = self._backoff.next_delay(res)
+        self.status.showMessage(f"{panel.display_name()}: reconnecting in {delay:.0f} s", 8000)
+        QTimer.singleShot(int(delay * 1000), lambda: self._auto_reconnect(res))
+
+    def _auto_reconnect(self, res: str):
+        import os
+        from ..safety import device_path
+        p = next((p for p in self.panels() if p.resource == res), None)
+        if p is None or not self.safety.auto_reconnect:
+            return                                  # closed meanwhile
+        if p.connected and not getattr(p, "_lost", False):
+            self._backoff.reset(res)
+            return                                  # it came back by itself
+        seq = getattr(self, "seq_win", None)
+        dev = device_path(res)
+        if (seq is not None and seq.running()) or (dev and not os.path.exists(dev)):
+            self._maybe_reconnect(p)                # try again later
+            return
+        self.reconnect(p)
 
 
 def parse_target(s: str) -> tuple[str, str]:
@@ -765,6 +1058,10 @@ def parse_target(s: str) -> tuple[str, str]:
             model = "SIGROK"
             if not res.upper().startswith(("SIGROK::", "SIM")):
                 res = "SIGROK::" + (res or "fx2lafw")   # SIGROK@fx2lafw
+        if model not in ("PPK2", "SALEAE", "SIGROK", "FGEN", "GPIO", "663xx", "6632A",
+                         "3456A", "auto"):
+            from ..instruments import resolve_model
+            model = resolve_model(model)        # 34461A@…, DS1054Z@…, SCPI:DP832@…
         return model, res
     return "auto", s
 

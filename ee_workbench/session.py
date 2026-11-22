@@ -17,11 +17,18 @@ viewer, or read with any SQLite tool:
     sqlite3 bench.eewb "select t, voltage_V from s_1"
 
 Writes are buffered and committed about once a second from the GUI thread.
+
+"Only around events" (a flight recorder): start(path, gate=(pre, post)) keeps
+the last `pre` seconds of every stream in memory and writes nothing until
+trigger(t) is called (a watchdog rule tripping, a capture, Mark event); then
+it writes from t - pre and keeps writing until t + post. Notes and captures
+are always written. Each trigger is kept in the `events` table.
 """
 from __future__ import annotations
 
 import io
 import json
+from collections import deque
 import sqlite3
 import time
 from dataclasses import asdict, dataclass, field
@@ -47,13 +54,23 @@ class SessionWriter:
         self._pending: dict[int, list] = {}
         self.rows = 0
         self.started = 0.0
+        self.gate: tuple[float, float] | None = None
+        self._ring: dict[int, deque] = {}       # sid -> chunks of rows (gated mode)
+        self._open_until = -1e300               # gated: writing until this time
+        self.events = 0
 
     @property
     def active(self) -> bool:
         return self.db is not None
 
-    def start(self, path: str):
+    def start(self, path: str, gate: tuple[float, float] | None = None):
+        """gate=(pre_s, post_s): record only around trigger() calls."""
         self.stop()
+        if gate is not None:
+            pre, post = float(gate[0]), float(gate[1])
+            if pre < 0 or post < 0:
+                raise ValueError("pre / post must be 0 or more seconds")
+            gate = (pre, post)
         db = sqlite3.connect(path)
         try:
             self._open(db)
@@ -65,6 +82,14 @@ class SessionWriter:
         self._pending.clear()
         self.rows = 0
         self.started = now()
+        self.gate = gate
+        self._ring.clear()
+        self._open_until = -1e300
+        self.events = 0
+        if gate:
+            self.db.execute("INSERT OR REPLACE INTO meta VALUES ('gate', ?)",
+                            (json.dumps({"pre_s": gate[0], "post_s": gate[1]}),))
+            self.db.commit()
 
     def _open(self, db: sqlite3.Connection):
         db.executescript("""
@@ -73,6 +98,7 @@ class SessionWriter:
             CREATE TABLE IF NOT EXISTS streams(id INTEGER PRIMARY KEY, name TEXT, model TEXT,
                 resource TEXT, columns TEXT, tbl TEXT);
             CREATE TABLE IF NOT EXISTS notes(t REAL, text TEXT);
+            CREATE TABLE IF NOT EXISTS events(t REAL, t_from REAL, t_to REAL, why TEXT);
             CREATE TABLE IF NOT EXISTS captures(id INTEGER PRIMARY KEY, t_app REAL, t0 REAL,
                 aligned INTEGER, name TEXT, cfg TEXT, data BLOB, table_header TEXT,
                 table_rows TEXT, note TEXT);
@@ -106,6 +132,7 @@ class SessionWriter:
                 pass
         self.db = None
         self._pending.clear()
+        self._ring.clear()
         return err
 
     # ---- data ------------------------------------------------------------
@@ -126,12 +153,53 @@ class SessionWriter:
 
     def add(self, key, t: float, values: list):
         sid = self._streams[key][0]
-        self._pending.setdefault(sid, []).append([t + self._shift] + list(values))
+        self._put(sid, [[t + self._shift] + list(values)])
 
     def add_many(self, key, rows):
         sid = self._streams[key][0]
-        self._pending.setdefault(sid, []).extend(
-            [float(r[0]) + self._shift] + list(r[1:]) for r in rows)
+        self._put(sid, [[float(r[0]) + self._shift] + list(r[1:]) for r in rows])
+
+    def _put(self, sid: int, rows: list):
+        if not rows:
+            return
+        if self.gate is None:
+            self._pending.setdefault(sid, []).extend(rows)
+            return
+        # gated: rows inside an open event window are written, the rest wait
+        # in the ring (trimmed to the pre-trigger time)
+        live = [r for r in rows if r[0] <= self._open_until]
+        if live:
+            self._pending.setdefault(sid, []).extend(live)
+        rest = [r for r in rows if r[0] > self._open_until] if live else rows
+        if not rest:
+            return
+        ring = self._ring.setdefault(sid, deque())
+        ring.append(rest)
+        cutoff = rest[-1][0] - self.gate[0]
+        while ring and ring[0][-1][0] < cutoff:
+            ring.popleft()
+
+    def trigger(self, t: float | None = None, why: str = "") -> bool:
+        """An event: in "only around events" mode, keep from t - pre to t + post.
+        Returns False when recording everything (nothing to do)."""
+        if self.db is None or self.gate is None:
+            return False
+        t = (now() if t is None else float(t)) + self._shift
+        pre, post = self.gate
+        start = max(t - pre, self._open_until)
+        for sid, ring in self._ring.items():
+            keep = [r for chunk in ring for r in chunk if r[0] >= start]
+            if keep:
+                self._pending.setdefault(sid, []).extend(keep)
+            ring.clear()
+        self._open_until = max(self._open_until, t + post)
+        self.events += 1
+        self.db.execute("INSERT INTO events VALUES (?, ?, ?, ?)", (t, t - pre, t + post, why))
+        return True
+
+    @property
+    def gated_open(self) -> bool:
+        return self.gate is not None and now() + self._shift <= self._open_until
 
     def note(self, text: str, t: float | None = None):
         self.db.execute("INSERT INTO notes VALUES (?, ?)",
@@ -139,6 +207,7 @@ class SessionWriter:
         self.db.commit()
 
     def capture(self, res: LogicCapture, name: str):
+        self.trigger(res.t_app, f"capture: {name}")       # a capture is an event
         aligned = res.offset is not None
         t0 = res.offset if aligned else (res.t_armed if res.t_armed is not None
                                          else res.t_app - res.elapsed)
@@ -268,6 +337,11 @@ class SessionReader:
             self.streams.append(s)
         self.notes = [(float(t), text) for t, text in
                       self.db.execute("SELECT t, text FROM notes ORDER BY t")]
+        try:        # "only around events" recordings: the windows that were kept
+            self.events = [(float(a), float(b), why or "") for a, b, why in self.db.execute(
+                "SELECT t_from, t_to, why FROM events ORDER BY t")]
+        except sqlite3.Error:     # files from before events existed
+            self.events = []
         self.captures = [SavedCapture(i, ta, t0, bool(al), name or "", note or "", self.db)
                          for i, ta, t0, al, name, note in self.db.execute(
                              "SELECT id, t_app, t0, aligned, name, note FROM captures "

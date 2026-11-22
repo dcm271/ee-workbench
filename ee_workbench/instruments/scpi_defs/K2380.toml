@@ -1,0 +1,92 @@
+# Keithley 2380 (and the B&K Precision 8600 series, which shares its SCPI).
+id = "K2380"
+name = "Keithley 2380 / B&K Precision 8600-series electronic load"
+maker = "Keithley"
+type = "load"
+idn = ["2380-", "MODEL 2380", "8600", "8601", "8602", "8610", "8612", "8614", "8616"]
+init = ["*CLS", "SYST:REM"]
+error_query = "SYST:ERR?"
+off = ["INP OFF"]
+
+[[reading]]
+name = "voltage"
+label = "Voltage"
+query = "MEAS:VOLT?"
+unit = "V"
+sim = "3.7 + noise(2e-4)"
+
+[[reading]]
+name = "current"
+label = "Current"
+query = "MEAS:CURR?"
+unit = "A"
+sim = "(cc if input and function == 'CC' else 0) + noise(2e-5)"
+
+[[reading]]
+name = "power"
+label = "Power"
+query = "MEAS:POW?"
+unit = "W"
+sim = "(3.7 * cc if input and function == 'CC' else 0) + noise(1e-4)"
+
+[[setting]]
+name = "function"
+label = "Mode"
+kind = "choice"
+query = "FUNC?"
+options = [
+  { label = "CC", set = "FUNC CURR", reply = '^CURR' },
+  { label = "CV", set = "FUNC VOLT", reply = '^VOLT' },
+  { label = "CR", set = "FUNC RES", reply = '^RES' },
+  { label = "CP", set = "FUNC POW", reply = '^POW' },
+]
+sim = "CC"
+
+[[setting]]
+name = "cc"
+label = "CC current"
+kind = "number"
+unit = "A"
+min = 0
+max = 120
+set = "CURR {value}"
+query = "CURR?"
+sim = "0.1"
+
+[[setting]]
+name = "cv"
+label = "CV voltage"
+kind = "number"
+unit = "V"
+min = 0
+max = 500
+set = "VOLT {value}"
+query = "VOLT?"
+sim = "1.0"
+
+[[setting]]
+name = "cr"
+label = "CR resistance"
+kind = "number"
+unit = "Ω"
+set = "RES {value}"
+query = "RES?"
+sim = "100"
+
+[[setting]]
+name = "cp"
+label = "CP power"
+kind = "number"
+unit = "W"
+set = "POW {value}"
+query = "POW?"
+sim = "1"
+
+[[setting]]
+name = "input"
+label = "Input"
+kind = "bool"
+set = "INP {on_off}"
+query = "INP?"
+output = true
+sim = "0"

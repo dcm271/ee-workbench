@@ -21,10 +21,82 @@ This guide lists the hardware EE Workbench supports, what each instrument can do
 | **Saleae Logic 8 / Logic Pro 8 / Logic Pro 16** | Logic analyzer with analog inputs | USB, through the **Logic 2** software (automation API) | Supported. Written from Saleae's API and file-format docs and tested on the simulator; not yet tried on real hardware |
 | sigrok-supported logic analyzers (fx2lafw clones, DSLogic, …) | Logic analyzer | USB, through `sigrok-cli` | Supported, including on the Raspberry Pi. Tested on the simulator |
 | **Function generators**: Keysight 33500B/33600A/33210A/33220A, Rigol DG800/DG900/DG1000Z/DG4000, Siglent SDG800/1000X/2000X/6000X | Signal source, 1–2 channels | LAN (VXI-11 / socket), USB-TMC or GPIB | Supported (waveform, frequency, amplitude, offset, duty, output; profiles). Written from the programming guides and tested on simulators of both command sets |
+| **Bench multimeters (SCPI)**: Keysight 34401A/344xxA, Keithley 2000-series and DMM6500/7510, Rigol DM3058/3068, Siglent SDM3000X, any SCPI meter | Measurements | LAN, USB-TMC, GPIB, RS-232 | Supported through [instrument definitions](#generic-scpi-meters-loads-and-supplies). Written from the programming guides and tested on simulators; not yet tried on real hardware |
+| **Electronic loads (SCPI)**: Rigol DL3021/3031, Siglent SDL1020X/1030X, Keithley 2380 / B&K 8600 | CC / CV / CR / CP load | LAN, USB-TMC, GPIB | As above |
+| **Programmable supplies (SCPI)**: Rigol DP832/831/821, Keysight E36311A–E36313A, Siglent SPD3303X, any single-output SCPI supply | Extra supplies, 1–3 outputs | LAN, USB-TMC, GPIB | As above |
+| **Oscilloscopes**: Rigol DS1000Z/DS2000A/MSO5000/DHO800-900, Keysight InfiniiVision 1000X–6000X, Tektronix TBS1000C/2000/MDO3/MSO2-6/DPO2000-3000, Siglent SDS1000X-E/2000X-E | Waveform capture and measurements | LAN, USB-TMC, GPIB | [Supported](#oscilloscopes) (channels, timebase, trigger, run/stop/single, waveforms, measurements). Written from the programming guides and tested on simulators of all four command sets; not yet tried on real hardware |
+| **Any other SCPI instrument** | Whatever you describe | as above | Write a [definition file](04-technical-reference.md#instrument-definition-files-toml): no programming needed |
 | **Raspberry Pi 40-pin GPIO header** | Relays, buttons, resets, "done" inputs | libgpiod (`/dev/gpiochip*`) | Supported on Pi 3/4/5/Zero 2 W. Tested on the simulator |
 | **Agilent E3610A** bench supply | Manual bench supply | **None** | Cannot be controlled. Monitor its output with the 3456A instead (see below) |
 | **NI GPIB-USB-HS** | USB-to-GPIB controller | USB 2.0 (ID `3923:709b`) | Supported through linux-gpib |
 | Linux PC | Runs the application | — | Ubuntu with kernel 7.0 tested |
+
+## Compatibility
+
+Every instrument below has a simulator, so its tab, the sequencer, the watchdog and sessions can all be tried without the hardware (`SIM::<model>`, see the last column). "Status" says how far each has been checked:
+
+- **Tested**: used with the real instrument (model and firmware noted).
+- **Simulator**: written from the maker's programming manual and checked against a simulator that follows that manual. It should work; if it doesn't, the tab's **Console** shows each command and its answer, and fixing it is usually a one-line change to a definition file. Please report what you find, with the instrument's `*IDN?` answer.
+
+**Auto-detect** means *Model: Auto-detect* in the toolbar recognises it from its `*IDN?` answer and opens the right tab. Otherwise choose the model by hand (the **Meter / load / scope / SCPI…** entry in the **＋ Add instrument** dialog, or the Model list).
+
+### Supplies, meters, profiler, logic, generators (built-in drivers)
+
+| Instrument | Model key | Auto-detect | Status | Simulator |
+|---|---|---|---|---|
+| Agilent 66321D, 66321B, 66311B | `66321D` | yes | Tested (66321D, fw A.03.01) | `SIM::66321D` |
+| HP 6632A, 6633A, 6634A | `6632A` | yes (`ID?`) | Simulator | `SIM::6632A` |
+| HP 3456A | `3456A` | **no**: choose by hand (it doesn't answer `*IDN?`) | Simulator | `SIM::3456A` |
+| Nordic PPK2 | `PPK2` | yes (USB ID) | Tested (HW 8682) | `SIM::PPK2` |
+| Saleae Logic 8 / Pro 8 / Pro 16 | `SALEAE` | through Logic 2 | Simulator | `SIM::SALEAE` |
+| sigrok analyzers | `SIGROK` | through `sigrok-cli --scan` | Simulator | `SIM::SIGROK` |
+| Keysight 33500B, 33600A, 33210A, 33220A; Rigol DG800–DG4000 | `FGEN` | yes | Simulator | `SIM::FGEN` |
+| Siglent SDG800, SDG1000X, SDG2000X, SDG6000X | `FGEN` | yes | Simulator | `SIM::SDG` |
+| Raspberry Pi GPIO header | `GPIO` | listed when present | Simulator | `SIM::GPIO` |
+
+### Meters, loads and supplies (instrument definitions)
+
+These are driven by the generic SCPI driver from the [definition files](04-technical-reference.md#instrument-definition-files-toml) in `ee_workbench/instruments/scpi_defs/`. Each one lists the model families its commands cover; close relatives usually work with the same file.
+
+| Instrument | Model key | Auto-detect | Readings | Settings | Simulator |
+|---|---|---|---|---|---|
+| Keysight 34461A, 34465A, 34470A (also 34401A, 34410A, 34411A, 34460A) | `SCPI:34461A` | yes | value (unit follows the function) | function (DC/AC V and I, 2W/4W Ω, frequency, capacitance…), NPLC, autozero | `SIM::34461A` |
+| Keithley 2000, 2001, 2002, 2010, 2100 | `SCPI:K2000` | yes | value | function, NPLC | `SIM::K2000` |
+| Keithley DMM6500, DMM7510, DAQ6510 (**SCPI** command set, not TSP) | `SCPI:DMM6500` | yes | value | function, NPLC | `SIM::DMM6500` |
+| Rigol DM3058, DM3058E, DM3068 | `SCPI:DM3058` | yes | value | function | `SIM::DM3058` |
+| Siglent SDM3045X, SDM3055, SDM3065X | `SCPI:SDM3055` | yes | value | function | `SIM::SDM3055` |
+| Any SCPI meter that answers `READ?` | `SCPI:SCPI-DMM` | no | value | (set the function on the meter) | `SIM::SCPI-DMM` |
+| Rigol DL3021, DL3021A, DL3031, DL3031A load | `SCPI:DL3021` | yes | voltage, current, power | function (CC/CV/CR/CP), cc, cv, cr, cp levels, input on/off | `SIM::DL3021` |
+| Siglent SDL1020X(-E), SDL1030X(-E) load | `SCPI:SDL1020` | yes | voltage, current, power | as above | `SIM::SDL1020` |
+| Keithley 2380, B&K Precision 8600 series load | `SCPI:K2380` | yes | voltage, current, power | as above | `SIM::K2380` |
+| Rigol DP832, DP832A, DP831, DP821 (3 outputs) | `SCPI:DP832` | yes | voltage1–3, current1–3 | vset, iset, ovp, ovp_on, ocp, ocp_on, out (per output) | `SIM::DP832` |
+| Keysight E36311A, E36312A, E36313A (3 outputs) | `SCPI:E36312A` | yes | voltage1–3, current1–3 | vset, iset, ovp, ocp_on, out (per output) | `SIM::E36312A` |
+| Siglent SPD3303X, SPD3303X-E (2 programmable outputs) | `SCPI:SPD3303X` | yes | voltage1–2, current1–2 | vset, iset, out (per output); no OVP over SCPI | `SIM::SPD3303X` |
+| Any single-output SCPI supply (`VOLT`, `CURR`, `OUTP`, `MEAS:VOLT?`): Keysight E36100/E3630/E3640 series, Rigol DP711/712, R&S NGE/HMP (output 1), TTi SCPI models… | `SCPI:SCPI-SUPPLY` | no | voltage, current | vset, iset, ovp, out | `SIM::SCPI-SUPPLY` |
+
+All of these are at the **Simulator** level. Any instrument that is missing can be added with a file, see [Add your own instrument](06-howtos.md#add-your-own-scpi-instrument).
+
+### Oscilloscope compatibility
+
+| Family | Model key | Command set used | Auto-detect | Simulator |
+|---|---|---|---|---|
+| Rigol DS1000Z (DS1054Z, DS1104Z, MSO1000Z), DS2000A, MSO5000, DHO800/900 | `SCOPE:RIGOL` | `:WAV:DATA?` bytes with `:WAV:PRE?` scaling | yes | `SIM::SCOPE` or `SIM::DS1054Z` |
+| Keysight / Agilent InfiniiVision 1000X–6000X (DSOX, MSOX, EDUX) | `SCOPE:KEYSIGHT` | `:WAV:DATA?` bytes, `:WAV:PRE?` | yes | `SIM::DSOX` |
+| Tektronix TBS1000C, TBS2000, MDO3, MSO2/4/5/6, DPO2000/3000 | `SCOPE:TEK` | `CURVE?` signed bytes, `WFMOUTPRE?` | yes | `SIM::TBS` |
+| Siglent SDS1000X-E, SDS2000X-E, SDS1000X | `SCOPE:SIGLENT` | the classic `C1:WF? DAT2` set | yes | `SIM::SDS` |
+
+All at the **Simulator** level. Newer Siglent models (SDS800X HD, SDS2000X HD, SDS3000X HD) use a different, SCPI-style command set and are not supported yet; nor are the analyzers' digital channels on MSO models (use a [logic-analyzer tab](03-users-guide.md#logic-analyzer-panel-saleae-and-sigrok) for those).
+
+### Several of the same instrument
+
+Any number of instruments of any kind can be open at once, including several of the same model (two PPK2s, three DP832s). Each gets its own tab; give each a name (the box under the instrument's ID) and the sequencer, watchdog, math and Remote API tell them apart by it. Two PPK2s can be lined up in time through a shared logic input: see [Several PPK2s](03-users-guide.md#several-ppk2s-in-step).
+
+### Not supported
+
+- **Prologix-style** USB/LAN-to-GPIB adapters: the app expects a linux-gpib board.
+- **Keithley TSP mode** (DMM6500/7510 default on some units, 2450/2460 SMUs): switch the instrument to its SCPI command set.
+- **Instruments without a remote interface** (E3610A and similar): see [below](#agilent-e3610a-not-remotely-controllable).
+- **Oscilloscope protocol decoding and digital channels**: use a logic-analyzer tab.
 
 ## The computer
 
@@ -168,6 +240,34 @@ Ground is on pins 6, 9, 14, 20, 25, 30, 34 and 39; 3.3 V on 1 and 17; 5 V on 2 a
 
 Off the Pi, a USB GPIO board isn't supported yet. On a PC, use the Pi as a [remote bench](03-users-guide.md#remote-api-python-and-jupyter) or a sigrok analyzer's inputs to read signals.
 
+### Generic SCPI meters, loads and supplies
+
+These instruments are described by [definition files](04-technical-reference.md#instrument-definition-files-toml) instead of code: which commands set each setting and which queries give each reading. The tab built from a definition shows:
+
+- **Readings** as large readouts (grouped by output on a multi-output supply), polled one after another as fast as the instrument answers (or with a set delay).
+- **Output / Input** buttons for every switch the definition marks as an output. **All outputs OFF (Esc)** sends the definition's `off` commands.
+- **Settings** forms: a list for choices (meter function, load mode), a tick box for on/off, a number box with the instrument's limits.
+- A **Trend** plot per reading (one curve per output), CSV recording and a **Console** for typing raw commands.
+
+**Connecting.** Most of these instruments have LAN, USB-TMC and sometimes GPIB or RS-232. LAN is the easiest: give the instrument a fixed address on its front panel and use `TCPIP::<ip>::INSTR` (VXI-11). USB instruments appear in the resource list as `USB0::…::INSTR` once the udev rules from the setup script are installed (see [Installation](02-installation.md#scpi-meters-loads-supplies-and-oscilloscopes-optional)).
+
+**Meters** set their function from the app (DC V, AC V, DC I, Ω 2-wire / 4-wire, frequency, …) and read with `READ?` at auto range. The unit on the readout follows the function. A reading of `9.9E+37` (overload) shows **OVLD**.
+
+**Electronic loads** have a **Mode** (CC, CV, CR, CP) and a level for each mode, plus an **Input** switch. Set the level for the mode before switching the input on. The load's readings are voltage, current and power.
+
+**Multi-output supplies** have their settings per output (`vset1`, `iset2`, `out3`, …). On the Rigol DP832 and Keysight E36312A, the watchdog can push its limits into the supply's own OVP / OCP: see [Watchdog → In HW](03-users-guide.md#watchdog).
+
+### Oscilloscopes
+
+A scope tab controls the scope and fetches what it captures:
+
+- **Run**, **Stop**, **Single → capture** (arms, waits for the trigger, fetches every channel shown) and **Grab screen** (fetches what is on screen now, without re-arming).
+- Per channel: on/off, V/div, offset. Timebase (s/div, position), trigger source, level, slope and sweep (auto, normal, single).
+- The fetched **Waveforms** plotted in volts against time from the trigger, with a table of Vpp, max, min, mean, RMS, frequency, period, duty, rise and fall time per channel, worked out from the samples (the scope's own measurement unit isn't used, so every brand gives the same numbers).
+- Captures go into the [session](03-users-guide.md#sessions-everything-in-one-file) being recorded and can be triggered by the sequencer and the watchdog.
+
+Waveforms are fetched as bytes (8 bits per sample). Rigol and Keysight scopes send their screen record (about 1200–2400 points per channel); Tektronix sends the record length set on the scope (up to 1 M points: lower it for faster transfers); Siglent sends its current acquisition. Deep-memory ("RAW" mode) transfers of Rigol and Keysight scopes are not used: they are slow over USB and LAN, and the screen record is what you see.
+
 ### Agilent E3610A: not remotely controllable
 
 The E3610A is a manual bench supply (front-panel knobs, analog meters) with **no GPIB, RS-232 or USB port**, so no software can control or read it directly. Two practical options:
@@ -206,6 +306,10 @@ A typical bench needs one GPIB-USB-HS and two or three 1 m or 2 m GPIB cables.
 - **Function generator into a DUT:** check the amplitude and offset with the output **off** first, and set the generator's load to High Z for a high-impedance input. A [watchdog](03-users-guide.md#watchdog) rule "*supply voltage < 2.9 → turn off* the generator" stops it driving a DUT pin while the DUT is unpowered (back-powering through its ESD diodes).
 - **GPIO and the DUT:** always join the grounds (unless through an optocoupler or relay), and see [the limits above](#raspberry-pi-gpio-header).
 
+- **Two PPK2s on one DUT** (two rails, or the DUT and a second board): join their grounds, then wire one DUT signal that changes at irregular times to the **same logic input** (e.g. D7) on both. That signal is how the app lines their time axes up to within a few tens of µs.
+- **Heartbeat to an external watchdog:** for unattended runs, a GPIO output toggled by the app can drive a retriggerable timer (a 74HC123 monostable, a 555 in missing-pulse mode, or a small microcontroller) whose output holds a relay or a load switch in the DUT's supply. If the app hangs or the computer stops, the toggling stops, the timer runs out and the DUT's power is cut. Set it up in **Tools ▾ → Safety…** ([details](03-users-guide.md#safety-and-unattended-runs)).
+- **Electronic load on a DUT's output:** use short, thick leads, and the load's remote-sense inputs for accurate CV/CR. Set the load's level *before* switching its input on, and keep the source's current limit above the load's CC level.
+
 - **Remote sense:** for accurate voltage at the device under test, use the 66321D's sense terminals (+S/−S) and set the output compensation to match your leads. With local sensing, the voltage reading is taken at the rear terminals.
 - **Pulsed loads (e.g. phone transmit bursts):** keep the leads short and twisted, set the current detector to ACDC, and use the pulse statistics.
 - **3456A ohms:** use 4-wire Ω for anything below about 100 Ω. Press **Null** with the leads shorted to remove lead resistance in 2-wire mode.
@@ -223,6 +327,16 @@ A typical bench needs one GPIB-USB-HS and two or three 1 m or 2 m GPIB cables.
 | Keysight 33500B / 33600A programming (SCPI) | Keysight website, search "33500B series user's guide" (programming chapter) |
 | Rigol DG1000Z programming guide | Rigol website, search "DG1000Z programming guide" |
 | Siglent SDG programming guide (`C1:BSWV`) | Siglent website, search "SDG programming guide" |
+| Keysight 34461A / 34465A operating and service guide (SCPI chapter) | Keysight website, search "Truevolt DMM operating and service guide" |
+| Keithley 2000 user's manual, DMM6500 reference manual (SCPI) | Tektronix/Keithley website |
+| Rigol DM3058, DL3000, DP800 programming guides | Rigol website, search the model and "programming guide" |
+| Siglent SDM3000X, SDL1000X, SPD3303X programming guides | Siglent website |
+| Keysight E36300 series programming guide | Keysight website, search "E36300 programming guide" |
+| Keithley 2380 / B&K 8600 programming manual | Tektronix/Keithley or B&K Precision website |
+| Rigol DS1000Z programming guide | Rigol website, search "MSO1000Z DS1000Z programming guide" |
+| Keysight InfiniiVision 2000X/3000X programmer's guide | Keysight website |
+| Tektronix TBS1000C / 2 Series MSO programmer manual | Tektronix website |
+| Siglent "Digital Oscilloscope Programming Guide" (SDS1000X-E series) | Siglent website |
 | Raspberry Pi GPIO and header | [raspberrypi.com/documentation](https://www.raspberrypi.com/documentation/computers/raspberry-pi.html#gpio) · [pinout.xyz](https://pinout.xyz/) |
 | libgpiod | [git.kernel.org libgpiod](https://git.kernel.org/pub/scm/libs/libgpiod/libgpiod.git/about/) |
 | linux-gpib project | [linux-gpib.sourceforge.io](https://linux-gpib.sourceforge.io/) |

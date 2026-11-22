@@ -42,6 +42,21 @@ DEFAULT_COLS = {"voltage_V", "current_A", "value", "power_W"}
 MAX_ROWS = 20_000
 
 
+
+def break_gaps(t: np.ndarray, y: np.ndarray):
+    """Insert a NaN wherever the readings stop for a while (an instrument
+    unplugged, or between the windows of an "only around events" recording),
+    so the plot shows a gap instead of a straight line across it."""
+    if t.size < 3:
+        return t, y
+    dt = np.diff(t)
+    typical = float(np.median(dt))
+    gaps = np.nonzero(dt > max(10 * typical, 1.0))[0]
+    if not gaps.size:
+        return t, y
+    return (np.insert(t, gaps + 1, (t[gaps] + t[gaps + 1]) / 2),
+            np.insert(y.astype(float), gaps + 1, np.nan))
+
 class SessionViewer(QMainWindow):
     def __init__(self, path: str | None = None, parent=None):
         super().__init__(parent)
@@ -282,7 +297,8 @@ class SessionViewer(QMainWindow):
                 p.setLabel("left", units=unit)
             self.plotted.append((f"{st.name} · {name}", unit if si else "", st.t - self.t_ref,
                                  st.data[col]))
-            c = p.plot(st.t - self.t_ref, st.data[col], pen=pg.mkPen(color, width=1))
+            gx, gy = break_gaps(st.t - self.t_ref, st.data[col])
+            c = p.plot(gx, gy, pen=pg.mkPen(color, width=1), connect="finite")
             c.setClipToView(True)
             c.setDownsampling(auto=True, method="peak")
             if st.model == "PPK2" and col == "current_A":
@@ -310,6 +326,14 @@ class SessionViewer(QMainWindow):
                                                 "fill": (11, 13, 17, 220)})
                 p.addItem(ln)
             if p is not self.logic_plot:
+                for a, b, _why in getattr(self.s, "events", []):
+                    # flight-recorder windows: what was kept around each event
+                    reg = pg.LinearRegionItem((a - self.t_ref, b - self.t_ref), movable=False,
+                                              brush=pg.mkBrush(76, 154, 255, 22))
+                    for ln in reg.lines:
+                        ln.setPen(pg.mkPen(None))
+                    reg.setZValue(-20)
+                    p.addItem(reg)
                 for c in caps:
                     a, b = c.span
                     reg = pg.LinearRegionItem((a - self.t_ref, b - self.t_ref), movable=False,

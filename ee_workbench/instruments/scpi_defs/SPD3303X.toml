@@ -1,0 +1,55 @@
+# Siglent SPD3303X / SPD3303X-E (CH1, CH2 programmable; CH3 is fixed).
+id = "SPD3303X"
+name = "Siglent SPD3303X / SPD3303X-E power supply (2 programmable outputs)"
+maker = "Siglent"
+type = "supply"
+idn = ["SPD3303"]
+channels = 2
+error_query = ""
+off = ["OUTP CH{ch},OFF"]
+notes = "The SPD can't report its output switches or errors over SCPI, so the output buttons show what was last sent. It is slow to accept commands: keep the poll delay at 200 ms or more."
+poll_ms = 250
+
+[[reading]]
+name = "voltage"
+label = "Voltage"
+query = "MEAS:VOLT? CH{ch}"
+unit = "V"
+sim = "(vset{ch} if out{ch} else 0) + noise(5e-4)"
+
+[[reading]]
+name = "current"
+label = "Current"
+query = "MEAS:CURR? CH{ch}"
+unit = "A"
+sim = "(min(vset{ch} / 50.0, iset{ch}) if out{ch} else 0) + noise(2e-4)"
+
+[[setting]]
+name = "vset"
+label = "Voltage"
+kind = "number"
+unit = "V"
+min = 0
+max = 32
+set = "CH{ch}:VOLT {value}"
+query = "CH{ch}:VOLT?"
+sim = "5.0"
+
+[[setting]]
+name = "iset"
+label = "Current limit"
+kind = "number"
+unit = "A"
+min = 0
+max = 3.2
+set = "CH{ch}:CURR {value}"
+query = "CH{ch}:CURR?"
+sim = "1.0"
+
+[[setting]]
+name = "out"
+label = "Output"
+kind = "bool"
+set = "OUTP CH{ch},{on_off}"
+output = true
+sim = "0"

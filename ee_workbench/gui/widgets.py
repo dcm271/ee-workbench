@@ -211,6 +211,21 @@ def io_errors(title: str):
     return deco
 
 
+def hint_label(text: str, width: int = 500, size: int = 11) -> QLabel:
+    """A muted, word-wrapped explanation of a fixed width. Its height is set
+    from the wrapped text: inside group boxes Qt doesn't pass height-for-width
+    on, so a plain word-wrapped label gets squashed and its lines overlap."""
+    lab = QLabel(text)
+    lab.setWordWrap(True)
+    lab.setStyleSheet(f"color:{C_MUTED}; font-size:{size}px;")
+    f = lab.font()
+    f.setPixelSize(size)
+    lab.setFont(f)
+    lab.setFixedWidth(width)
+    lab.setMinimumHeight(lab.heightForWidth(width) + 2)
+    return lab
+
+
 class CsvRecorder:
     def __init__(self):
         self.fh = None
@@ -244,6 +259,19 @@ class CsvRecorder:
             return False
         try:
             self.w.writerow(["" if v is None else v for v in values])
+            self.fh.flush()
+            return True
+        except (OSError, ValueError) as e:
+            self.error = str(e)
+            self.stop()
+            return False
+
+    def rows(self, rows) -> bool:
+        """Many rows at once (the PPK2's binned samples); like row()."""
+        if not self.w:
+            return False
+        try:
+            self.w.writerows(rows)
             self.fh.flush()
             return True
         except (OSError, ValueError) as e:

@@ -27,6 +27,12 @@ Each recipe is a complete job from start to finish. The [User's Guide](03-users-
 | [Analyse a recorded session](#analyse-a-recorded-session) | session viewer, cursors, export |
 | [Connect a LAN function generator](#connect-a-lan-function-generator) | function generator |
 | [Recover from a pulled cable or a crash](#recover-from-a-pulled-cable-or-a-crash) | ⟳ Reconnect, crash log, restart-on-crash |
+| [Add your own SCPI instrument](#add-your-own-scpi-instrument) | instrument definition file, console, check_instruments |
+| [Drain a battery with an electronic load](#drain-a-battery-with-an-electronic-load) | SCPI load, watchdog, session |
+| [Catch a glitch with the scope](#catch-a-glitch-with-the-scope) | scope, watchdog capture, flight recorder |
+| [Measure two rails with two PPK2s](#measure-two-rails-with-two-ppk2s) | several PPK2s, alignment, math |
+| [Set up a production test station](#set-up-a-production-test-station) | production test, sequencer limits, barcode scanner |
+| [Leave a test running overnight](#leave-a-test-running-overnight) | safety, In HW limits, flight recorder, resume |
 
 ---
 
@@ -36,13 +42,15 @@ Every instrument has a simulator, so you can learn the app (or develop a sequenc
 
 ```bash
 ./run.sh SIM::66321D SIM::PPK2 SIM::SIGROK SIM::FGEN SIM::GPIO
+./run.sh SIM::DP832 SIM::34461A SIM::DL3021 SIM::SCOPE SIM::PPK2 SIM::PPK2#2   # the newer instruments
 ```
 
 1. **66321D tab:** set 3.3 V, **Set**, then **Output ON**. The simulated phone load draws bursts; watch the **Trend**.
 2. **PPK2 tab:** **DUT POWER** on. Turn on **Log scale** to see sleep µA and radio mA together. In **Events**, press **Find events**.
 3. **Logic tab (sigrok):** set **Align with PPK2** to D7 ↔ PPK2 D7, tick D0 and D7, add a **UART** decoder on D0 at 115200, and **▶ Capture**. The PPK2 current appears under the lanes.
 4. **GPIO tab:** set GPIO20 to Output and GPIO21 to Input. Switching 20 also switches 21, because the simulated jig wires them together. GPIO26 is a button that is pressed every 2 s.
-5. **Tools ▾ → Sequencer**, **Watchdog**, **Math channels**: see the recipes below.
+5. **DP832, 34461A, DL3021 tabs** (second command): switch an output or the load's input on and watch the readings; change the meter's **Function**. **SCOPE tab:** **Single → capture**.
+6. **Tools ▾ → Sequencer**, **Watchdog**, **Math channels**, **Production test**: see the recipes below.
 
 ---
 
@@ -183,6 +191,8 @@ Alternatively, without the sequencer: generator **Profile** tab, **Vary** = freq
 
 ## Protect a DUT with the watchdog
 
+![Watchdog rules](images/watchdog.png)
+
 **Tools ▾ → Watchdog → ＋ Rule** for each case:
 
 | Protect against | Rule |
@@ -193,7 +203,9 @@ Alternatively, without the sequencer: generator **Profile** tab, **Vary** = freq
 | An operator pressing an e-stop | GPIO · `gpio26` (button to GND, Pull up) **<** `0.5` → **all outputs off** |
 | A sequence running on after a failure | 3V3 out · value **<** `3.0` for `200` ms → **stop sequence** |
 
-Keep **Watchdog armed** ticked. A trip shows a message, writes a note into the session, and marks the rule **TRIPPED** until you press **Re-arm tripped**. The supplies' own OCP / OVP still act first, in hardware; the watchdog adds rules that span instruments.
+Keep **Watchdog armed** ticked. A trip shows a message, writes a note into the session, and marks the rule **TRIPPED** until you press **Re-arm tripped**.
+
+**Put the limit in the supply too.** For a *voltage >* or *current >* rule on a supply, tick **In HW**: the supply's own OVP / current limit is set to the rule's limit, so it protects the DUT within microseconds even if the computer stops. The State column shows *+ HW* when it's set. The watchdog then adds what the supply can't do on its own: rules that span instruments, hold times, and actions on other instruments.
 
 ---
 
@@ -310,6 +322,8 @@ If VXI-11 doesn't answer, use the raw socket form: `TCPIP::192.168.1.50::5025::S
 2. Tap **⟳ Reconnect** on the tab. It closes and reopens in the same place, with its tab settings kept, and reads the instrument's state as usual (nothing is switched on).
 3. If you were recording a [session](03-users-guide.md#sessions-everything-in-one-file), it carries on; the gap shows as a gap.
 
+With **Reconnect automatically** ticked in **Tools ▾ → Safety…**, step 2 happens by itself, as soon as the instrument answers again (a USB device: as soon as it is plugged back in).
+
 **A window "EE Workbench: internal error" appeared:** the app caught a problem and carried on. Close the window and keep working. To report it, send `~/.config/ee-workbench/crash.log`.
 
 **The app closed by itself:**
@@ -317,6 +331,179 @@ If VXI-11 doesn't answer, use the raw socket form: `TCPIP::192.168.1.50::5025::S
 1. Check the bench first: outputs stay as they were when the app ended.
 2. Start it again (`./run.sh`). It reopens the same instruments; supply setpoints are read from the supplies.
 3. The cause is in `~/.config/ee-workbench/fault.log` (a crash in Qt or a driver) or `crash.log`.
-4. On a screen nobody watches, launch it with `./run.sh --restart-on-crash --fullscreen` so it comes back by itself (the Pi's autostart already does). Add a [watchdog](#protect-a-dut-with-the-watchdog) rule if the DUT must be protected meanwhile.
+4. On a screen nobody watches, launch it with `./run.sh --restart-on-crash --fullscreen` so it comes back by itself (the Pi's autostart already does), and see [Leave a test running overnight](#leave-a-test-running-overnight) for switching outputs off and resuming automatically.
 
 **Esc reported "⚠ FAILED for …":** every other output was switched off; switch the named instrument off at its front panel, then reconnect it.
+
+---
+
+## Add your own SCPI instrument
+
+Any instrument that takes SCPI-style commands (a meter, load, supply, switch unit, temperature controller…) can get its own tab from a small text file, with no programming. As an example, take a single-output electronic load whose programming manual lists:
+
+| What | Command | Query | Answer |
+|---|---|---|---|
+| Mode | `FUNC CURR` / `FUNC VOLT` / `FUNC RES` | `FUNC?` | `CURR` / `VOLT` / `RES` |
+| CC level | `CURR 1.5` | `CURR?` | `1.500` |
+| Input | `INP ON` / `INP OFF` | `INP?` | `1` / `0` |
+| Readings | | `MEAS:VOLT?`, `MEAS:CURR?` | `12.034` |
+| Errors | | `SYST:ERR?` | `0,"No error"` |
+
+1. **Check the commands on the instrument.** Open it with any SCPI model (say **Model → Any SCPI meter (READ? only)**), go to its **Console** tab, and try each query: `*IDN?`, `FUNC?`, `MEAS:VOLT?`. Note the exact answers; the console shows them verbatim. Also note a part of the `*IDN?` answer that names the model (`EL-150`).
+2. **Start from the closest built-in.** Copy one from `ee_workbench/instruments/scpi_defs/` (here `DL3021.toml`, a load) to `~/.config/ee-workbench/instruments/el150.toml`:
+
+   ```bash
+   mkdir -p ~/.config/ee-workbench/instruments
+   cp ee_workbench/instruments/scpi_defs/DL3021.toml ~/.config/ee-workbench/instruments/el150.toml
+   ```
+
+3. **Edit it** to match the manual:
+
+   ```toml
+   id = "EL150"
+   name = "Acme EL-150 electronic load"
+   type = "load"
+   idn = ["EL-150"]
+   init = ["*CLS"]
+   error_query = "SYST:ERR?"
+   off = ["INP OFF"]
+   notes = "Set the level for the mode before switching the input on."
+
+   [[reading]]
+   name = "voltage"
+   label = "Voltage"
+   query = "MEAS:VOLT?"
+   unit = "V"
+   sim = "12.0 - 0.05 * cc * input"
+
+   [[reading]]
+   name = "current"
+   label = "Current"
+   query = "MEAS:CURR?"
+   unit = "A"
+   sim = "cc * input if function == 'CC' else 0"
+
+   [[setting]]
+   name = "function"
+   label = "Mode"
+   kind = "choice"
+   query = "FUNC?"
+   options = [
+     { label = "CC", set = "FUNC CURR", reply = "^CURR" },
+     { label = "CV", set = "FUNC VOLT", reply = "^VOLT" },
+     { label = "CR", set = "FUNC RES",  reply = "^RES" },
+   ]
+
+   [[setting]]
+   name = "cc"
+   label = "CC current"
+   kind = "number"
+   unit = "A"
+   min = 0
+   max = 30
+   set = "CURR {value}"
+   query = "CURR?"
+
+   [[setting]]
+   name = "input"
+   label = "Input"
+   kind = "bool"
+   set = "INP {on_off}"
+   query = "INP?"
+   output = true
+   ```
+
+   The [definition reference](04-technical-reference.md#instrument-definition-files-toml) explains every key. Points to watch: names are identifiers (`cc`, not `CC current`), a reading and a setting can't share a name, and a `reply` pattern must match only its own option (anchor it with `^`).
+
+4. **Check it:**
+
+   ```bash
+   .venv/bin/python -m ee_workbench.check_instruments ~/.config/ee-workbench/instruments/el150.toml
+   ```
+
+   `ok` means the file is valid and works with its own simulator. Errors name the key and say what's wrong.
+
+5. **Try it on the simulator:** `./run.sh SIM::EL150`. Set the mode, the level, switch the input on, and see the readings follow your `sim` expressions.
+6. **Open the real instrument** with *Auto-detect* (your `idn` entry picks the file) or by choosing **Acme EL-150 electronic load** under Model. Watch the **Console** while you change each setting: every command should be followed by no error. If a reading shows **—** or the log shows an error such as `-113 Undefined header`, the command differs on your model: find the right one in the console and fix the file. Restart the app to reload it.
+7. **Share it**: once it works, set `tested = "EL-150 fw 1.02"` and consider contributing the file to the project, so others get it built in.
+
+A **multi-output** instrument uses `channels = 2` and `{ch}` in its commands (`set = "VOLT {value},(@{ch})"`); see `DP832.toml`. A **meter** whose unit follows its function uses `unit_from = "function"` on its reading and a `unit` on each option; see `34461A.toml`.
+
+---
+
+## Drain a battery with an electronic load
+
+Measure a battery's capacity at constant current, stopping at its cut-off voltage.
+
+1. Connect the battery to the load's input (short, thick leads; the load's sense leads to the battery terminals if it has them). Open the load: `SIM::DL3021` to practise.
+2. On the load's tab: **Mode** CC, **CC current** `0.5` A (C/5 for a 2.5 Ah cell).
+3. **Tools ▾ → Watchdog**: *DL3021 · voltage < `3.0` for `2000` ms → **turn off** DL3021*. The hold time stops a brief dip under load from ending the test early.
+4. **⏺ Record** a session (everything), then switch **Input** on.
+5. When it trips, open the session: put cursor **A** at the start and **B** at the trip, and the table gives the **charge** in C (÷ 3600 = Ah) and, with a [math channel](03-users-guide.md#math-channels) `dl3021.voltage * dl3021.current` integrated, the energy in Wh.
+
+For a constant-power discharge (closer to a real DUT), use **Mode** CP instead.
+
+---
+
+## Catch a glitch with the scope
+
+A rail occasionally dips, and you want to see the waveform when it does.
+
+1. Open the scope and the supply or PPK2 that powers the DUT. On the scope, set the channel on the rail, a timebase that shows the event (e.g. 100 µs/div), and a trigger on that channel *falling* below the dip level, **sweep normal**.
+2. **Tools ▾ → Watchdog**: *PPK2 · current > `30m` for `0.1` ms → **capture**, **Which** = the scope, **Re-arm (s)** `10`*. Each spike makes the scope capture; the rule re-arms itself 10 s later for the next one.
+3. **⏺ Record** with **Only around events**, keep `5` s before and after. Leave it running.
+4. Afterwards, open the session: every capture is a lane at its moment, with the PPK2's current around it, and nothing else filled the file.
+
+The scope can also be triggered directly by its own trigger: **Single → capture** arms it and waits.
+
+---
+
+## Measure two rails with two PPK2s
+
+Measure a DUT's MCU and radio supplies at the same time, on one time axis.
+
+1. Power each rail through its own PPK2 (ampere-meter mode if the DUT has its own regulator; source mode to power each rail directly). Join the grounds.
+2. Wire one DUT GPIO that toggles at irregular times (a debug pin set on each wake-up) to **D7** of both PPK2s, and each PPK2's logic VCC to the DUT's I/O voltage.
+3. Open both: they appear as two `PPK2::/dev/serial/by-id/…` entries. Name the tabs `MCU` and `radio`. **▶ Run** on both.
+4. On the **radio** tab, under **Time-align to another PPK2**: **Reference** `PPK2 · MCU`, **Shared input** `D7`, **Align now**, and tick **Keep aligned**.
+5. **Tools ▾ → Math channels**: `ppk2_mcu.current + ppk2_radio.current` (total current), or each times its rail voltage for power.
+6. Record a session: both currents, the sum and their logic inputs share one time axis in the viewer, so you can see which rail draws what during each event.
+
+With the simulators: `./run.sh SIM::PPK2 SIM::PPK2#2` (their D7 carries the same debug pin).
+
+---
+
+## Set up a production test station
+
+Test a batch of boards with a barcode scanner, a PASS / FAIL banner and a record of every unit.
+
+1. **Build the test** in the sequencer, as in [Run a pass/fail test](#run-a-passfail-test-and-get-a-report): power on, wait, **Measure** each quantity with limits, **Outputs off at the end** ticked. Add a **Note** step `Testing {serial}` at the start if you record sessions. Run it once on a known-good board.
+2. **Save it as a setup** ("Sensor board test"), so the station can be put back in one click.
+3. **Tools ▾ → Production test…**: **Product** `Sensor board rev C`, **Operator** your initials, **Serial format** `SB\d{6}` (if your serials are SB + six digits), tick **Save an HTML report for every unit** and choose the folder.
+4. Plug in a USB barcode scanner. Most need no setup; make sure it sends **Enter** after the code (the default on most; the scanner's manual has a "suffix: CR" barcode to scan if not).
+5. For each board: put it in the fixture, scan its label. The banner shows **TESTING**, then **PASS** (green) or **FAIL** (red, with the failing value). Put it on the matching pile and scan the next.
+6. **Yield** shows how the batch is doing; **Export CSV…** gives every result for a spreadsheet; each report holds the measurements of one unit.
+
+A failed board that is reworked is simply scanned again: the history keeps both results, *first-pass yield* counts the failure, *final yield* the pass.
+
+To stop a test (a board badly seated), press **■ Stop** or **Esc**: every output goes off and the unit is recorded as **ERROR**, not FAIL. On a Pi touch screen the window fills the screen; see [Raspberry Pi](05-raspberry-pi.md#production-test-station).
+
+---
+
+## Leave a test running overnight
+
+An unattended sweep or soak test should survive a crash, a power blip, or a knocked cable, and never leave a DUT in danger.
+
+1. **Limits in the supplies.** **Tools ▾ → Watchdog**: rules *supply · voltage > max* and *supply · current > max* with **In HW** ticked (State shows *+ HW*). The supplies now enforce them by themselves.
+2. **Tools ▾ → Safety…**: tick
+   - *Switch all outputs off when EE Workbench quits*,
+   - *After a crash, switch off the outputs of every instrument that was open*,
+   - *Reconnect automatically*,
+   - *After a crash, resume a running sequence* (if the sequence should carry on rather than stop safely),
+   - and set a **heartbeat pin** if you have an external watchdog circuit ([wiring](05-raspberry-pi.md#unattended-bench)).
+3. **Record only what matters**: **⏺ Record → Only around events**, keep 30 s before and 10 s after. Add watchdog rules with **mark session** for the things you want to catch (*current > 20m → mark session*, re-arm after 60 s).
+4. **Start the app so it restarts itself**: `./run.sh --restart-on-crash` (the Pi's autostart already does this).
+5. Start the sequence and leave.
+
+In the morning: the session holds a window around every event; `crash.log` says whether anything restarted; if the app did crash, the outputs were switched off at the restart and, with resume on, the sequence carried on at the pass after the last one that finished.
+

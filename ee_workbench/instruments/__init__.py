@@ -8,11 +8,13 @@ from .gpio import GpioDriver
 from .hp3456a import HP3456A
 from .hp6632a import HP6632A
 from .ppk2 import PPK2
+from . import scopes
 from .saleae import SaleaeLogic
+from .scpi_generic import ScpiDriver, definition_for, definitions, match_idn
 from .sigrok import SigrokLogic
 
 MODELS = {
-    "auto": "Auto-detect (power supplies)",
+    "auto": "Auto-detect (asks *IDN?)",
     "663xx": "Agilent 66311B / 66321B / 66321D",
     "6632A": "HP 6632A / 6633A / 6634A",
     "3456A": "HP 3456A DMM",
@@ -22,6 +24,36 @@ MODELS = {
     "FGEN": "Function generator (Siglent SDG, Rigol DG, Keysight 33xxx)",
     "GPIO": "Raspberry Pi GPIO header (or a Linux GPIO chip)",
 }
+BUILTIN_MODELS = dict(MODELS)
+
+
+def all_models() -> dict[str, str]:
+    """Model key -> label: the built-in drivers, the oscilloscopes and every
+    generic SCPI definition (built in or in ~/.config/ee-workbench/instruments)."""
+    out = dict(BUILTIN_MODELS)
+    for key, (label, _) in scopes.MODELS.items():
+        out[key] = label
+    for d in sorted(definitions().values(), key=lambda d: (d.type, d.name)):
+        out[d.model_key] = f"{d.name}  [SCPI {d.type}]"
+    return out
+
+
+def resolve_model(name: str) -> str:
+    """A model as typed (command line, config.toml, a setup): '34461A',
+    'SCPI:34461A', 'DS1054Z', 'scope:rigol' -> its model key, else unchanged."""
+    s = str(name).strip()
+    if not s:
+        return "auto"
+    if s.upper().startswith("SCPI:"):
+        d = definition_for(s)
+        return d.model_key if d else s
+    key = scopes.resolve(s)
+    if key:
+        return key
+    d = definition_for(s)
+    if d is not None:
+        return d.model_key
+    return s
 
 _CLASSES = {"663xx": Agilent663xx, "6632A": HP6632A, "3456A": HP3456A, "PPK2": PPK2,
             "SALEAE": SaleaeLogic, "SIGROK": SigrokLogic, "FGEN": FunctionGenerator,
@@ -44,6 +76,12 @@ def detect(transport) -> str:
             return "663xx"
         if looks_like_fgen(idn):
             return "FGEN"
+        scope = scopes.detect_idn(idn)
+        if scope:
+            return scope
+        d = match_idn(idn)
+        if d is not None:
+            return d.model_key
     except TransportTimeout:
         transport.clear()
     try:
@@ -55,7 +93,8 @@ def detect(transport) -> str:
     except TransportTimeout:
         transport.clear()
     raise RuntimeError("Couldn't identify the instrument. Choose the model explicitly "
-                       "(the HP 3456A always has to be selected by hand).")
+                       "(the HP 3456A always has to be selected by hand; any SCPI meter, "
+                       "load or supply can use a generic SCPI definition).")
 
 
 def model_for(resource: str, model: str = "auto") -> str:
@@ -70,13 +109,38 @@ def model_for(resource: str, model: str = "auto") -> str:
         return "SIGROK"
     if resource.upper().startswith("GPIO::"):
         return "GPIO"
-    return SIM_MODELS.get(resource.upper(), "auto")
+    base = sim_base(resource).upper()
+    if base in SIM_MODELS:
+        return SIM_MODELS[base]
+    if base.startswith("SIM::"):
+        name = base[5:]
+        d = definition_for(name)
+        if d is not None:
+            return d.model_key
+        dialect = scopes.sim_dialect(name)
+        if dialect:
+            return scopes.model_for_dialect(dialect)
+    return "auto"
+
+
+def sim_base(resource: str) -> str:
+    """'SIM::PPK2#2' -> 'SIM::PPK2': a second (third, …) simulated unit of a model."""
+    return resource.split("#", 1)[0] if resource.upper().startswith("SIM") else resource
 
 
 def make_driver(model: str, transport, resource: str = ""):
     model = model_for(resource, model)
     if model == "auto":
         model = detect(transport)
+    model = resolve_model(model)
+    if model.startswith("SCPI:"):
+        d = definition_for(model)
+        if d is None:
+            raise RuntimeError(f"No generic SCPI definition '{model[5:]}' (built in, or in "
+                               "~/.config/ee-workbench/instruments)")
+        return ScpiDriver(transport, d)
+    if model.startswith("SCOPE:"):
+        return scopes.ScopeDriver(transport, scopes.dialect_of(model))
     if model in ("SALEAE", "SIGROK"):
         # the resource names the analyzer (SIM::…: whichever the simulator has)
         sim = resource.upper().startswith("SIM")

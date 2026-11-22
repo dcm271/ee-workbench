@@ -72,7 +72,29 @@ Exec="/home/<you>/ee-workbench/run.sh" --restart-on-crash --fullscreen
 - A normal quit (**✕**, logging out, shutting down) is not a crash, so it stays closed.
 - Five crashes within two minutes stop the restarts, so a fault that happens at every start can't loop for ever.
 - Each restart is noted in `~/.config/ee-workbench/crash.log`; the crash itself is in `fault.log` next to it.
-- Outputs are never switched on by a restart: supplies keep whatever they were doing, and the app reads their state as usual. Use the [watchdog](03-users-guide.md#watchdog) if the DUT must be protected while nobody is there.
+- Outputs are never switched on by a restart: supplies keep whatever they were doing, and the app reads their state as usual. To have them switched **off** after a crash instead, tick *After a crash, switch off the outputs…* in **Tools ▾ → Safety…** (see below).
+
+## Unattended bench
+
+A Pi left running a test overnight or on a production line should have **Tools ▾ → Safety…** set up ([details](03-users-guide.md#safety-and-unattended-runs)):
+
+- **Outputs off after a crash**, so a restart leaves the DUT unpowered rather than as it was.
+- **Reconnect automatically**, so an instrument power-cycled or a USB cable knocked out and plugged back in comes back by itself.
+- **Resume a running sequence**, so a long sweep carries on after a crash or a power cut (the Pi starts the app at boot, and it picks up at the next pass).
+- **Heartbeat pin**: a header pin toggling while the app is healthy. Wire it to a retriggerable timer that holds the DUT's supply relay, and the DUT loses power if the app or the Pi stops, even with no software running at all.
+- Watchdog rules with **In HW** set, so the supplies' own OVP and current limits protect the DUT whatever happens to the Pi.
+
+![Safety settings on the touch screen](images/touch-safety.png)
+
+The heartbeat works like this, on GPIO 17 (physical pin 11) named `heartbeat`, toggled every 0.5 s:
+
+```
+ Pi GPIO17 ──1 kΩ──┬── trigger input of a retriggerable one-shot (74HC123, ~2 s timeout)
+                    │        └── Q output ─► relay driver / load switch enable in the DUT supply
+ Pi GND ────────────┴── circuit GND
+```
+
+As long as a rising edge arrives every second (the pin toggles every 0.5 s), the one-shot stays triggered and the relay closed; 2 s without one and it drops out. Keep the timeout well above the toggle period: the app may pause briefly while it opens an instrument. Test it by closing the app: the DUT's power should go off within the timeout.
 
 ## Instruments at start-up
 
@@ -117,11 +139,17 @@ What's different from the desktop layout:
   ![Capture tab on the touch screen](images/touch-capture.png)
 
 - **Plots don't pan or zoom** under a finger. The **Span** selector sets the time window, and Y always autoscales. Scroll areas scroll by dragging.
-- **＋ Add instrument** replaces the connection toolbar. It scans the GPIB bus when it opens and lists what it finds plus the simulators. Pick one (or enter a GPIB address with the keypad, or **Type a resource…** for a LAN or USB instrument such as a function generator), choose the model, then tap **Connect**. For the 3456A, tap the **3456A DMM** model button, because the meter can't identify itself.
+- **＋ Add instrument** replaces the connection toolbar. It scans the GPIB bus when it opens and lists what it finds plus the simulators. Pick one (or enter a GPIB address with the keypad, or **Type a resource…** for a LAN or USB instrument such as a function generator), choose the model, then tap **Connect**. For the 3456A, tap the **3456A DMM** model button, because the meter can't identify itself. For a SCPI meter, load, supply or oscilloscope, **Auto-detect** usually finds it; otherwise tap **Meter / load / scope / SCPI…** and pick it from the list.
 
   ![Add instrument](images/touch-connect.png)
 
 ![Touch layout, 3456A](images/touch-dmm.png)
+
+Meters, loads and multi-output supplies from [definition files](03-users-guide.md#meter-load-and-supply-panel-scpi), and oscilloscopes, use the same touch layout: number boxes open the keypad, and output buttons need two taps.
+
+| | |
+|---|---|
+| ![Rigol DP832 on the touch screen](images/touch-scpi.png) | ![Oscilloscope on the touch screen](images/touch-scope.png) |
 
 Typing is still available where it makes sense: channel names and the console use the keyboard as usual.
 
@@ -135,6 +163,10 @@ On the Pi, the 40-pin header is an instrument too: it appears in the resource li
 - On a touch screen, **ON / off** in the State column switches an output with one tap (no confirmation: GPIO pins are low-power), and the **Pulse** button presses-and-releases.
 - **Esc** sets every output to its inactive level; closing the tab releases the pins (they go back to inputs). Pin settings are remembered with the instrument.
 - The Pi 5's header is on the RP1 chip (`pinctrl-rp1`); the app finds the right `/dev/gpiochip*` by its label, whatever its number.
+
+## Production test station
+
+A Pi with a touch screen and a USB barcode scanner makes a test station: open **Tools ▾ → Production test…**, which fills the screen in touch mode, and scan each unit. The PASS / FAIL banner is readable from across the bench, and every result goes into the results database. See [Production test](03-users-guide.md#production-test) and [the how-to](06-howtos.md#set-up-a-production-test-station). A USB barcode scanner needs no driver: it types like a keyboard.
 
 ## Remote API from your desk
 

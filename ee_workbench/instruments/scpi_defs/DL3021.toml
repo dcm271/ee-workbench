@@ -1,0 +1,97 @@
+# Rigol DL3000-series DC electronic loads.
+id = "DL3021"
+name = "Rigol DL3021 / DL3021A / DL3031 / DL3031A electronic load"
+maker = "Rigol"
+type = "load"
+idn = ["DL3021", "DL3031"]
+init = ["*CLS"]
+error_query = ":SYST:ERR?"
+off = [":SOUR:INP:STAT OFF"]
+notes = "Set the level for the mode in use (CC: current, CV: voltage, CR: resistance, CP: power) before switching the input on."
+
+[[reading]]
+name = "voltage"
+label = "Voltage"
+query = ":MEAS:VOLT?"
+unit = "V"
+sim = "5.0 - (min(cc, 2.0) * 0.05 if input and function == 'CC' else 0) + noise(2e-4)"
+
+[[reading]]
+name = "current"
+label = "Current"
+query = ":MEAS:CURR?"
+unit = "A"
+sim = "({'CC': cc, 'CR': 5.0 / max(cr, 1e-3), 'CP': cp / 5.0, 'CV': 0.5}.get(function, 0) if input else 0) + noise(2e-5)"
+
+[[reading]]
+name = "power"
+label = "Power"
+query = ":MEAS:POW?"
+unit = "W"
+sim = "(5.0 * {'CC': cc, 'CR': 5.0 / max(cr, 1e-3), 'CP': cp / 5.0, 'CV': 0.5}.get(function, 0) if input else 0) + noise(1e-4)"
+
+[[setting]]
+name = "function"
+label = "Mode"
+kind = "choice"
+query = ":SOUR:FUNC?"
+options = [
+  { label = "CC", set = ":SOUR:FUNC CURR", reply = '^CC' },
+  { label = "CV", set = ":SOUR:FUNC VOLT", reply = '^CV' },
+  { label = "CR", set = ":SOUR:FUNC RES", reply = '^CR' },
+  { label = "CP", set = ":SOUR:FUNC POW", reply = '^CP' },
+]
+sim = "CC"
+
+[[setting]]
+name = "cc"
+label = "CC current"
+kind = "number"
+unit = "A"
+min = 0
+max = 40
+set = ":SOUR:CURR:LEV:IMM {value}"
+query = ":SOUR:CURR:LEV:IMM?"
+sim = "0.1"
+
+[[setting]]
+name = "cv"
+label = "CV voltage"
+kind = "number"
+unit = "V"
+min = 0
+max = 150
+set = ":SOUR:VOLT:LEV:IMM {value}"
+query = ":SOUR:VOLT:LEV:IMM?"
+sim = "1.0"
+
+[[setting]]
+name = "cr"
+label = "CR resistance"
+kind = "number"
+unit = "Ω"
+min = 0.05
+max = 15000
+set = ":SOUR:RES:LEV:IMM {value}"
+query = ":SOUR:RES:LEV:IMM?"
+sim = "100"
+
+[[setting]]
+name = "cp"
+label = "CP power"
+kind = "number"
+unit = "W"
+min = 0
+max = 200
+set = ":SOUR:POW:LEV:IMM {value}"
+query = ":SOUR:POW:LEV:IMM?"
+sim = "1"
+
+[[setting]]
+name = "input"
+label = "Input"
+kind = "bool"
+set = ":SOUR:INP:STAT {on_off}"
+query = ":SOUR:INP:STAT?"
+output = true
+sim = "0"

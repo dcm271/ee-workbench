@@ -16,6 +16,7 @@ from .transport import open_transport
 # their tab closed. Qt aborts the whole app if a running QThread is destroyed,
 # so they are kept here until their thread ends; see `wait_all`.
 _PARKED: list = []
+_STOP = object()            # queued by stop(): everything queued before it still runs
 
 
 def _unpark():
@@ -71,9 +72,11 @@ class InstrumentWorker(QThread):
         """Ask the thread to end and wait for it. If it is stuck in a slow
         call, it is parked rather than destroyed (which would abort the app);
         it closes its transport as soon as that call returns."""
-        self._running = False
-        self._q.put(None)
+        # Commands already queued (e.g. "output off" just before quitting) are
+        # carried out first; only then does the thread end.
+        self._q.put(_STOP)
         if not self.wait(int(timeout_s * 1000)):
+            self._running = False
             self.log.emit("The I/O thread is still busy; it will close when the "
                           "current operation ends.")
             _unpark()
@@ -106,6 +109,8 @@ class InstrumentWorker(QThread):
                 item = self._q.get(timeout=timeout)
             except queue.Empty:
                 item = None
+            if item is _STOP:
+                break
             if item is not None:
                 self._handle(*item)
                 continue

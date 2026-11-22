@@ -1,6 +1,6 @@
 # EE Workbench
 
-A Linux desktop app (PyQt6) for controlling, logging and automating a bench of test instruments: GPIB supplies and meters, a power profiler, logic analyzers, function generators and the Raspberry Pi's GPIO pins. It runs on a PC or full screen on a Pi with a touch screen.
+A Linux desktop app (PyQt6) for controlling, logging and automating a bench of test instruments: GPIB and SCPI supplies, meters and electronic loads, oscilloscopes, a power profiler, logic analyzers, function generators and the Raspberry Pi's GPIO pins. It runs on a PC or full screen on a Pi with a touch screen, as a lab bench, an unattended soak-test rig, or a production test station.
 
 | Instrument | Support |
 |---|---|
@@ -12,23 +12,33 @@ A Linux desktop app (PyQt6) for controlling, logging and automating a bench of t
 | sigrok logic analyzers (via sigrok-cli) | The same panel for anything sigrok drives: 24 MHz fx2lafw "Saleae clones", the original Saleae Logic / Logic16, DSLogic, …; sigrok's decoders; save as .sr (opens in PulseView). Runs on the Raspberry Pi |
 | Function generators (LAN, USB, GPIB) | Keysight 33500B/33600A/332x0A, Rigol DG800–DG4000, Siglent SDG: waveform, frequency, amplitude, offset, duty, outputs, per channel; frequency and amplitude sweeps |
 | Raspberry Pi GPIO header | Name pins, drive relays and resets, pulse a DUT's buttons, read "done" pins, log levels |
+| Bench multimeters (SCPI) | Keysight 34401A/344xxA, Keithley 2000-series and DMM6500/7510, Rigol DM3058/3068, Siglent SDM3000X, any SCPI meter: function, NPLC, readings with their unit |
+| Electronic loads (SCPI) | Rigol DL3021/3031, Siglent SDL1020X/1030X, Keithley 2380 / B&K 8600: CC/CV/CR/CP mode and levels, input, V/I/P readings |
+| Programmable supplies (SCPI) | Rigol DP832/831/821, Keysight E36311A–13A, Siglent SPD3303X, any single-output SCPI supply: per-output setpoints, OVP/OCP, outputs |
+| Oscilloscopes | Rigol DS1000Z/DS2000A/MSO5000/DHO, Keysight InfiniiVision 1000X–6000X, Tektronix TBS/MDO3/MSO2–6/DPO, Siglent SDS1000X-E/2000X-E: channels, timebase, trigger, run/stop/single, waveforms with Vpp/freq/duty/rise… |
+| **Anything else that speaks SCPI** | Describe it in a [small TOML file](docs/06-howtos.md#add-your-own-scpi-instrument): its tab, simulator, sequencer and watchdog support come with it, no code needed |
+
+The [compatibility list](docs/01-hardware-and-resources.md#compatibility) says which models have been checked on real hardware and which so far only against simulators written from the makers' manuals. Several units of any instrument can be open at once (two PPK2s, three supplies), each in its own named tab.
 
 Across instruments:
 
 - **Sequencer with limits.** Steps (set, wait, measure, capture, profile, wait for a GPIO pin, note) run once, N times or as a sweep, or a Python script with the same `bench` API. Min/max limits mark each pass PASS or FAIL, optionally stopping at the first failure. Results come as a table, a plot and CSV.
 - **Reports.** One HTML or PDF page per sequence run or session: verdict, instruments, plots, results, steps and log.
 - **Profiles.** Vary any supply, PPK2 or generator setpoint over time (sine, triangle, square, ramp, steps, log steps, a list, or a CSV), for battery curves, brown-out tests and frequency sweeps.
-- **Watchdog.** Rules across instruments: *PPK2 current > 50 mA for 10 ms → all outputs off*, *rail < 2.9 V → generator off*, *e-stop pin low → stop the sequence*.
+- **Watchdog.** Rules across instruments: *PPK2 current > 50 mA for 10 ms → all outputs off*, *rail < 2.9 V → generator off*, *e-stop pin low → stop the sequence*, *current spike → capture on the scope*. **In HW** also sets a supply's own OVP / current limit from the rule, so the DUT stays protected even if the computer stops.
 - **PPK2 event finder.** Every current burst with its duration, peak and charge, histograms, the sleep current between bursts, and the decoded bus traffic during each burst.
 - **Math channels.** Live expressions such as `_66321d_out.power / _6632a_in.power * 100` (efficiency) or integrated energy, plotted and recorded. They work in the session viewer too.
 - **PPK2 ↔ logic-analyzer alignment.** Wire one DUT pin to an analyzer channel and a PPK2 logic input. Each capture is then lined up with the PPK2 to within ±5–10 µs, with the current drawn under the decoded traffic.
-- **Sessions.** One file (`.eewb`, SQLite) records every instrument, capture, math channel, result and note. The viewer lays them out on one time axis, with cursors (Δt, mean, charge, energy), math, CSV/PNG export and reports.
+- **Sessions.** One file (`.eewb`, SQLite) records every instrument, capture, math channel, result and note. The viewer lays them out on one time axis, with cursors (Δt, mean, charge, energy), math, CSV/PNG export and reports. A **flight-recorder** mode keeps only the seconds before and after each event (a watchdog trip, a capture, a note), for overnight runs.
+- **Production test.** Scan a serial number, the sequence runs, a big PASS / FAIL banner says where the unit goes. Every unit goes into a results database with history, first-pass and final yield, per-unit HTML reports and CSV export.
+- **Unattended runs.** Outputs off on quit or after a crash, automatic reconnect when a USB cable is replugged or an instrument power-cycled, resuming a sequence after a crash, and a heartbeat GPIO pin for an external hardware watchdog.
+- **Several PPK2s in step.** Line up two or more PPK2s' time axes through a shared logic input, to within tens of µs.
 - **Setups.** Save the whole bench (instruments, sequence, watchdog, math) under a name, and recall it in one click.
 - **Remote API.** Drive the open bench from Jupyter, pytest or CI: `bench = connect(); bench.measure("PPK2", "current", 2.0)`.
 
 Each instrument opens in its own tab with live readouts, trend plots on a shared time base, and CSV recording. **Esc turns every output off**: supplies, PPK2 DUT power, generator channels and GPIO outputs. It also stops a running sequence or profile.
 
-**Built to keep running.** An error inside the app is logged to `~/.config/ee-workbench/crash.log` and reported once, never closing the window or touching the outputs. An instrument that stops answering gets a **⟳ Reconnect** button on its tab. Damaged settings files cost only the damaged entries, and Esc still reaches every other instrument if one fails. `./run.sh --restart-on-crash` brings an unattended screen back after a hard crash (the Pi's autostart uses it). See [When something goes wrong](docs/03-users-guide.md#when-something-goes-wrong). Simulators (`SIM::66321D`, `SIM::6632A`, `SIM::3456A`, `SIM::PPK2`, `SIM::SALEAE`, `SIM::SIGROK`, `SIM::FGEN`, `SIM::SDG`, `SIM::GPIO`) let you try everything without hardware.
+**Built to keep running.** An error inside the app is logged to `~/.config/ee-workbench/crash.log` and reported once, never closing the window or touching the outputs. An instrument that stops answering gets a **⟳ Reconnect** button on its tab. Damaged settings files cost only the damaged entries, and Esc still reaches every other instrument if one fails. `./run.sh --restart-on-crash` brings an unattended screen back after a hard crash (the Pi's autostart uses it). See [When something goes wrong](docs/03-users-guide.md#when-something-goes-wrong). Every instrument has a simulator (`SIM::66321D`, `SIM::PPK2`, `SIM::34461A`, `SIM::DP832`, `SIM::DL3021`, `SIM::SCOPE`, … see [Simulators](docs/03-users-guide.md#simulators)), so everything can be tried without hardware.
 
 ![66321D panel](docs/images/supply-66321d.png)
 
@@ -40,6 +50,10 @@ Each instrument opens in its own tab with live readouts, trend plots on a shared
 | [Logic + PPK2 alignment](docs/03-users-guide.md#lining-a-capture-up-with-a-ppk2) | [Session viewer](docs/03-users-guide.md#looking-through-a-session) |
 | ![GPIO](docs/images/gpio.png) | ![Math channels](docs/images/math.png) |
 | [Pi GPIO](docs/03-users-guide.md#gpio-panel-raspberry-pi-header) | [Math channels](docs/03-users-guide.md#math-channels) |
+| ![Oscilloscope](docs/images/scope.png) | ![Three-output supply](docs/images/scpi-supply.png) |
+| [Oscilloscope](docs/03-users-guide.md#oscilloscope-panel) | [SCPI supplies, meters, loads](docs/03-users-guide.md#meter-load-and-supply-panel-scpi) |
+| ![Production test](docs/images/production.png) | ![Watchdog with hardware limits](docs/images/watchdog-hw.png) |
+| [Production test](docs/03-users-guide.md#production-test) | [Watchdog](docs/03-users-guide.md#watchdog) with limits in the supply |
 
 ## Quick start
 
@@ -52,7 +66,10 @@ Each instrument opens in its own tab with live readouts, trend plots on a shared
 ./run.sh SIGROK@fx2lafw                    # a sigrok-supported analyzer (also listed as SIGROK::…)
 ./run.sh FGEN@TCPIP::192.168.1.50::INSTR   # a LAN function generator
 ./run.sh GPIO@                             # the Raspberry Pi's GPIO header
+./run.sh TCPIP::192.168.1.60::INSTR        # a LAN meter / load / supply / scope (auto-detected)
+./run.sh SCPI:DL3021@USB0::0x1AB1::0x0E11::DL3A000000001::INSTR   # ... or named
 ./run.sh SIM::66321D SIM::PPK2 SIM::GPIO   # no hardware needed
+./run.sh SIM::DP832 SIM::DL3021 SIM::SCOPE SIM::PPK2 SIM::PPK2#2
 ./run.sh --restart-on-crash --fullscreen   # kiosk: start again if it ever crashes
 ```
 
@@ -71,15 +88,20 @@ print(bench.measure("PPK2", "current", 2.0))
 
 Read the guides here on GitHub (the Markdown sources in [`docs/`](docs/)), or as PDFs in [`docs/pdf/`](docs/pdf/). The whole manual is in one file, [EE-Workbench-Manual.pdf](docs/pdf/EE-Workbench-Manual.pdf). Rebuild the PDFs with `scripts/build-docs.sh`.
 
-1. [Hardware & Resources](docs/01-hardware-and-resources.md): supported instruments, function generators, the Pi's GPIO header and its wiring, GPIB addresses, cabling, manuals
-2. [Installation & Setup](docs/02-installation.md): setup scripts and their options, GPIB driver, PPK2, Saleae, sigrok, function generators (LAN/USB), GPIO, PDF reports, Remote API, troubleshooting
-3. [User's Guide](docs/03-users-guide.md): every panel and control, profiles, events, sequencer and limits, watchdog, math, reports, setups, Remote API, sessions, workflows, file formats, what happens when something goes wrong
-4. [Technical Reference](docs/04-technical-reference.md): command sets, timings, architecture, error handling and recovery, file formats, environment variables, the Remote API protocol, adding instruments
-5. [Raspberry Pi & Touch Screen](docs/05-raspberry-pi.md): one-step Pi setup, full-screen launcher, touch layout, GPIO, remote use
-6. [How-to Guides](docs/06-howtos.md): step-by-step recipes, from sleep current and battery life, to relay power-cycling, pass/fail reports, frequency response, Jupyter and CI, and recovering from a pulled cable or a crash
+1. [Hardware & Resources](docs/01-hardware-and-resources.md): the compatibility list, supported instruments, scopes, meters, loads, the Pi's GPIO header and its wiring, GPIB addresses, cabling, manuals
+2. [Installation & Setup](docs/02-installation.md): setup scripts and their options, GPIB driver, PPK2, Saleae, sigrok, LAN/USB instruments (generators, meters, loads, scopes), GPIO, PDF reports, Remote API, troubleshooting
+3. [User's Guide](docs/03-users-guide.md): every panel and control, several units and PPK2 alignment, profiles, events, sequencer and limits, watchdog and hardware limits, math, production test, safety and unattended runs, reports, setups, Remote API, sessions and the flight recorder, workflows, file formats, what happens when something goes wrong
+4. [Technical Reference](docs/04-technical-reference.md): the instrument definition format, command sets and scope dialects, timings, architecture, error handling and recovery, file formats (sessions, results database, bench state), environment variables, the Remote API protocol, adding instruments
+5. [Raspberry Pi & Touch Screen](docs/05-raspberry-pi.md): one-step Pi setup, full-screen launcher, touch layout, GPIO, an unattended bench with a heartbeat, a production station, remote use
+6. [How-to Guides](docs/06-howtos.md): step-by-step recipes, from sleep current and battery life, to relay power-cycling, pass/fail reports, frequency response, Jupyter and CI, adding your own instrument, a production station, two PPK2s, a battery drain, catching a glitch on the scope, an overnight run, and recovering from a pulled cable or a crash
 
 ## Tests
 
 ```bash
 .venv/bin/python -m pytest tests          # runs everything against the simulators; no hardware needed
+.venv/bin/python -m ee_workbench.check_instruments   # validate every instrument definition file
 ```
+
+## Reporting what works
+
+Many instruments here have so far been checked only against simulators written from their makers' programming manuals. If you use one on real hardware, whether it works or not, please report it with the instrument's `*IDN?` answer and, for a problem, the tab's **Console** output and `~/.config/ee-workbench/crash.log`. A definition file that you got working on a new model is the most useful contribution of all.

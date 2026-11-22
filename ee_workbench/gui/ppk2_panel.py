@@ -159,6 +159,8 @@ class Ppk2Panel(PanelBase):
 
     def __init__(self, resource: str, model: str, baud: int):
         super().__init__(resource, model, baud)
+        self.time_shift = 0.0         # added to this PPK2's times (aligned to another)
+        self._sync_pending: dict = {}
         self.state = PpkState()
         self.ring = Ring(LIVE_SECONDS * SAMPLE_RATE)
         self.fine = TraceBuffer(5, max_rows=1_000_000)       # t, mean, min, max, logic
@@ -344,7 +346,110 @@ class Ppk2Panel(PanelBase):
         self.lost_label.setToolTip("Gaps in the sample counter: data that never reached "
                                    "the computer (USB too busy, or the app fell behind).")
         form.addRow(self.lost_label)
+        form.addRow(self._build_sync())
         return g
+
+    # ---- several PPK2s on one time base ---------------------------------------
+    def _build_sync(self):
+        box = QGroupBox("Time-align to another PPK2")
+        f = QFormLayout(box)
+        self.sync_combo = QComboBox()
+        self.sync_combo.setToolTip("Wire one DUT pin to the same logic input on both PPK2s; "
+                                   "this one's times are then shifted to match the other's "
+                                   "(to ~10-20 µs instead of the USB's few ms).")
+        self.sync_combo.addItem("(none)", "")
+        self.sync_combo.activated.connect(lambda *_: self.settings_changed.emit())
+        f.addRow("Reference", self.sync_combo)
+        self.sync_ch = QSpinBox()
+        self.sync_ch.setRange(0, 7)
+        self.sync_ch.setPrefix("D")
+        f.addRow("Shared input", self.sync_ch)
+        row = QHBoxLayout()
+        self.sync_btn = QPushButton("Align now")
+        self.sync_btn.clicked.connect(self.align_now)
+        row.addWidget(self.sync_btn)
+        self.sync_keep = QCheckBox("Keep aligned")
+        self.sync_keep.setToolTip("Align again every 30 s (clocks drift apart slowly)")
+        self.sync_keep.toggled.connect(self._keep_toggled)
+        row.addWidget(self.sync_keep)
+        f.addRow(row)
+        self.sync_label = QLabel("Not aligned")
+        self.sync_label.setWordWrap(True)
+        self.sync_label.setStyleSheet(f"color:{C_MUTED};")
+        f.addRow(self.sync_label)
+        self.sync_timer = QTimer(self)
+        self.sync_timer.timeout.connect(lambda: self.align_now(quiet=True))
+        return box
+
+    def _refresh_sync_choices(self):
+        from .panel_base import open_panels
+        keep = self.sync_combo.currentData() or self._sync_pending.get("to", "")
+        self.sync_combo.blockSignals(True)
+        self.sync_combo.clear()
+        self.sync_combo.addItem("(none)", "")
+        for p in open_panels():
+            if p is not self and p.KIND == "ppk2":
+                self.sync_combo.addItem(p.display_name(), p.display_name())
+        i = self.sync_combo.findData(keep)
+        self.sync_combo.setCurrentIndex(max(0, i))
+        self.sync_combo.blockSignals(False)
+
+    def showEvent(self, e):
+        self._refresh_sync_choices()
+        super().showEvent(e)
+
+    def _keep_toggled(self, on):
+        if on:
+            self.sync_timer.start(30_000)
+            self.align_now(quiet=True)
+        else:
+            self.sync_timer.stop()
+        self.settings_changed.emit()
+
+    def _sync_ref(self):
+        from ..signals import name_matches
+        from .panel_base import open_panels
+        want = self.sync_combo.currentData()
+        if not want:
+            return None
+        return next((p for p in open_panels() if p is not self and p.KIND == "ppk2"
+                     and name_matches(want, p.display_name())), None)
+
+    def align_now(self, quiet: bool = False):
+        from ..align import ppk_to_ppk
+        self._refresh_sync_choices()
+        ref = self._sync_ref()
+        if ref is None:
+            if not quiet:
+                self.sync_label.setText("Choose the reference PPK2 (open both tabs first)")
+            return
+        k = 2 * SAMPLE_RATE                      # the last 2 s of both
+        t_o, _, lg_o = self.ring.latest(k)
+        t_r, _, lg_r = ref.ring.latest(k + SAMPLE_RATE // 2)
+        res = ppk_to_ppk(t_r, lg_r, t_o, lg_o, self.sync_ch.value())
+        if res.offset is None or res.ambiguous:
+            self.sync_label.setText("Couldn't align: " + (res.note or "no match"))
+            self.sync_label.setStyleSheet(f"color:{C_WARN};")
+            return
+        self.time_shift += res.offset
+        self.sync_label.setText(f"Aligned to {ref.display_name()}: shift "
+                                f"{self.time_shift * 1e3:+.3f} ms ({res.note})")
+        self.sync_label.setStyleSheet("color:#7ee787;")
+        if not quiet:
+            self.message.emit(f"{self.display_name()}: time-aligned to {ref.display_name()}")
+        if session.active:
+            session.note(f"{self.display_name()} time-aligned to {ref.display_name()}: "
+                         f"shift {self.time_shift * 1e6:+.1f} µs")
+
+    def _on_reading(self, r):
+        if self.time_shift and getattr(r, "n", 0):
+            r.t0 += self.time_shift
+            if hasattr(r, "t"):
+                try:
+                    r.t += self.time_shift
+                except AttributeError:
+                    pass
+        super()._on_reading(r)
 
     def _build_trend_tab(self):
         w = QWidget()
@@ -561,7 +666,9 @@ class Ppk2Panel(PanelBase):
     def session_settings(self) -> dict:
         return {"name": self.name_edit.text(), "live_window": self.live_combo.currentText(),
                 "log": self.log_chk.isChecked(), "live_log": self.live_log_chk.isChecked(),
-                "logic": self.logic_chk.isChecked(), "csv_interval": self.csv_combo.currentText()}
+                "logic": self.logic_chk.isChecked(), "csv_interval": self.csv_combo.currentText(),
+                "sync": {"to": self.sync_combo.currentData() or "",
+                         "ch": self.sync_ch.value(), "keep": self.sync_keep.isChecked()}}
 
     def restore_settings(self, s: dict):
         self.name_edit.setText(str(s.get("name", "")))
@@ -572,6 +679,15 @@ class Ppk2Panel(PanelBase):
         self.log_chk.setChecked(bool(s.get("log", False)))
         self.live_log_chk.setChecked(bool(s.get("live_log", False)))
         self.logic_chk.setChecked(bool(s.get("logic", False)))
+        sync = s.get("sync") if isinstance(s.get("sync"), dict) else {}
+        self._sync_pending = {"to": str(sync.get("to", ""))}
+        try:
+            self.sync_ch.setValue(int(sync.get("ch", 0)))
+        except (TypeError, ValueError):
+            pass
+        self._refresh_sync_choices()
+        if sync.get("keep"):
+            self.sync_keep.setChecked(True)
 
     # ================================================================ slots
     def on_connected(self, family, caps, state):
@@ -619,11 +735,14 @@ class Ppk2Panel(PanelBase):
             rows = self.b_csv.push(r.t0, r.current, r.logic)
             if rows.size:
                 wall = self._wall_offset + rows[:, 0]
-                self.recorder.w.writerows(
+                ok = self.recorder.rows(
                     [time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(w)) + f".{int(w % 1 * 1000):03d}",
                      f"{t:.5f}", f"{a:.6e}", f"{lo:.6e}", f"{hi:.6e}", int(lg)]
                     for w, (t, a, lo, hi, lg) in zip(wall, rows))
-                self.recorder.fh.flush()
+                if not ok:
+                    err, self.recorder.error = self.recorder.error, ""
+                    self.rec_btn.setChecked(False)
+                    self.on_error(f"CSV recording stopped: {err}")
 
     def _toggle_record(self, on: bool):
         if on:

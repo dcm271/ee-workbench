@@ -1,0 +1,54 @@
+# Keysight / Agilent / HP bench DMMs that share the 34401A command set.
+id = "34461A"
+name = "Keysight 34461A / 34465A / 34470A (also 34401A, 34410A, 34411A, 34460A)"
+maker = "Keysight"
+type = "meter"
+idn = ["34401A", "34410A", "34411A", "34460A", "34461A", "34465A", "34470A"]
+init = ["*CLS"]
+error_query = "SYST:ERR?"
+notes = "READ? takes one reading with the function chosen here, at auto range. The capacitance function needs a 34461A or newer."
+
+[[reading]]
+name = "value"
+label = "Reading"
+query = "READ?"
+unit = "V"
+unit_from = "function"
+sim = "{'DC V': 3.3, 'AC V': 0.12, 'DC I': 0.015, 'AC I': 0.001, '2W ohm': 1000, '4W ohm': 1000, 'Frequency': 1000, 'Diode': 0.62, 'Continuity': 0.5, 'Capacitance': 1e-7}.get(function, 0) * (1 + noise(2e-5))"
+
+[[setting]]
+name = "function"
+label = "Function"
+kind = "choice"
+query = "CONF?"
+options = [
+  { label = "DC V", set = "CONF:VOLT:DC AUTO", reply = '^"?VOLT ', unit = "V", sim = '"VOLT +1.000000E+01,+3.000000E-06"' },
+  { label = "AC V", set = "CONF:VOLT:AC AUTO", reply = '^"?VOLT:AC', unit = "V", sim = '"VOLT:AC +1.000000E+00,+1.000000E-06"' },
+  { label = "DC I", set = "CONF:CURR:DC AUTO", reply = '^"?CURR ', unit = "A", sim = '"CURR +1.000000E-01,+1.000000E-07"' },
+  { label = "AC I", set = "CONF:CURR:AC AUTO", reply = '^"?CURR:AC', unit = "A", sim = '"CURR:AC +1.000000E-01,+1.000000E-07"' },
+  { label = "2W ohm", set = "CONF:RES AUTO", reply = '^"?RES ', unit = "Ω", sim = '"RES +1.000000E+03,+1.000000E-04"' },
+  { label = "4W ohm", set = "CONF:FRES AUTO", reply = '^"?FRES', unit = "Ω", sim = '"FRES +1.000000E+03,+1.000000E-04"' },
+  { label = "Frequency", set = "CONF:FREQ", reply = '^"?FREQ', unit = "Hz", sim = '"FREQ +1.000000E+03,+3.000000E-04"' },
+  { label = "Diode", set = "CONF:DIOD", reply = '^"?DIOD', unit = "V", sim = '"DIOD"' },
+  { label = "Continuity", set = "CONF:CONT", reply = '^"?CONT', unit = "Ω", sim = '"CONT"' },
+  { label = "Capacitance", set = "CONF:CAP AUTO", reply = '^"?CAP', unit = "F", sim = '"CAP +1.000000E-06,+1.000000E-09"' },
+]
+sim = "DC V"
+
+[[setting]]
+name = "nplc"
+label = "Integration (DC V)"
+kind = "number"
+unit = "PLC"
+set = "SENS:VOLT:DC:NPLC {value}"
+query = "SENS:VOLT:DC:NPLC?"
+values = [0.02, 0.2, 1, 10, 100]
+sim = "10"
+
+[[setting]]
+name = "autozero"
+label = "Autozero (DC V)"
+kind = "bool"
+set = "SENS:VOLT:DC:ZERO:AUTO {on_off}"
+query = "SENS:VOLT:DC:ZERO:AUTO?"
+sim = "1"

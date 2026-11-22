@@ -111,3 +111,24 @@ def align(logic_t: np.ndarray, logic_d: np.ndarray, ppk_t: np.ndarray, ppk_d: np
         note += (". Warning: the signal is too regular, another period fits about as well; "
                  "use an irregular signal (UART, a debug pin)")
     return Alignment(float(o), n, lt.size, spread, ambiguous, note)
+
+
+def ppk_to_ppk(t_ref: np.ndarray, bits_ref: np.ndarray, t_other: np.ndarray,
+               bits_other: np.ndarray, channel: int, window: float = 0.25) -> Alignment:
+    """Two PPK2s with one DUT pin wired to the same logic input D<channel> on
+    both. Returns the offset o with other_t + o ≈ ref_t (searched within
+    ±window seconds, which the host's own timing already guarantees).
+
+    Each PPK2 knows an edge to ±1 sample, so the tolerance is twice the
+    single-device one; after alignment the two agree to about 10-20 µs."""
+    bit = 1 << int(channel)
+    rt, rd = edges_from_samples(np.asarray(t_ref, float), (np.asarray(bits_ref) & bit) > 0)
+    ot, od = edges_from_samples(np.asarray(t_other, float),
+                                (np.asarray(bits_other) & bit) > 0)
+    if ot.size < 3:
+        return Alignment(None, note=f"This PPK2 saw fewer than 3 edges on D{channel} "
+                                    "(is the logic input wired and switched on?).")
+    res = align(ot, od, rt, rd, -window, window, tol=2 * TOL)
+    if res.offset is None and "PPK2 saw no edges" in res.note:
+        res.note = f"The reference PPK2 saw no edges on D{channel} in that time."
+    return res

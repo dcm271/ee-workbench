@@ -52,15 +52,16 @@ for g in dialout plugdev gpio; do
     echo "Added $USER to '$g': log out and back in."
   fi
 done
-# USB-TMC instruments (function generators) for pyvisa-py: Keysight/Agilent,
-# Rigol, Siglent, Tektronix. Members of 'plugdev' may open them.
+# USB-TMC instruments (generators, meters, loads, supplies, scopes) for
+# pyvisa-py: Keysight/Agilent, Rigol, Siglent, Tektronix, Keithley. Members of 'plugdev' may open them.
 TMC_RULES=/etc/udev/rules.d/60-ee-workbench-usbtmc.rules
 TMC_TEXT='SUBSYSTEM=="usb", ATTR{idVendor}=="0957", MODE="0660", GROUP="plugdev"
 SUBSYSTEM=="usb", ATTR{idVendor}=="2a8d", MODE="0660", GROUP="plugdev"
 SUBSYSTEM=="usb", ATTR{idVendor}=="1ab1", MODE="0660", GROUP="plugdev"
 SUBSYSTEM=="usb", ATTR{idVendor}=="f4ec", MODE="0660", GROUP="plugdev"
 SUBSYSTEM=="usb", ATTR{idVendor}=="f4ed", MODE="0660", GROUP="plugdev"
-SUBSYSTEM=="usb", ATTR{idVendor}=="0699", MODE="0660", GROUP="plugdev"'
+SUBSYSTEM=="usb", ATTR{idVendor}=="0699", MODE="0660", GROUP="plugdev"
+SUBSYSTEM=="usb", ATTR{idVendor}=="05e6", MODE="0660", GROUP="plugdev"'
 echo "$TMC_TEXT" | sudo tee "$TMC_RULES" >/dev/null
 sudo udevadm control --reload-rules
 sudo udevadm trigger --subsystem-match=usb

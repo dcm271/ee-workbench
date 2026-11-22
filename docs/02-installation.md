@@ -20,7 +20,7 @@ These steps take a fresh Ubuntu machine to EE Workbench talking to your instrume
 > | `--docs` | also install what's needed to rebuild these documents as PDFs |
 > | `--dry-run` | show what it would do, and do nothing |
 >
-> It also adds you to the `dialout`, `plugdev` and (if it exists) `gpio` groups, and installs a udev rule for [USB function generators](#function-generators-optional). Log out and back in afterwards so the groups apply. The sections below explain each part, in case you'd rather do it by hand.
+> It also adds you to the `dialout`, `plugdev` and (if it exists) `gpio` groups, and installs a udev rule for [USB instruments](#scpi-meters-loads-supplies-and-oscilloscopes-optional) (generators, meters, loads, supplies, scopes). Log out and back in afterwards so the groups apply. The sections below explain each part, in case you'd rather do it by hand.
 >
 > **Raspberry Pi?** `scripts/setup-pi.sh` does the same for the Pi. See *Raspberry Pi & Touch Screen*.
 
@@ -164,10 +164,38 @@ The package's udev rules give USB analyzers to the desktop user, so unplug the a
 Nothing extra to install: generators use the same VISA library as GPIB.
 
 - **LAN** (recommended): give the generator a fixed IP address on its front panel (Utility → I/O → LAN), check you can `ping` it, and connect to `TCPIP::192.168.1.50::INSTR` (VXI-11; Keysight, Rigol and Siglent all answer it). If VXI-11 is blocked, `TCPIP::192.168.1.50::5025::SOCKET` (Keysight, Siglent port 5025; Rigol 5555) works too. Type the resource in the toolbar, with model **Function generator** or **Auto-detect**.
-- **USB**: plug it in and it appears in the resource list as `USB0::0x1AB1::0x0642::DG1ZA2xxxxxxx::INSTR`. pyvisa-py drives USB-TMC through `pyusb` (in `requirements.txt`), and needs permission on the device: the setup scripts install `/etc/udev/rules.d/60-ee-workbench-usbtmc.rules` for Keysight/Agilent (`0957`, `2a8d`), Rigol (`1ab1`), Siglent (`f4ec`, `f4ed`) and Tektronix (`0699`), giving them to the `plugdev` group. Another brand: add a line with its USB vendor ID (`lsusb`), then `sudo udevadm control --reload-rules` and replug.
+- **USB**: plug it in and it appears in the resource list as `USB0::0x1AB1::0x0642::DG1ZA2xxxxxxx::INSTR`. pyvisa-py drives USB-TMC through `pyusb` (in `requirements.txt`), and needs permission on the device: the setup scripts install `/etc/udev/rules.d/60-ee-workbench-usbtmc.rules` for Keysight/Agilent (`0957`, `2a8d`), Rigol (`1ab1`), Siglent (`f4ec`, `f4ed`), Tektronix (`0699`) and Keithley (`05e6`), giving them to the `plugdev` group. Another brand: add a line with its USB vendor ID (`lsusb`), then `sudo udevadm control --reload-rules` and replug.
 - **GPIB**: as any other GPIB instrument.
 
 Auto-detect recognises the Keysight 33xxx, Rigol DG and Siglent SDG families by their `*IDN?` answer; otherwise choose **Function generator** by hand. Test with the simulators first: `./run.sh SIM::FGEN` (SCPI) or `SIM::SDG` (Siglent).
+
+## SCPI meters, loads, supplies and oscilloscopes (optional)
+
+Nothing extra to install: these use the same VISA library (pyvisa-py) as the generators. The [Compatibility](01-hardware-and-resources.md#compatibility) table lists the models with a built-in definition.
+
+1. **Connect it.**
+   - **LAN** (recommended for meters, loads and scopes): set a fixed IP address on the instrument (its Utility / I/O / LAN menu), check you can `ping` it, and use `TCPIP::<ip>::INSTR`. If VXI-11 is blocked or not offered, the raw socket form works: `TCPIP::<ip>::5025::SOCKET` (Keysight, Siglent, Keithley), `::5555::SOCKET` (Rigol), `::4000::SOCKET` (Tektronix).
+   - **USB**: the instrument appears in the resource list as `USB0::0x1AB1::…::INSTR` once the udev rule above is installed (replug it after installing). Another brand: add a line with its vendor ID from `lsusb`, `sudo udevadm control --reload-rules`, replug.
+   - **GPIB**: as any other GPIB instrument. **RS-232**: `ASRL/dev/ttyUSB0::INSTR` with the baud rate set in the toolbar.
+2. **Open it** with *Model: Auto-detect*: it reads `*IDN?` and opens a meter / load / supply tab or a scope tab. If it isn't recognised, choose it by hand: **Model** list in the toolbar, or **＋ Add instrument → Meter / load / scope / SCPI…**. On the command line: `./run.sh SCPI:34461A@TCPIP::192.168.1.60::INSTR`, `./run.sh SCOPE:RIGOL@TCPIP::192.168.1.70::INSTR`.
+3. **Try the simulator first** if you like: `./run.sh SIM::34461A SIM::DL3021 SIM::DP832 SIM::SCOPE`.
+
+A few instruments need a setting on their front panel first:
+
+| Instrument | Set |
+|---|---|
+| Keithley DMM6500 / DMM7510 / DAQ6510 | **MENU → System → Settings → Command Set: SCPI** (it may ship in TSP mode), then power-cycle |
+| Keysight E36300, 34460A/34461A | LAN or USB is on by default; for GPIB set its address in **Utility → I/O** |
+| Siglent SPD3303X | Over LAN, VXI-11 (`TCPIP::<ip>::INSTR`) or port 5025. Keep the poll delay at 200 ms or more; it drops commands sent faster |
+| Rigol DS1000Z | Over USB, set **Utility → IO Setting → USB Device: Computer**. Over LAN, turn on DHCP or set a static address |
+| Tektronix TBS1000C/2000 | Over USB, set **Utility → Config → USB Device Port: Connect to Computer** |
+
+**Your own instruments.** An instrument without a built-in definition can be added with a small TOML file in `~/.config/ee-workbench/instruments/`. No programming is needed: see [Add your own SCPI instrument](06-howtos.md#add-your-own-scpi-instrument). Check a file with:
+
+```bash
+.venv/bin/python -m ee_workbench.check_instruments ~/.config/ee-workbench/instruments/my-meter.toml
+.venv/bin/python -m ee_workbench.check_instruments          # every definition in use
+```
 
 ## Raspberry Pi GPIO (optional)
 
@@ -216,10 +244,13 @@ api_port = 8765
 ./run.sh SIGROK@fx2lafw                    # a sigrok analyzer
 ./run.sh FGEN@TCPIP::192.168.1.50::INSTR   # a LAN function generator
 ./run.sh GPIO@                             # the Raspberry Pi's GPIO header
+./run.sh SCPI:DL3021@TCPIP::192.168.1.61::INSTR    # a meter / load / supply from a definition
+./run.sh SCOPE:KEYSIGHT@USB0::0x2A8D::0x1797::CN12345678::INSTR   # an oscilloscope
+./run.sh PPK2@/dev/ttyACM0 PPK2@/dev/ttyACM2     # two PPK2s: two tabs
 ./run.sh --api SIM::66321D SIM::PPK2       # simulators, with the Remote API on
 ```
 
-`MODEL@RESOURCE` forces a driver. Models are `663xx` (or `66321D`), `6632A`, `3456A`, `PPK2`, `SALEAE`, `SIGROK`, `FGEN` and `GPIO`. **The 3456A always has to be named**, because it has no ID query.
+`MODEL@RESOURCE` forces a driver. Models are `663xx` (or `66321D`), `6632A`, `3456A`, `PPK2`, `SALEAE`, `SIGROK`, `FGEN`, `GPIO`, `SCPI:<id>` for an [instrument definition](04-technical-reference.md#instrument-definition-files-toml) (`SCPI:34461A`, `SCPI:DP832`, …; plain `34461A` works too) and `SCOPE:RIGOL`, `SCOPE:KEYSIGHT`, `SCOPE:TEK`, `SCOPE:SIGLENT` (a model name such as `DS1054Z` or `TBS2000` works too). **The 3456A always has to be named**, because it has no ID query. The same resource can't be opened twice, but any number of different instruments of one model can.
 
 ### Desktop launcher (optional)
 
@@ -271,7 +302,14 @@ Then copy it to `~/.local/share/applications/` (menu), `~/Desktop/`, or `~/.conf
 | Saleae: "Logic 2 doesn't see analyzer …" | Unplugged, or another analyzer is connected. Check Logic 2's device list; `SALEAE::` picks whichever is there. |
 | Saleae: "invalid digital sample rate" (or similar) at Capture | That rate isn't possible with this many channels on. Pick a lower rate or turn channels off. |
 | Saleae: a decoder finds nothing | Wrong channel or bit rate, or the analyzer setting names don't match Logic 2's (for **Other…** decoders they must match exactly). |
-| "Couldn't identify the instrument" | Auto-detect only knows the supplies. Pick the model by hand (the 3456A always needs this). |
+| "Couldn't identify the instrument" | Its `*IDN?` answer isn't in any definition. Pick the model by hand (the 3456A always needs this), or [write a definition](06-howtos.md#add-your-own-scpi-instrument) with an `idn` entry for it. |
+| Status bar: "⚠ N instrument definition file(s) not loaded" | A file in `~/.config/ee-workbench/instruments/` has a mistake. `python -m ee_workbench.check_instruments` says which and why; the full list is in `crash.log`. |
+| SCPI tab: a reading shows **—** and the console shows `-113` / `Undefined header` | The instrument doesn't know that command (another model of the family, or another firmware). Type the right one in the **Console** to find it, then change it in a copy of the definition. |
+| SCPI tab: a reading shows **OVLD** | The instrument answered 9.9E+37: overload or no reading at the present range. |
+| Keithley DMM6500: nothing but errors | It's in TSP mode: switch its command set to SCPI (see above). |
+| Scope: "Single → capture" waits forever | The trigger never comes: check the trigger source and level, or use **Grab screen**. **■ Stop** ends the wait. |
+| Scope: waveform is flat or clipped | The channel's V/div or offset puts the signal off screen: the screen record is all that is fetched. |
+| Production test: the banner says **SERIAL?** | The serial-format pattern is a regular expression matched against the whole serial: `SB\d{6}` means SB and six digits. Clear the box to accept anything. |
 | Readings stop and "Polling paused" appears; the tab shows ⚠ and **⟳ Reconnect** | A bus error occurred, or the instrument was switched off or unplugged. Fix the cause, then press **Resume polling**, or **⟳ Reconnect** to reopen the tab with its settings. |
 | A window "EE Workbench: internal error" | A bug was caught; the app keeps running and the instruments are untouched. Details are in `~/.config/ee-workbench/crash.log`; include it when reporting the problem. |
 | The app vanished (no window, no message) | A crash inside Qt or a driver library. The stack is in `~/.config/ee-workbench/fault.log`. Restart it; it reopens the same instruments. On an unattended screen launch it with `./run.sh --restart-on-crash`. |

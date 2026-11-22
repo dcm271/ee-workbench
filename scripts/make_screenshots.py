@@ -393,7 +393,7 @@ def bench_start():
 
     def done():
         bw.close()
-        app.quit()
+        extras_start()
 
     at(2500, setup)
     at(4500, run1)
@@ -402,11 +402,151 @@ def bench_start():
     at(12500, done)
 
 
-at(1500, setup)
-at(6000, mid)
-at(6500, capture)
-at(11000, shots)
-at(17000, tests)
-at(18000, console)
+def extras_start():
+    """Generic SCPI instruments, a scope, several PPK2s, watchdog hardware
+    limits, recording mode, safety and production test."""
+    import tempfile
+
+    from ee_workbench.gui.hub import hub
+    from ee_workbench.gui.record_dialog import RecordDialog
+    from ee_workbench.gui.safety_dialog import SafetyDialog
+    from ee_workbench.safety import Safety
+    from ee_workbench.sequencer import Plan, Step
+    from ee_workbench.watchdog import Rule
+    global xw
+    xw = MainWindow([parse_target(t) for t in ("SIM::DP832", "SIM::34461A", "SIM::DL3021",
+                                               "SIM::SCOPE", "SIM::PPK2", "SIM::PPK2#2")])
+    xw.resize(1440, 900)
+    xw.show()
+    P = {}
+
+    def setup():
+        sup, dmm, load, scope, p1, p2 = xw.panels()
+        P.update(sup=sup, dmm=dmm, load=load, scope=scope, p1=p1, p2=p2)
+        sup.name_edit.setText("bench rails")
+        for n, v in (("vset1", 3.3), ("iset1", 0.5), ("vset2", 5.0), ("iset2", 1.0),
+                     ("vset3", 1.8), ("out1", True), ("out2", True)):
+            sup._set(n, v)
+        dmm.name_edit.setText("VREF")
+        dmm._set("nplc", 1)
+        load.name_edit.setText("battery drain")
+        load._set("cc", 0.75)
+        load._set("input", True)
+        scope.name_edit.setText("clock + data")
+        p1.name_edit.setText("main MCU")
+        p2.name_edit.setText("radio")
+        for p in (p1, p2):
+            p.set_dut_power(True)
+
+    def shots1():
+        scope = P["scope"]
+        scope.capture_now()
+        for key, name in (("sup", "scpi-supply"), ("dmm", "scpi-meter"),
+                          ("load", "scpi-load")):
+            xw.tabs.setCurrentWidget(P[key])
+            app.processEvents()
+            xw.grab().save(str(OUT / f"{name}.png"))
+
+    def shots2():
+        xw.tabs.setCurrentWidget(P["scope"])
+        app.processEvents()
+        xw.grab().save(str(OUT / "scope.png"))
+        p2 = P["p2"]
+        p2._refresh_sync_choices()
+        p2.sync_combo.setCurrentIndex(1)
+        p2.sync_ch.setValue(7)
+        p2.sync_label.setText(f"Aligned to {P['p1'].display_name()}: shift +3.412 ms "
+                              "(38 of 38 edges match, ±9 µs)")
+        p2.sync_label.setStyleSheet("color:#7ee787;")
+        xw.tabs.setCurrentWidget(p2)
+        app.processEvents()
+        xw.grab().save(str(OUT / "multi-ppk2.png"))
+        hub.watchdog.rules = [
+            Rule(P["sup"].display_name(), "voltage1", ">", 3.6, 0.0, "all outputs off",
+                 hw=True),
+            Rule(P["sup"].display_name(), "current2", ">", 0.8, 50.0, "all outputs off",
+                 hw=True),
+            Rule(P["p2"].display_name(), "current", ">", 0.03, 1.0, "capture",
+                 P["scope"].display_name(), rearm_s=60),
+            Rule(P["load"].display_name(), "voltage", "<", 3.0, 200.0, "mark session")]
+        xw.apply_hw_limits()
+        wd = xw.show_watchdog()
+        wd.resize(1440, 480)
+
+    def shots3():
+        xw.wd_win._refresh_state()
+        app.processEvents()
+        xw.wd_win.grab().save(str(OUT / "watchdog-hw.png"))
+        xw.wd_win.close()
+        hub.watchdog.rules = []
+        d = RecordDialog(xw, True, 10, 5)
+        d.show()
+        app.processEvents()
+        d.grab().save(str(OUT / "record-mode.png"))
+        d.close()
+        d = SafetyDialog(xw, Safety(off_on_quit=True, off_after_crash=True,
+                                    heartbeat_tab="jig", heartbeat_pin="heartbeat",
+                                    heartbeat_period=0.5, auto_reconnect=True,
+                                    resume_sequence=True))
+        d.show()
+        app.processEvents()
+        d.grab().save(str(OUT / "safety.png"))
+        d.close()
+        # production test: a few units through a one-step sequence on the meter
+        seq = xw.sequencer()
+        seq._set_plan(Plan(steps=[
+            Step("Note", value="unit {serial}"),
+            Step("Measure", P["dmm"].display_name(), "value", "0.3", "VREF (V)", "3.25",
+                 "3.35"),
+            Step("Measure", P["load"].display_name(), "current", "", "I_load (A)", "0.7",
+                 "0.8")], off_at_end=False))
+        xw.prefs["production"] = {"product": "Sensor board rev C", "operator": "DM",
+                                  "pattern": r"SB\d{6}", "reports": True,
+                                  "report_dir": tempfile.mkdtemp(),
+                                  "db": str(Path(tempfile.mkdtemp()) / "results.db")}
+        global prod
+        prod = xw.show_production()
+        prod.resize(1280, 820)
+        units = ["SB000101", "SB000102", "SB000103", "SB000104"]
+
+        def one():
+            if not units:
+                return at(500, shots4)
+            sn = units.pop(0)
+            if sn == "SB000103":
+                P["dmm"]._set("function", "DC V")
+                P["load"]._set("cc", 0.9)     # this one draws too much: FAIL
+            else:
+                P["load"]._set("cc", 0.75)
+            prod.sn.setText(sn)
+            at(700, prod.start)
+            at(4500, one)
+        one()
+
+    def shots4():
+        prod.grab().save(str(OUT / "production.png"))
+        prod.close()
+        xw.all_outputs_off()
+        at(500, finish)
+
+    def finish():
+        xw.close()
+        app.quit()
+
+    at(2500, setup)
+    at(6500, shots1)
+    at(9000, shots2)
+    at(10500, shots3)
+
+
+if "--only-new" in sys.argv:
+    at(500, extras_start)
+else:
+    at(1500, setup)
+    at(6000, mid)
+    at(6500, capture)
+    at(11000, shots)
+    at(17000, tests)
+    at(18000, console)
 app.exec()
 print("wrote", sorted(p.name for p in OUT.glob("*.png")))

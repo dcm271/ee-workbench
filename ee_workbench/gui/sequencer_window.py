@@ -61,6 +61,31 @@ PASS_FG = QBrush(QColor("#7ee787"))
 FAIL_FG = QBrush(QColor("#ff8a80"))
 
 
+def write_checkpoint(path, plan: dict, next_pass: int, total: int):
+    """Where a steps-mode run has got to, so it can resume after a crash."""
+    import json
+    import os
+    try:
+        tmp = path.with_suffix(".tmp")
+        tmp.write_text(json.dumps({"plan": plan, "next_pass": next_pass, "total": total,
+                                   "saved": time.strftime("%Y-%m-%dT%H:%M:%S")}))
+        os.replace(tmp, path)
+    except OSError:
+        pass
+
+
+def read_checkpoint(path) -> dict | None:
+    import json
+    try:
+        d = json.loads(path.read_text())
+        if isinstance(d, dict) and isinstance(d.get("plan"), dict) \
+                and int(d.get("next_pass", -1)) >= 0:
+            return d
+    except (OSError, ValueError, TypeError):
+        pass
+    return None
+
+
 def kind_of(panel) -> str:
     return getattr(panel, "KIND", "")
 
@@ -98,6 +123,15 @@ class PanelInst(Inst):
         self.p, self.invoke, self.stop = panel, invoke, stop
         self.name = panel.display_name()
         self.kind = kind_of(panel)
+        if self.kind in ("scpi", "scope"):
+            self.set_names = panel.set_names()
+            self.setting_kinds = panel.setting_kinds()
+            self.measure_names = panel.measure_names()
+            self.profile_names = panel.profile_names()
+
+    def unit_of(self, what: str) -> str:
+        fn = getattr(self.p, "unit_of", None)
+        return fn(what) if fn else ""
 
     def _need(self):
         if not self.p.connected:
@@ -162,7 +196,7 @@ class PanelInst(Inst):
         return None
 
     def outputs_off(self):
-        if self.kind in ("supply", "ppk2", "gpio", "fgen") and self.p.connected:
+        if self.kind in ("supply", "ppk2", "gpio", "fgen", "scpi") and self.p.connected:
             self.invoke(self.p.output_off)
 
 
@@ -369,11 +403,17 @@ class SequencerWindow(QMainWindow):
                 return [p.state.pins[g].label for g in p._used()]
         return []
 
+    def _panel_for(self, name: str):
+        from ..signals import name_matches
+        if not name:
+            return None
+        panels = open_panels()
+        return next((p for p in panels if p.display_name() == name), None) or \
+            next((p for p in panels if name_matches(name, p.display_name())), None)
+
     def _kind_for(self, name: str) -> str:
-        for p in open_panels():
-            if p.display_name() == name or name and name.lower() in p.display_name().lower():
-                return kind_of(p)
-        return ""
+        p = self._panel_for(name)
+        return kind_of(p) if p is not None else ""
 
     def add_step(self, step: Step | None = None, at: int | None = None):
         step = step or Step("Set")
@@ -399,8 +439,12 @@ class SequencerWindow(QMainWindow):
         def refresh(*_):
             a = act.currentText()
             kind = self._kind_for(target.currentText())
+            panel = self._panel_for(target.currentText())
             if kind == "gpio" and a in ("Set", "Measure", "Wait for"):
                 opts = self._pins_for(target.currentText())
+            elif panel is not None and a in ("Set", "Measure", "Profile"):
+                opts = {"Set": panel.set_names, "Measure": panel.measure_names,
+                        "Profile": panel.profile_names}[a]()
             elif a == "Profile":
                 opts = PROFILE_WHAT.get(kind, [])
             else:
@@ -543,9 +587,13 @@ class SequencerWindow(QMainWindow):
     def running(self) -> bool:
         return self.thread is not None and self.thread.is_alive()
 
-    def run(self):
+    def run(self, extra: dict | None = None, on_finish=None, start: int = 0):
+        """Run the sequence. extra: names for the steps / script (the
+        production-test window passes serial=…); on_finish(outcome, bench)
+        on the GUI thread; start: the pass to begin at (resuming)."""
         if self.running():
-            return
+            return False
+        self._on_finish = on_finish
         try:
             self._save(self.path)
         except OSError:
@@ -566,22 +614,33 @@ class SequencerWindow(QMainWindow):
                 plan.passes()
             except SequenceError as e:
                 QMessageBox.warning(self, "Sequencer", str(e))
-                return
+                return False
             if not plan.steps:
-                return
+                return False
         self.rows, self.columns = [], []
         self.results.setRowCount(0)
         self.results.setColumnCount(0)
         self.logbox.clear()
         self._log("Instruments: " + (", ".join(i.name for i in insts) or "none open"))
 
+        extra = dict(extra or {})
+        checkpoint = self.checkpoint_path()
+        resume_ok = script is None and not extra
+
+        def on_pass(idx):
+            if resume_ok:
+                write_checkpoint(checkpoint, self.run_plan_dict, idx + 1, len(plan.passes()))
+
+        if start:
+            self._log(f"Resuming at pass {start + 1}")
+
         def body():
             outcome = "Finished"
             try:
                 if script is not None:
-                    run_script(script, bench)
+                    run_script(script, bench, extra)
                 else:
-                    run_plan(plan, bench)
+                    run_plan(plan, bench, start=start, extra=extra, on_pass=on_pass)
             except Stopped:
                 outcome = "Stopped"
             except LimitFailed as e:
@@ -597,13 +656,24 @@ class SequencerWindow(QMainWindow):
                     self.sig.log.emit("Outputs off")
                     bench.stop_event = threading.Event()   # let the off commands through
                     bench.outputs_off()
+                try:
+                    checkpoint.unlink()         # ended (any way but a crash): no resume
+                except OSError:
+                    pass
             self.sig.done.emit(outcome)
         self.thread = threading.Thread(target=body, daemon=True, name="sequence")
         self.run_btn.setEnabled(False)
         self.stop_btn.setEnabled(True)
         self.status.setText("Running…")
         self.status.setStyleSheet("color:#7ee787;")
+        if resume_ok:
+            write_checkpoint(checkpoint, self.run_plan_dict, start, len(plan.passes()))
         self.thread.start()
+        return True
+
+    @staticmethod
+    def checkpoint_path():
+        return config_dir() / "sequence-run.json"
 
     def stop(self):
         if self.running():
@@ -622,6 +692,9 @@ class SequencerWindow(QMainWindow):
         bad = outcome != "Finished" or b.failed
         self.status.setStyleSheet(f"color:{'#ff8a80' if b.failed else C_WARN if bad else '#7ee787' if b.passed else C_MUTED}; font-weight:bold;")
         self._log(outcome + tally)
+        cb, self._on_finish = getattr(self, "_on_finish", None), None
+        if cb is not None:
+            cb(outcome, b)
 
     def _log(self, text: str):
         self.logbox.appendPlainText(f"{now():9.3f}  {text}")

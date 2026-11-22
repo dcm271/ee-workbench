@@ -3,7 +3,19 @@ from __future__ import annotations
 
 
 def open_sim(resource: str):
-    name = resource.upper().split("::", 1)[-1]
+    name = resource.upper().split("::", 1)[-1].split("#", 1)[0]
+    from ..instruments import scopes
+    from ..instruments.scpi_generic import definition_for
+
+    d = definition_for(name)
+    if d is not None:
+        from .sscpi import SimScpi
+
+        return SimScpi(d)
+    if scopes.sim_dialect(name):
+        from .sscope import SimScope
+
+        return SimScope(scopes.sim_dialect(name))
     if "GPIO" in name:
         from .sgpio import SimGpio
 

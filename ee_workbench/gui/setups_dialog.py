@@ -23,7 +23,7 @@ from .widgets import C_MUTED
 def capture_bench(main) -> dict:
     seq = main.sequencer()
     return {"instruments": [{"resource": p.resource, "model": norm_model(p.model),
-                             "settings": p.session_settings()} for p in main.panels()],
+                             "settings": p.saved_settings()} for p in main.panels()],
             "sequence": seq.state(),
             "watchdog": hub.watchdog.to_list(),
             "watchdog_armed": hub.watchdog.armed,

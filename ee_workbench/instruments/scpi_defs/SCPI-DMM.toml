@@ -1,0 +1,13 @@
+# Fallback for any SCPI meter: one READ? per poll, configured on its front panel.
+id = "SCPI-DMM"
+name = "Any SCPI meter (READ? only)"
+type = "meter"
+error_query = "SYST:ERR?"
+notes = "Set the function and range on the meter itself; each poll sends READ?. If the meter has no SYST:ERR?, copy this file and set error_query = \"\"."
+
+[[reading]]
+name = "value"
+label = "Reading"
+query = "READ?"
+unit = ""
+sim = "1.234 * (1 + noise(1e-4))"

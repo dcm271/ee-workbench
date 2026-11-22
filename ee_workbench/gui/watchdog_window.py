@@ -17,14 +17,16 @@ from PyQt6.QtWidgets import (QAbstractItemView, QCheckBox, QComboBox, QDoubleSpi
                              QMainWindow, QPushButton, QSplitter, QTableWidget, QVBoxLayout,
                              QWidget)
 
-from ..signals import QUANTITIES
+from ..signals import name_matches
 from ..watchdog import ACTIONS, Rule
 from . import touch
 from .hub import hub
 from .panel_base import open_panels
 from .widgets import C_MUTED, C_WARN
 
-COLS = ["On", "Instrument", "Quantity", "", "Limit", "For (ms)", "Then", "Which", "State"]
+COLS = ["On", "Instrument", "Quantity", "", "Limit", "For (ms)", "Then", "Which",
+        "Re-arm (s)", "In HW", "State"]
+STATE = len(COLS) - 1
 SI = {"p": 1e-12, "n": 1e-9, "u": 1e-6, "µ": 1e-6, "m": 1e-3, "k": 1e3, "M": 1e6}
 
 
@@ -70,8 +72,11 @@ class WatchdogWindow(QMainWindow):
                       "sample). “For” is how long it must stay past the limit; slower "
                       "instruments are checked once per reading. Limits take SI suffixes: "
                       "50m = 0.05, 10u = 0.00001. A rule that trips stays tripped until "
-                      "re-armed, and its action runs once. Rules apply only while the "
-                      "instrument's tab is open and reading.")
+                      "re-armed (or “Re-arm (s)” later), and its action runs once. Rules "
+                      "apply only while the instrument's tab is open and reading. “In HW” "
+                      "also sets a supply's own OVP / current limit, so the DUT stays "
+                      "protected even if this program stops. “capture” fires the logic "
+                      "analyzer / scope tabs named in “Which” (blank: all of them).")
         hint.setWordWrap(True)
         hint.setStyleSheet(f"color:{C_MUTED}; font-size:11px;")
         v.addWidget(hint)
@@ -82,6 +87,9 @@ class WatchdogWindow(QMainWindow):
         hh.setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
         hh.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
         hh.setSectionResizeMode(7, QHeaderView.ResizeMode.Stretch)
+        # the state is a label widget, which ResizeToContents doesn't see
+        hh.setSectionResizeMode(STATE, QHeaderView.ResizeMode.Fixed)
+        hh.resizeSection(STATE, 190 if touch.TOUCH else 140)
         self.table.verticalHeader().setVisible(False)
         self.table.verticalHeader().setDefaultSectionSize(44 if touch.TOUCH else 34)
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
@@ -98,7 +106,7 @@ class WatchdogWindow(QMainWindow):
     # ---------------------------------------------------------------- rows
     def _names(self):
         return [p.display_name() for p in open_panels()
-                if p.KIND in ("supply", "ppk2", "dmm", "gpio")]
+                if p.KIND in ("supply", "ppk2", "dmm", "gpio", "scpi", "logic", "scope")]
 
     def _add_row(self, rule: Rule):
         r = self.table.rowCount()
@@ -128,19 +136,34 @@ class WatchdogWindow(QMainWindow):
         tgt.setEditable(True)
         tgt.addItems([n for n in self._names()])
         tgt.setCurrentText(rule.target)
+        rearm = QDoubleSpinBox()
+        rearm.setRange(0, 86_400)
+        rearm.setDecimals(1)
+        rearm.setSpecialValueText("never")
+        rearm.setValue(rule.rearm_s)
+        rearm.setToolTip("Re-arm by itself this many seconds after tripping (never: stay "
+                         "tripped until you press Re-arm)")
+        touch.attach_keypad(rearm, "Re-arm after (s)")
+        hw = QCheckBox()
+        hw.setChecked(rule.hw)
+        hw.setToolTip("Also set the limit in the supply itself (over-voltage protection, or "
+                      "current limit + over-current protection), so it holds even if this "
+                      "program, the PC or the cable fails. Only for “voltage >” / "
+                      "“current >” rules on a power supply.")
         state = QLabel("")
-        for c, w in enumerate((on, src, qty, op, lim, hold, act, tgt, state)):
+        # long instrument names mustn't push the State column off the edge
+        for cb in (src, tgt):
+            cb.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
+            cb.setMinimumContentsLength(12)
+        for c, w in enumerate((on, src, qty, op, lim, hold, act, tgt, rearm, hw, state)):
             self.table.setCellWidget(r, c, w)
 
         def fill_qty(*_):
-            kind = next((p.KIND for p in open_panels()
-                         if src.currentText() and src.currentText().lower()
-                         in p.display_name().lower()), "")
+            panel = next((p for p in open_panels()
+                          if name_matches(src.currentText(), p.display_name())), None)
             keep = qty.currentText() or rule.quantity
-            opts = list(QUANTITIES.get(kind, [])) or ["current", "voltage", "power", "value"]
-            if kind == "gpio":
-                gp = next(p for p in open_panels() if p.KIND == "gpio")
-                opts = [f"gpio{g}" for g in gp._used()]
+            opts = (panel.quantities() if panel is not None else []) or \
+                ["current", "voltage", "power", "value"]
             qty.blockSignals(True)
             qty.clear()
             qty.addItems(opts)
@@ -148,14 +171,15 @@ class WatchdogWindow(QMainWindow):
             qty.blockSignals(False)
 
         def act_changed(*_):
-            tgt.setEnabled(act.currentText() == "turn off")
+            tgt.setEnabled(act.currentText() in ("turn off", "capture"))
         src.currentTextChanged.connect(fill_qty)
         act.currentTextChanged.connect(act_changed)
         fill_qty()
         qty.setCurrentText(rule.quantity)
         act_changed()
-        for w in (on,):
+        for w in (on, hw):
             w.toggled.connect(self._commit)
+        rearm.valueChanged.connect(self._commit)
         for w in (src, qty, op, act, tgt):
             w.currentTextChanged.connect(self._commit)
         lim.editingFinished.connect(self._commit)
@@ -169,9 +193,11 @@ class WatchdogWindow(QMainWindow):
         except ValueError:
             w(r, 4).setStyleSheet(f"border-color:{C_WARN};")
             limit = hub.watchdog.rules[r].limit if r < len(hub.watchdog.rules) else 0.0
-        return Rule(w(r, 1).currentText().strip(), w(r, 2).currentText().strip(),
-                    w(r, 3).currentText(), limit, w(r, 5).value(), w(r, 6).currentText(),
-                    w(r, 7).currentText().strip(), w(r, 0).isChecked())
+        return Rule(source=w(r, 1).currentText().strip(), quantity=w(r, 2).currentText().strip(),
+                    op=w(r, 3).currentText(), limit=limit, hold_ms=w(r, 5).value(),
+                    action=w(r, 6).currentText(), target=w(r, 7).currentText().strip(),
+                    enabled=w(r, 0).isChecked(), rearm_s=w(r, 8).value(),
+                    hw=w(r, 9).isChecked())
 
     def _commit(self, *_):
         old = hub.watchdog.rules
@@ -183,6 +209,7 @@ class WatchdogWindow(QMainWindow):
             new.append(rule)
         hub.watchdog.rules = new
         self.main.save_bench_state()
+        self.main.apply_hw_limits()
         self._refresh_state()
 
     def add_rule(self):
@@ -207,6 +234,7 @@ class WatchdogWindow(QMainWindow):
     def _armed_toggled(self, on):
         hub.watchdog.armed = on
         self.main.save_bench_state()
+        self.main.apply_hw_limits()
         self._refresh_state()
 
     def _refresh_state(self):
@@ -214,7 +242,7 @@ class WatchdogWindow(QMainWindow):
         for r, rule in enumerate(hub.watchdog.rules):
             if r >= self.table.rowCount():
                 break
-            lab = self.table.cellWidget(r, 8)
+            lab = self.table.cellWidget(r, STATE)
             if rule.tripped:
                 n_trip += 1
                 lab.setText(f"  TRIPPED ({rule.trip_value:.4g})")
@@ -223,8 +251,12 @@ class WatchdogWindow(QMainWindow):
                 lab.setText("  off")
                 lab.setStyleSheet(f"color:{C_MUTED};")
             else:
-                lab.setText("  watching")
-                lab.setStyleSheet("color:#7ee787;")
+                hw = self.main.hw_status.get(id(rule), "") if rule.hw else ""
+                bad = hw.startswith("not")
+                lab.setText("  watching" + ("  · HW not set" if bad else "  · + HW" if hw
+                                            else ""))
+                lab.setStyleSheet("color:#ffb74d;" if bad else "color:#7ee787;")
+                lab.setToolTip(f"In the instrument: {hw}" if hw else "")
         if not hub.watchdog.armed:
             self.status.setText("Disarmed: no rule is checked")
             self.status.setStyleSheet(f"color:{C_WARN};")

@@ -102,6 +102,13 @@ def stylesheet() -> str:
                                     image:url({_icon('check.svg')}); }}
     QCheckBox::indicator:disabled {{ background:#15181d; border-color:#22262d; }}
 
+    QRadioButton {{ spacing:8px; background:transparent; }}
+    QRadioButton::indicator {{ width:14px; height:14px; border:1px solid {LINE_HI};
+                               border-radius:8px; background:{FIELD}; }}
+    QRadioButton::indicator:hover {{ border-color:{ACCENT}; }}
+    QRadioButton::indicator:checked {{ border:5px solid {ACCENT}; background:#ffffff;
+                                       width:6px; height:6px; }}
+
     /* tabs: text with an accent underline, no boxes */
     QTabWidget::pane {{ border:none; border-top:1px solid {LINE}; top:-1px; }}
     QTabBar {{ qproperty-drawBase:0; background:transparent; }}
@@ -185,6 +192,8 @@ def touch_extra(hit: int) -> str:
     """Bigger check boxes / arrows for fingers (added to touch.TOUCH_STYLE)."""
     return f"""
     QCheckBox::indicator {{ width:26px; height:26px; border-radius:6px; }}
+    QRadioButton::indicator {{ width:24px; height:24px; border-radius:13px; }}
+    QRadioButton::indicator:checked {{ border-width:8px; width:10px; height:10px; }}
     QSpinBox::up-button, QDoubleSpinBox::up-button, QSpinBox::down-button,
     QDoubleSpinBox::down-button {{ width:0; }}
     QTabWidget#instruments > QTabBar::tab {{ min-height:{hit - 6}px; }}

@@ -1,0 +1,62 @@
+# Any single-output supply that speaks the IEEE 488.2 / SCPI basics:
+# Keysight E36102A-E36106A, E3632A-E3634A, E3640A-E3649A (output 1),
+# Rigol DP711 / DP712, R&S NGE/HMP (first output), TTi with SCPI, …
+id = "SCPI-SUPPLY"
+name = "Any SCPI power supply, single output (VOLT / CURR / OUTP / MEAS)"
+type = "supply"
+init = ["*CLS"]
+error_query = "SYST:ERR?"
+off = ["OUTP OFF"]
+notes = "Uses only the common SCPI commands. A supply that differs (another OVP command, no SYST:ERR?) needs its own copy of this file."
+
+[[reading]]
+name = "voltage"
+label = "Voltage"
+query = "MEAS:VOLT?"
+unit = "V"
+sim = "(vset if out else 0) + noise(2e-4)"
+
+[[reading]]
+name = "current"
+label = "Current"
+query = "MEAS:CURR?"
+unit = "A"
+sim = "(min(vset / 100.0, iset) if out else 0) + noise(1e-5)"
+
+[[setting]]
+name = "vset"
+label = "Voltage"
+kind = "number"
+unit = "V"
+min = 0
+set = "VOLT {value}"
+query = "VOLT?"
+sim = "5.0"
+
+[[setting]]
+name = "iset"
+label = "Current limit"
+kind = "number"
+unit = "A"
+min = 0
+set = "CURR {value}"
+query = "CURR?"
+sim = "0.5"
+
+[[setting]]
+name = "ovp"
+label = "OVP level"
+kind = "number"
+unit = "V"
+set = "VOLT:PROT {value}"
+query = "VOLT:PROT?"
+sim = "20"
+
+[[setting]]
+name = "out"
+label = "Output"
+kind = "bool"
+set = "OUTP {on_off}"
+query = "OUTP?"
+output = true
+sim = "0"

@@ -6,13 +6,13 @@ from PyQt6.QtWidgets import (QButtonGroup, QDialog, QGridLayout, QHBoxLayout, QI
                              QLabel, QListWidget, QListWidgetItem, QPushButton, QSpinBox,
                              QVBoxLayout)
 
-from ..instruments import MODELS, model_for
+from ..instruments import MODELS, all_models, model_for
 from ..transport import list_resources
 from . import touch
 from .theme import set_role
 from .widgets import C_MUTED
 
-SHORT_MODELS = {"auto": "Auto\n(supplies)", "663xx": "66321D\n66311B/21B",
+SHORT_MODELS = {"auto": "Auto-\ndetect", "663xx": "66321D\n66311B/21B",
                 "6632A": "6632A\n33A/34A", "3456A": "3456A\nDMM", "PPK2": "PPK2\nNordic",
                 "SALEAE": "Saleae\nLogic", "SIGROK": "sigrok\nlogic",
                 "FGEN": "Function\ngenerator", "GPIO": "Pi GPIO\nheader"}
@@ -78,6 +78,15 @@ class ConnectDialog(QDialog):
             self.models.addButton(b)
             self.model_btns[key] = b
             grid.addWidget(b, n // 2, n % 2)
+        n = len(MODELS)
+        self.more_btn = QPushButton("Meter / load /\nscope / SCPI…")
+        self.more_btn.setCheckable(True)
+        self.more_btn.setMinimumHeight(56)
+        self.more_btn.setToolTip("Bench meters, electronic loads, multi-output supplies and "
+                                 "oscilloscopes (generic SCPI definitions)")
+        self.more_btn.clicked.connect(self._pick_more)
+        self.models.addButton(self.more_btn)
+        grid.addWidget(self.more_btn, n // 2, n % 2)
         right.addLayout(grid)
         self.model_btns["auto"].setChecked(True)
         right.addStretch(1)
@@ -122,12 +131,33 @@ class ConnectDialog(QDialog):
         if ok and text.strip():
             self._select(text.strip())
 
+    def _pick_more(self):
+        extra = {k: v for k, v in all_models().items() if k not in MODELS}
+        labels = list(extra.values())
+        cur = extra.get(self.model, labels[0] if labels else "")
+        text, ok = QInputDialog.getItem(self, "Model", "Instrument model:", labels,
+                                        labels.index(cur) if cur in labels else 0, False)
+        if ok and text:
+            self.model = next(k for k, v in extra.items() if v == text)
+            self.more_btn.setText(self._short(self.model))
+        elif self.model in self.model_btns:
+            self.model_btns[self.model].setChecked(True)
+
+    @staticmethod
+    def _short(key: str) -> str:
+        kind = "scope" if key.startswith("SCOPE:") else "SCPI"
+        return f"{key.split(':', 1)[-1].title() if kind == 'scope' else key[5:]}\n{kind}"
+
     def _select(self, resource: str):
         self.resource = resource
         implied = model_for(resource)
         if implied != "auto":
             self.model = implied
-            self.model_btns[implied].setChecked(True)
+            if implied in self.model_btns:
+                self.model_btns[implied].setChecked(True)
+            else:
+                self.more_btn.setChecked(True)
+                self.more_btn.setText(self._short(implied))
         self.chosen.setText(resource)
         self.chosen.setStyleSheet("font-weight:bold;")
         self.ok.setEnabled(True)

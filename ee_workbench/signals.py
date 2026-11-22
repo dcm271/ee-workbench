@@ -7,6 +7,7 @@ signals_of(kind, reading) -> {quantity: (t array, value array)}
   ppk2     current (every 10 µs sample)
   dmm      value
   gpio     gpio17 … (each configured pin: 0 / 1)
+  scpi     each reading its definition names (value; voltage1, current1, …)
 
 Identifiers for expressions: `slug("66321D · DUT rail")` = "_66321d_dut_rail",
 so a math channel can say  _66321d_dut_rail.power / ppk2.current .
@@ -36,6 +37,21 @@ def slug(name: str) -> str:
     if not s:
         return "_"
     return "_" + s if s[0].isdigit() else s
+
+
+def name_matches(query: str, name: str) -> bool:
+    """Does `query` (from a watchdog rule, a sequence step, a script) mean the
+    instrument called `name`? Exact or same identifier, else a part of the
+    name. With several of one model open, the second is "PPK2 #2", and so on:
+    a query without "#" then means the first, never "#2" and up."""
+    q, n = query.strip().lower(), name.strip().lower()
+    if not q:
+        return False
+    if q == n or slug(q) == slug(n):
+        return True
+    if re.search(r" #\d+\b", n) and "#" not in q:
+        return False
+    return q in n
 
 
 def signals_of(kind: str, r) -> dict:
@@ -72,4 +88,7 @@ def signals_of(kind: str, r) -> dict:
         return {"value": (t, np.array([float(r.value)]))}
     if kind == "gpio":
         return {f"gpio{g}": (t, np.array([float(v)])) for g, v in r.levels.items()}
+    if kind == "scpi":
+        return {k: (t, np.array([np.nan if v is None else float(v)]))
+                for k, v in r.values.items()}
     return {}

@@ -5,7 +5,7 @@ subtitle: Every panel, control and workflow
 
 # User's Guide
 
-**Contents:** [Starting up](#starting-up) · [66321D supply](#power-supply-panel-agilent-66321d) · [6632A supply](#power-supply-panel-hp-6632a) · [3456A DMM](#multimeter-panel-hp-3456a) · [PPK2](#power-profiler-panel-nordic-ppk2) · [Logic analyzers](#logic-analyzer-panel-saleae-and-sigrok) · [Function generator](#function-generator-panel) · [GPIO](#gpio-panel-raspberry-pi-header) · [Profiles](#profiles-varying-a-setpoint-over-time) · [PPK2 events](#ppk2-events-tab) · [Sequencer & limits](#sequencer) · [Watchdog](#watchdog) · [Math channels](#math-channels) · [Reports](#reports) · [Setups](#setups-the-whole-bench-by-name) · [Remote API](#remote-api-python-and-jupyter) · [Sessions](#sessions-everything-in-one-file) · [Workflows](#workflows) · [CSV formats](#csv-formats) · [Simulators](#simulators) · [Start-up](#instruments-at-start-up) · [When something goes wrong](#when-something-goes-wrong) · [Keys](#keyboard-and-mouse-reference)
+**Contents:** [Starting up](#starting-up) · [66321D supply](#power-supply-panel-agilent-66321d) · [6632A supply](#power-supply-panel-hp-6632a) · [3456A DMM](#multimeter-panel-hp-3456a) · [PPK2](#power-profiler-panel-nordic-ppk2) · [Logic analyzers](#logic-analyzer-panel-saleae-and-sigrok) · [Function generator](#function-generator-panel) · [GPIO](#gpio-panel-raspberry-pi-header) · [Meters, loads, supplies (SCPI)](#meter-load-and-supply-panel-scpi) · [Oscilloscope](#oscilloscope-panel) · [Several of one instrument](#several-of-the-same-instrument) · [Profiles](#profiles-varying-a-setpoint-over-time) · [PPK2 events](#ppk2-events-tab) · [Sequencer & limits](#sequencer) · [Watchdog](#watchdog) · [Math channels](#math-channels) · [Reports](#reports) · [Production test](#production-test) · [Safety & unattended runs](#safety-and-unattended-runs) · [Setups](#setups-the-whole-bench-by-name) · [Remote API](#remote-api-python-and-jupyter) · [Sessions](#sessions-everything-in-one-file) · [Workflows](#workflows) · [CSV formats](#csv-formats) · [Simulators](#simulators) · [Start-up](#instruments-at-start-up) · [When something goes wrong](#when-something-goes-wrong) · [Keys](#keyboard-and-mouse-reference)
 
 Step-by-step recipes for common jobs are in [How-to guides](06-howtos.md).
 
@@ -22,12 +22,12 @@ The **toolbar** along the top is always visible:
 | **Resource** | The VISA address, e.g. `GPIB0::5::INSTR`. You can type in the box. |
 | **⟳** | Re-list the VISA resources. |
 | **⌕ Scan GPIB** | Find every address with an instrument listening. It sends no commands, so it's safe for the 3456A. |
-| **Model** | *Auto-detect* identifies the supplies. **Choose HP 3456A by hand.** |
+| **Model** | *Auto-detect* asks the instrument's `*IDN?` and opens the matching tab: the supplies, the generators, every [SCPI meter, load and supply](#meter-load-and-supply-panel-scpi) with a definition, and the [oscilloscopes](#oscilloscope-panel). **Choose HP 3456A by hand** (it has no ID query), and any instrument that isn't recognised. |
 | **Baud** | Appears only for serial (`ASRL…`) resources. |
 | **Connect** | Opens the instrument in a new tab. |
-| **⏺ Record** / **✎ Note** | Record a [session](#sessions-everything-in-one-file); put a note into it (Ctrl+M). |
-| **Tools ▾** | [Sequencer](#sequencer), [Watchdog](#watchdog), [Math channels](#math-channels), [Setups](#setups-the-whole-bench-by-name), open a session in the [viewer](#looking-through-a-session), a [session report](#reports), and the [Remote API](#remote-api-python-and-jupyter) switch. |
-| **All outputs OFF (Esc)** | Turns off every output: supplies, PPK2 DUT power, function-generator channels and GPIO outputs. It also stops a running sequence, profile or remote-API call. |
+| **⏺ Record** / **✎ Note** | Record a [session](#sessions-everything-in-one-file), everything or [only around events](#only-around-events-the-flight-recorder); put a note into it (Ctrl+M). |
+| **Tools ▾** | [Sequencer](#sequencer), [Watchdog](#watchdog), [Math channels](#math-channels), [Production test](#production-test), [Safety](#safety-and-unattended-runs), [Setups](#setups-the-whole-bench-by-name), open a session in the [viewer](#looking-through-a-session), a [session report](#reports), and the [Remote API](#remote-api-python-and-jupyter) switch. |
+| **All outputs OFF (Esc)** | Turns off every output: supplies (including every output of a multi-output SCPI supply), electronic-load inputs, PPK2 DUT power, function-generator channels and GPIO outputs. It also stops a running sequence, profile or remote-API call. |
 
 Each instrument gets its own **tab**. Closing a tab disconnects that instrument but leaves its outputs as they are. All tabs share one time axis (seconds since the app started), so you can line up events across instruments.
 
@@ -345,6 +345,67 @@ Each row is one header pin, numbered by its **GPIO** (BCM) number with the physi
 
 > **3.3 V only.** Never connect 5 V to a header pin. An output can drive a few milliamps: use a transistor, MOSFET or relay board for anything more. See [Hardware](01-hardware-and-resources.md#raspberry-pi-gpio-header).
 
+## Meter, load and supply panel (SCPI)
+
+![Rigol DP832 from its definition](images/scpi-supply.png)
+
+Bench meters, electronic loads and extra programmable supplies (see the [compatibility list](01-hardware-and-resources.md#meters-loads-and-supplies-instrument-definitions)) all use one panel, built from the instrument's [definition file](04-technical-reference.md#instrument-definition-files-toml). Open one with *Auto-detect*, or choose it under **Model** (desktop) / **＋ Add instrument → Meter / load / scope / SCPI…** (touch).
+
+The left column, top to bottom:
+
+- The instrument's `*IDN?` answer and the definition's notes (things to know about this model), then the **tab name** box.
+- **Readings**: one large readout per reading, grouped by output on a multi-output supply (**CH1**, **CH2**, …). Every number keeps its width and sign, so the digits don't jump. A meter's unit follows its function (V, A, Ω, Hz, F); **OVLD** means the instrument reported an overload.
+- **Outputs** (supplies) or **Input** (loads): one button per switch, red while on. **Esc** turns them all off.
+- **Settings**: one form per output on a multi-output supply. Choices (meter function, load mode) are lists; on/off settings (OVP on) are tick boxes; levels are number boxes limited to the instrument's range. A change is sent at once and read back, so the box always shows what the instrument has.
+- **Polling**: **Poll delay** between readings (as fast as possible by default; the Siglent SPD3303X needs 200 ms or more), and **Pause polling**.
+
+The right side has the **Trend**: one plot per reading, with a curve per output, the mean of each over the span, **Freeze**, **Clear** and **● Record CSV**. A meter's trend also shows σ (its standard deviation over the span). The **Console** tab shows every command and answer, and takes commands of your own: `*IDN?`, `SYST:ERR?`, or the one you're looking for while writing a definition.
+
+![Keysight 34461A meter](images/scpi-meter.png)
+
+**Meters** read with `READ?` (or the function's `MEAS…?` query) at auto range. Change **Function** and **NPLC** (integration time: more is quieter and slower) from the panel. The Keithley DMM6500 must be in its SCPI command set.
+
+![Rigol DL3021 load](images/scpi-load.png)
+
+**Electronic loads**: choose the **Mode** (CC, CV, CR, CP), set the level for that mode (**CC current**, **CV voltage**, **CR resistance**, **CP power**), then switch **Input** on. The load's own readings (voltage, current, power) show what the DUT gives. For a battery-drain test, add a watchdog rule *voltage < 3.0 → turn off* the load.
+
+**In the sequencer and scripts** the names are those of the definition: `vset1`, `iset2`, `out3`, `function`, `cc`, `input` for **Set**; `voltage1`, `current2`, `value`, `power` for **Measure**. The step editor's lists show exactly which ones each instrument has.
+
+## Oscilloscope panel
+
+![Oscilloscope](images/scope.png)
+
+A [supported scope](01-hardware-and-resources.md#oscilloscope-compatibility) (Rigol, Keysight, Tektronix, Siglent) opens in its own tab:
+
+| Control | |
+|---|---|
+| **▶ Run**, **■ Stop** | The scope's own run / stop. |
+| **Single → capture** | Arms a single acquisition, waits for the trigger (the status line says *waiting*), then fetches every channel that is shown and plots it. **■ Stop** gives up waiting. |
+| **Grab screen** | Fetches what is on the screen now, without re-arming. |
+| **Channels** | On, V/div (1-2-5 steps, 1 mV to 10 V) and offset for each channel. |
+| **Timebase and trigger** | s/div, position (time of the trigger on screen), trigger source, level and slope, sweep (auto / normal / single). |
+
+The **Waveforms** tab plots each fetched channel in volts against time from the trigger, in the channel's colour. The table under it gives, per channel, **Vpp, Max, Min, Mean, RMS, Freq, Period, Duty, Rise, Fall** (10–90 %), worked out from the fetched samples, so every brand gives the same numbers. **Save CSV…** writes the samples, a time and a voltage column per channel (`t1_s, ch1_V, t2_s, ch2_V, …`).
+
+A capture goes into the [session](#sessions-everything-in-one-file) being recorded, like a logic-analyzer capture, so it shows up in the session viewer at the moment it was taken. The **sequencer** can capture (a **Capture** step on the scope tab; its result is the number of samples fetched) and measure (**Measure** `vpp1`, `freq2`, `duty1`, `rise3`, …: from the waveform on screen now), and set anything on the panel (**Set** `timebase`, `trigger_level`, `ch1_scale`, `acquire` `single`, …). A [watchdog](#watchdog) rule can make it capture when something happens.
+
+## Several of the same instrument
+
+Open as many instruments as you like, of any kind, including several of one model: two PPK2s, two DP832s, a 34461A on each rail. Each gets its own tab. **Name each one** in its tab-name box ("main MCU", "radio"): the sequencer, watchdog, math channels, sessions and Remote API refer to instruments by name, and any unique part of the name will do. A second tab of the same model with no name of its own is called `… #2` (`PPK2 #2`), a third `#3`, and so on.
+
+### Several PPK2s in step
+
+![Two PPK2s, the second aligned to the first](images/multi-ppk2.png)
+
+Each PPK2 counts time with its own clock, and they start at different moments, so two PPK2s' traces drift apart by milliseconds. To line them up:
+
+1. Wire one DUT signal that changes at irregular times (a debug pin, UART TX) to the **same logic input** of both PPK2s (say D7), grounds joined.
+2. On the second PPK2's tab, under **Time-align to another PPK2**, choose the **Reference** (the first PPK2) and the **Shared input** (D7).
+3. Press **Align now**. The app compares the edges on that input in the last 2 s of both, works out the offset, and shifts this PPK2's time axis to match. The label shows the shift in ms and how the edges matched; *Couldn't align* means too few edges, or a pattern that repeats too regularly to tell apart (use a less regular signal).
+4. Tick **Keep aligned** to repeat it every 30 s, which follows the slow drift between the two clocks over a long run.
+
+From then on both PPK2s' trends, sessions, math channels and watchdog rules share one time axis. The settings are saved with the tab.
+
 ## Profiles: varying a setpoint over time
 
 ![Supply profile](images/supply-profile.png)
@@ -393,13 +454,13 @@ The search ends events with 10 % hysteresis, so a burst that dips just under the
 
 | Action | Instrument | Setting / quantity / pin | Value |
 |---|---|---|---|
-| **Set** | supply, PPK2, function generator, GPIO | supply: `voltage`, `current` (limit), `output`, `ovp`, `sense_protect` (open-sense detection on / off; 66321D family only). PPK2: `voltage`, `output` (DUT power). Generator: `function`, `frequency`, `amplitude`, `offset`, `duty`, `output`. GPIO: a pin's name. | the value, or `on` / `off`. Generator `function`: `sine`, `square`, `ramp`, `pulse`, `noise`, `dc`. GPIO: `on`, `off` or `pulse 0.1` (seconds). |
+| **Set** | supply, PPK2, function generator, GPIO, SCPI meter / load / supply, scope | supply: `voltage`, `current` (limit), `output`, `ovp`, `sense_protect` (open-sense detection on / off; 66321D family only). PPK2: `voltage`, `output` (DUT power). Generator: `function`, `frequency`, `amplitude`, `offset`, `duty`, `output`. GPIO: a pin's name. SCPI instrument: its definition's settings (`vset1`, `out1`, `function`, `cc`, `input`, …). Scope: `acquire` (`run` / `stop` / `single`), `timebase`, `position`, `trigger_source`, `trigger_level`, `trigger_slope`, `sweep`, `ch1_on`, `ch1_scale`, `ch1_offset`, … | the value, or `on` / `off`. Generator `function`: `sine`, `square`, `ramp`, `pulse`, `noise`, `dc`. GPIO: `on`, `off` or `pulse 0.1` (seconds). |
 | **Wait** | | | seconds |
-| **Measure** | supply, DMM, PPK2, GPIO | supply: `voltage` `current` `power` `dvm`. DMM: `value`. PPK2: `current` (mean), `peak`, `charge`. GPIO: a pin (0 / 1). | seconds to average over (blank: one fresh reading) |
-| **Capture** | logic analyzer | | (uses that tab's settings and decoders); the column is the number of decoded rows |
+| **Measure** | supply, DMM, PPK2, GPIO, SCPI instrument, scope | supply: `voltage` `current` `power` `dvm`. DMM: `value`. PPK2: `current` (mean), `peak`, `charge`. GPIO: a pin (0 / 1). SCPI instrument: its readings (`value`, `voltage2`, `power`, …). Scope: `vpp1`, `vmax1`, `vmin1`, `vavg1`, `vrms1`, `freq1`, `period1`, `duty1`, `rise1`, `fall1` (the digit is the channel), from the waveform on screen. | seconds to average over (blank: one fresh reading) |
+| **Capture** | logic analyzer, scope | | (uses that tab's settings and decoders); the column is the number of decoded rows (a scope: samples fetched) |
 | **Profile** | supply, PPK2, function generator | what to vary: `voltage`, `current`; generator `frequency` … | a [profile](#profiles-varying-a-setpoint-over-time), e.g. `ramp 3.0..3.6 for=10`. The step ends when the profile does. |
 | **Wait for** | GPIO | an input pin | the level: `1` / `0` / `high` / `low`, optionally `timeout=10` (default 60 s). Fails if the pin doesn't get there in time. With a **Results column**, records how long it took. |
-| **Note** | | | text; `{x}` and `{i}` are filled in. It goes into the session being recorded. |
+| **Note** | | | text; `{x}`, `{i}` and, in a [production test](#production-test), `{serial}`, `{product}` and `{operator}` are filled in. It goes into the session being recorded. |
 
 **Run once**, **Repeat** N times, or **Sweep x** from / to / step. Values can be expressions in `x` (the sweep value), `i` (the pass, from 0), `n` and math functions, e.g. `x`, `x / 2`, `3.3 + 0.1 * i`, `10 ** x` (a log sweep: x from 1 to 5 is 10 Hz to 100 kHz). Each pass adds one row to **Results**: the measured values (named by **Results column**, or automatically). Plot any column against another, and **Save CSV…**.
 
@@ -443,29 +504,66 @@ for v in np.arange(3.0, 3.61, 0.1):
 | `bench.record(col=value, …)` | one row of results |
 | `bench.outputs_off()` | every output off |
 
+In a [production test](#production-test) the script also has `serial`, `product` and `operator`.
+
 The same calls work from outside the app through the [Remote API](#remote-api-python-and-jupyter).
+
+### Resuming after a crash
+
+With **Resume a running sequence** ticked in [Safety](#safety-and-unattended-runs), a steps-mode run saves its place after each pass (`sequence-run.json`). If the app crashes or the power fails, the next start reopens the instruments, waits for them to connect, and carries on at the pass after the last one that finished. Passes that had finished are not repeated; their results are in the session file, if one was recording. Scripts and production tests are not resumed (a script's state can't be saved, and a unit under production test should be retested from the start).
 
 ## Watchdog
 
-![Watchdog](images/watchdog.png)
+![Watchdog](images/watchdog-hw.png)
 
 **Tools ▾ → Watchdog…** holds rules that watch one instrument and act on others, protection no single instrument can give:
 
 - *PPK2 current > 50m for 10 ms → all outputs off* (a shorted DUT)
 - *66321D voltage < 2.9 → turn off* the function generator (never drive a DUT's input while it is unpowered)
 - *GPIO gpio26 < 0.5 for 500 ms → stop sequence* (an e-stop button with a pull-up)
+- *DP832 voltage1 > 3.6 → all outputs off*, **In HW** (the supply's own OVP is set to 3.6 V too)
+- *PPK2 current > 30m for 1 ms → capture* on the scope, re-arming after 60 s (catch every brown-out)
+- *DL3021 voltage < 3 for 200 ms → mark session* (keep that moment in a flight-recorder session)
 
 | Column | |
 |---|---|
 | **On** | the rule is checked |
-| **Instrument**, **Quantity** | what to watch: a supply's `voltage` `current` `power` `dvm`, a PPK2's `current`, a DMM's `value`, a GPIO pin (`gpio26`) |
+| **Instrument**, **Quantity** | what to watch: a supply's `voltage` `current` `power` `dvm`, a PPK2's `current`, a DMM's `value`, a GPIO pin (`gpio26`), any reading of a SCPI instrument (`voltage2`, `value`) |
 | **>** / **<**, **Limit** | the limit, with SI suffixes: `50m` = 0.05, `10u` = 0.00001, `3.3` |
 | **For (ms)** | how long it must stay past the limit (0: at once) |
-| **Then** | **all outputs off** (as Esc), **turn off** the instrument in **Which**, **stop sequence**, or **note only** |
+| **Then** | what to do, see below |
+| **Which** | for **turn off**: the instrument to switch off. For **capture**: the logic-analyzer or scope tab(s) to capture on (blank: all of them). Any unique part of a name will do. |
+| **Re-arm (s)** | **never**: a rule that trips stays tripped until you re-arm it. A number: it re-arms itself that long after tripping, so it can act again (for **capture** and **mark session** rules that should catch every occurrence). |
+| **In HW** | also set the limit in the supply itself, see below |
+| **State** | *watching*, **TRIPPED** (with the value and time), *off*, or whether the limit is set in the supply (*+ HW*, or *HW not set*: hover for why) |
 
-A PPK2 is checked sample by sample (10 µs), so *for 10 ms* means 1000 samples in a row over the limit. Slower instruments are checked per reading: with a hold time, two readings past the limit at least that far apart trip it. A rule that trips is **TRIPPED** (latched) and its action runs once; a message box and the log say what happened, and the event goes into the session being recorded as a note. **Re-arm tripped** after fixing the cause. Untick **Watchdog armed** to suspend every rule.
+**Then:**
 
-The rules are kept between runs and saved in [setups](#setups-the-whole-bench-by-name). They work only while the instrument's tab is open and reading (a PPK2 must be running), and they act through the app: the watchdog is a convenience, **not a replacement for the supplies' own current limits and OVP**, which act in hardware within microseconds.
+| Action | Does | Shows a message box |
+|---|---|---|
+| **all outputs off** | as **Esc**: every output off, any running sequence stopped | yes |
+| **turn off** | the instrument in **Which**: its outputs off | yes |
+| **stop sequence** | stops the running sequence (its outputs go off if the sequence says so) | yes |
+| **capture** | starts a capture on the logic analyzers / scopes in **Which**, as **Capture** on their tab | no |
+| **mark session** | marks the moment in the session being recorded (and, in [only around events](#only-around-events-the-flight-recorder) mode, keeps the seconds around it) | no |
+| **note only** | writes it to the log and the session | no |
+
+Every trip, whatever its action, goes into the session being recorded as a note, marks the moment for a flight-recorder session, and appears in the status bar and the log under the table.
+
+A PPK2 is checked sample by sample (10 µs), so *for 10 ms* means 1000 samples in a row over the limit. Slower instruments are checked per reading: with a hold time, two readings past the limit at least that far apart trip it. **Re-arm tripped** re-arms every tripped rule after fixing the cause. Untick **Watchdog armed** to suspend every rule.
+
+### Limits in the instrument (In HW)
+
+The watchdog acts through the app: if the app, the computer or the USB cable fails, it can't act. For a supply, tick **In HW** on a **voltage >** or **current >** rule, and the limit is also set in the supply itself, which then protects the DUT on its own, within microseconds, whatever happens to the computer:
+
+| Supply | voltage > L | current > L |
+|---|---|---|
+| Agilent 66321D / 66311B, HP 6632A | over-voltage protection at L | current limit no higher than L, over-current protection on (the output trips off instead of limiting) |
+| SCPI supplies whose definition has `ovp` / `ocp` settings (Rigol DP832, Keysight E36312A, any single-output SCPI supply) | `ovp` at L (and `ovp_on`) | `iset` no higher than L, and `ocp` / `ocp_on` where the supply has them |
+
+The limit is set when the rule is armed, when the supply's tab connects (or reconnects), and when the rule's limit changes; the status bar says what was sent, and it goes into the session being recorded. On a multi-output supply, the quantity names the output (`voltage2`). The supply acts at once, without the rule's hold time, so set the limit a little above the highest value the DUT should ever see. **Making a rule looser or removing it doesn't undo what the supply was told**: change the OVP / current limit on the supply's tab. Supplies without OVP over SCPI (Siglent SPD3303X) show *HW not set* with the reason.
+
+The rules are kept between runs and saved in [setups](#setups-the-whole-bench-by-name). They work only while the instrument's tab is open and reading (a PPK2 must be running).
 
 ## Math channels
 
@@ -494,6 +592,74 @@ A **report** is one page with everything about a test, as **HTML** (a single fil
 - **Session viewer → Report…**, or **Tools ▾ → Session report…** for any `.eewb`: the instruments, one plot per signal over the stretch shown (or the whole session) with notes as dashed lines, the sequencer results, the notes and the logic captures.
 
 **Open it** opens the saved report in your browser. Plots keep their spikes (each is drawn from a min/max envelope).
+
+## Production test
+
+![Production test](images/production.png)
+
+**Tools ▾ → Production test…** turns the bench into a test station: scan a unit's barcode (or type its serial number), the [sequence](#sequencer) runs, and a big banner says **PASS** or **FAIL**. Every unit is kept in a results database with its history and the yield.
+
+**Set up once:**
+
+1. Build the test in the **Sequencer**: steps with **Min / Max** limits (or a script with `bench.expect`). Run it once by hand on a good unit to check it.
+2. In the production window, fill in the **Station** fields:
+
+| Field | |
+|---|---|
+| **Product** | the product name; history and yield are kept per product |
+| **Operator** | who is testing (goes into every result and report) |
+| **Serial format** | optional: a [regular expression](https://docs.python.org/3/library/re.html#regular-expression-syntax) the whole serial number must match, e.g. `SB\d{6}` (SB and six digits). A misread barcode then shows **SERIAL?** instead of being tested. |
+| **Save an HTML report for every unit** | and the folder: one report per unit as `<folder>/<product>/<serial>_<date>_<time>_<result>.html` |
+
+**Testing:**
+
+1. Click in **Serial number** (it has the focus when the window opens) and scan the barcode. A USB barcode scanner types like a keyboard and presses Enter, which starts the test. Typing the number and pressing Enter, or **▶ Test**, does the same.
+2. The banner turns blue (**TESTING**), then:
+   - **PASS** (green): every limit was met.
+   - **FAIL** (red): a limit was missed; the line under the banner says which (`I_load (A)=0.899994 (want 0.7 … 0.8)`).
+   - **ERROR** (yellow): the sequence couldn't finish (an instrument stopped answering, **■ Stop**, **Esc**, the watchdog), so the unit wasn't judged. Retest it.
+3. The serial box clears, ready for the next unit.
+
+A serial number that has **already passed** asks before testing it again. The serial number, product and operator reach the sequence as `{serial}`, `{product}`, `{operator}` in a **Note** step (and as variables in a script), and the serial is a column of every result row, so a session recorded across a shift shows which unit was on the bench when.
+
+**History** lists this product's units, newest first: serial, result, when, how long, operator and what failed. Double-click a row to open its report. **Yield**:
+
+| | |
+|---|---|
+| **Today** | units passed / tests run today, and today's first-pass yield |
+| **All time** | the same for every test of this product |
+| **Units tested** | different serial numbers |
+| **First-pass yield** | units that passed on their **first** test |
+| **Final yield** | units whose **latest** test passed (after rework and retest) |
+| **Pass / fail / error** | test runs of each result |
+
+**Export CSV…** writes every test of the product (one row per test, with the failures) for a spreadsheet. The database is `~/.config/ee-workbench/results.db` (SQLite; see the [Technical Reference](04-technical-reference.md#production-results-database) for its table). To share one database between stations, put `"db": "/path/on/a/share/results.db"` under `"production"` in `bench.json`.
+
+On a touch screen the window fills the screen, and the banner is readable from across the bench:
+
+![Production test on the touch screen](images/touch-production.png)
+
+## Safety and unattended runs
+
+![Safety settings](images/safety.png)
+
+**Tools ▾ → Safety…** sets what the app does on its own when nobody is watching. Everything is off until you turn it on. The settings are kept in `bench.json`.
+
+**Outputs**
+
+- **Switch all outputs off when EE Workbench quits.** Closing the window (or a Ctrl+C, logout or `kill`) switches every output off, as **Esc** does, before releasing the instruments. Normally closing leaves outputs as they are, so a long-running DUT keeps its power while you restart the app.
+- **After a crash, switch off the outputs of every instrument that was open.** While it runs, the app keeps a list of its open instruments in `running.json`; a normal quit removes it. If the next start finds it (a crash, a power cut, `kill -9`), it reopens those instruments and switches their outputs off as soon as each one answers, then says so in the status bar and the session. With `./run.sh --restart-on-crash` this happens a few seconds after the crash; the [In HW](#limits-in-the-instrument-in-hw) watchdog limits protect the DUT before that.
+
+**Heartbeat pin**
+
+Choose a **GPIO tab** and an **output pin** on it (set it up as an output on that tab first), and the pin toggles every **Toggle every** seconds for as long as the app runs normally. Wire it to an external watchdog: a retriggerable monostable (74HC123), a 555 missing-pulse detector, or a small microcontroller, holding a relay or load switch in the DUT's supply. If the app hangs, crashes or the computer stops, the toggling stops and the external circuit cuts the DUT's power. It doesn't depend on any software. See [bench wiring](01-hardware-and-resources.md#bench-wiring-tips).
+
+**Recovery**
+
+- **Reconnect automatically when an instrument stops answering.** An instrument that stops answering (USB cable pulled, instrument switched off, LAN dropped) is reopened by itself, as **⟳ Reconnect** would, after 3 s, then 6, 12, 24 … up to every 60 s until it answers. A USB serial device (a PPK2, `/dev/ttyACM…`) is tried only once it appears again, so unplugging and replugging it just works. Nothing is reopened while a sequence is running (the sequence would lose its instrument part way; it stops with an error instead, and its outputs-off still runs).
+- **After a crash, resume a running sequence where it stopped.** See [Resuming after a crash](#resuming-after-a-crash).
+
+**A typical overnight run:** tick all of the above; add watchdog rules with **In HW** for the DUT's voltage and current; record a session [only around events](#only-around-events-the-flight-recorder); start the app with `./run.sh --restart-on-crash`. See the [how-to](06-howtos.md#leave-a-test-running-overnight).
 
 ## Setups: the whole bench by name
 
@@ -546,6 +712,21 @@ The API listens only on `127.0.0.1` (this computer), on port 8765 by default (`a
 - **✎ Note** text (Ctrl+M), stamped with the moment you pressed it.
 
 Instruments opened while recording join in. **■ Stop** closes the file and offers to open it. Recording into an existing file adds to it on the same time base.
+
+### Only around events: the flight recorder
+
+![Record dialog](images/record-mode.png)
+
+**⏺ Record** first asks what to keep:
+
+- **Everything, from now until Stop**, as above.
+- **Only around events (flight recorder)**: readings are kept in memory and written only around an *event*, from **Keep before each event** seconds before it to **Keep after each event** seconds after. Everything else is dropped.
+
+An event is a [watchdog](#watchdog) rule tripping (any action, including **mark session**), a logic-analyzer or scope capture, or **✎ Note** (Ctrl+M). Notes, captures and sequence results are always written. While recording, the top bar shows **●** while it is writing (inside an event's window) and **○** while it is only keeping readings in memory, with the number of events so far.
+
+Use it for a long unattended run where only rare moments matter: leave a battery-powered DUT running overnight with a rule *current > 30m → mark session*, and the file holds just the seconds around each spike instead of 12 hours of data. In the viewer, the windows that were kept are shaded blue, and the lines break where nothing was recorded.
+
+Before/after times are remembered. The memory needed is about the before-time's worth of every instrument's readings (a PPK2 at 1 ms rows: 10 s is 10 000 rows).
 
 ![Session viewer](images/session-viewer.png)
 
@@ -689,6 +870,8 @@ Switch on **Tools ▾ → Remote API**, then in the notebook `from ee_workbench.
 
 Open the resources `SIM::66321D`, `SIM::6632A`, `SIM::3456A`, `SIM::PPK2`, `SIM::SALEAE`, `SIM::SIGROK`, `SIM::FGEN`, `SIM::SDG` and `SIM::GPIO` to try every feature without hardware. The simulated 66321D drives a phone-like load drawing short current bursts. The 6632A drives a 10 Ω resistor. The 3456A reads a slightly drifting 5 V rail, about 1 kΩ, or 120 mV AC. The PPK2 powers a BLE-style sensor: 3 µA asleep, a 400 µA wake-up every 10 ms, and a 6–9 mA radio event every 100 ms (shown on D0). The Saleae is a Logic Pro 16 that needs no Logic 2: D0 sends `EE Workbench\r\n` at 115200 baud every 2 ms, D1 is 1 kHz at 25 % duty, D2 10 kHz, D3 bursts of eight 1 MHz clocks, A0 a 1 kHz sine and A1 the D1 signal through an RC filter. Its Async Serial decoder works on D0. `SIM::SIGROK` is a 16-channel fx2lafw-style analyzer whose D7 carries the same irregular debug pin as the simulated PPK2's D7, so [alignment](#lining-a-capture-up-with-a-ppk2) can be tried. `SIM::FGEN` is a two-channel Keysight 33522B (SCPI commands); `SIM::SDG` a Siglent SDG2042X (Siglent's commands). `SIM::GPIO` is a Pi header wired like a small test jig: GPIO21 reads what GPIO20 drives, GPIO12 reads GPIO16 inverted, and GPIO26 is a button pressed (low) for 0.2 s every 2 s.
 
+Every [instrument definition](01-hardware-and-resources.md#meters-loads-and-supplies-instrument-definitions) has a simulator under its id: `SIM::34461A`, `SIM::K2000`, `SIM::DMM6500`, `SIM::DM3058`, `SIM::SDM3055`, `SIM::SCPI-DMM` (meters reading a fixed value for each function: 3.3 or 5 V DC, 10–15 mA, 1 kΩ, 1 kHz…), `SIM::DL3021`, `SIM::SDL1020`, `SIM::K2380` (loads on a 5 V source with 50 mΩ behind it), `SIM::DP832`, `SIM::E36312A`, `SIM::SPD3303X`, `SIM::SCPI-SUPPLY` (supplies into 100 Ω loads), and so does any definition of your own. The oscilloscopes: `SIM::SCOPE` (Rigol), `SIM::DSOX` (Keysight), `SIM::TBS` (Tektronix), `SIM::SDS` (Siglent), each with a 1 kHz 0–3.3 V square wave on CH1, a 2 kHz sine on CH2, a triangle on CH3 and DC on CH4, sent in that brand's own format. Add `#2`, `#3` to open several of one: `SIM::PPK2#2` is a second PPK2, whose D7 carries the same debug pin as the first, so [PPK2 alignment](#several-ppk2s-in-step) can be tried.
+
 ## Instruments at start-up
 
 EE Workbench remembers which instruments were open, and reopens them the next time it starts. Panel settings come back too: the 3456A's channel name, function, range, integration and filter/autozero; GPIO pin modes and names; analyzer decoders. The watchdog rules and math channels are kept too (`~/.config/ee-workbench/bench.json`). For several bench arrangements you switch between, use [setups](#setups-the-whole-bench-by-name). **Supply setpoints and outputs are never restored.** They are always read from the supply itself, so starting the app never changes what a supply is doing.
@@ -747,6 +930,8 @@ GPIO tabs have no Resume button: they retry by themselves every 5 s. As soon as 
 **An internal error** (a bug in EE Workbench). The app does not close. A window titled *EE Workbench: internal error* says what happened; **Show Details…** has the technical details. Your instruments and their outputs are left as they were, and you can carry on working. The same error is reported at most once a minute, however often it happens. Everything is recorded in `~/.config/ee-workbench/crash.log`; please include that file if you report a problem.
 
 **The app closes unexpectedly** (a crash inside Qt or a driver library). The stack of every thread is written to `~/.config/ee-workbench/fault.log`. Instrument outputs stay as they were, so check the bench. Start the app again and it reopens the same instruments. To have it restart by itself (an unattended Pi, for example), launch it as `./run.sh --restart-on-crash`: see [Raspberry Pi](05-raspberry-pi.md#start-again-after-a-crash).
+
+**Unattended.** [Safety](#safety-and-unattended-runs) can reconnect instruments by themselves, switch outputs off on quit or after a crash, resume a sequence, and drive a heartbeat pin for an external watchdog.
 
 **Quitting from outside** (Ctrl+C in the terminal you started it from, logging out, `kill`). The app closes as if you had pressed ✕: the session file, the open instruments and the bench state are saved, and every instrument is released. If an instrument is stuck in a long operation (a slow decoder, a bus timeout), the app waits a few seconds for it and then exits anyway.
 

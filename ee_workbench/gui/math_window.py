@@ -23,7 +23,7 @@ from PyQt6.QtWidgets import (QAbstractItemView, QCheckBox, QHBoxLayout, QHeaderV
 from ..clock import now
 from ..mathchannels import Channel
 from ..session import recorder as session
-from ..signals import QUANTITIES, slug
+from ..signals import slug
 from . import touch
 from .hub import hub
 from .panel_base import open_panels
@@ -187,11 +187,8 @@ class MathWindow(QMainWindow):
     def _fill_signals(self):
         known = set()
         for p in open_panels():
-            for q in QUANTITIES.get(p.KIND, []):
+            for q in p.quantities():
                 known.add(f"{slug(p.display_name())}.{q}")
-            if p.KIND == "gpio":
-                for g in p._used():
-                    known.add(f"{slug(p.display_name())}.gpio{g}")
         known |= set(hub.math.available())
         have = [self.sigs.item(i).text().split()[0] for i in range(self.sigs.count())]
         if sorted(known) != have:

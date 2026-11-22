@@ -1,0 +1,34 @@
+# Rigol DM3058 / DM3058E / DM3068 bench DMMs.
+id = "DM3058"
+name = "Rigol DM3058 / DM3058E / DM3068"
+maker = "Rigol"
+type = "meter"
+idn = ["DM3058", "DM3068"]
+init = ["*CLS"]
+error_query = ":SYST:ERR?"
+notes = "Each reading is a :MEASure query of the chosen function, at auto range."
+
+[[reading]]
+name = "value"
+label = "Reading"
+query = ":MEAS:VOLT:DC?"
+query_from = "function"
+unit = "V"
+unit_from = "function"
+sim = "{'DC V': 12.0, 'AC V': 0.12, 'DC I': 0.02, 'AC I': 0.001, '2W ohm': 220, '4W ohm': 220, 'Frequency': 50}.get(function, 0) * (1 + noise(3e-5))"
+
+[[setting]]
+name = "function"
+label = "Function"
+kind = "choice"
+query = ":FUNC?"
+options = [
+  { label = "DC V", set = ":FUNC:VOLT:DC", reply = '^DCV', unit = "V", read = ":MEAS:VOLT:DC?" },
+  { label = "AC V", set = ":FUNC:VOLT:AC", reply = '^ACV', unit = "V", read = ":MEAS:VOLT:AC?" },
+  { label = "DC I", set = ":FUNC:CURR:DC", reply = '^DCI', unit = "A", read = ":MEAS:CURR:DC?" },
+  { label = "AC I", set = ":FUNC:CURR:AC", reply = '^ACI', unit = "A", read = ":MEAS:CURR:AC?" },
+  { label = "2W ohm", set = ":FUNC:RES", reply = '^2WR', unit = "Ω", read = ":MEAS:RES?" },
+  { label = "4W ohm", set = ":FUNC:FRES", reply = '^4WR', unit = "Ω", read = ":MEAS:FRES?" },
+  { label = "Frequency", set = ":FUNC:FREQ", reply = '^FREQ', unit = "Hz", read = ":MEAS:FREQ?" },
+]
+sim = "DC V"

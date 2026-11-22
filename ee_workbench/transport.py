@@ -426,6 +426,14 @@ class VisaTransport:
         except self._pyvisa.errors.VisaIOError as e:
             raise self._wrap(e, cmd) from e
 
+    def query_raw(self, cmd: str) -> bytes:
+        """An IEEE-488.2 definite-length block (#<n><len><bytes>) as raw bytes;
+        text before the '#' (a Siglent "C1:WF DAT2," header) is skipped."""
+        try:
+            return bytes(self.inst.query_binary_values(cmd, datatype="B", container=bytes))
+        except self._pyvisa.errors.VisaIOError as e:
+            raise self._wrap(e, cmd) from e
+
     def read_stb(self) -> int:
         try:
             return int(self.inst.read_stb())

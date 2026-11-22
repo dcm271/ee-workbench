@@ -1,0 +1,72 @@
+# Keysight E36300-series triple-output supplies.
+id = "E36312A"
+name = "Keysight E36311A / E36312A / E36313A power supply (3 outputs)"
+maker = "Keysight"
+type = "supply"
+idn = ["E36311A", "E36312A", "E36313A"]
+channels = 3
+init = ["*CLS"]
+error_query = "SYST:ERR?"
+off = ["OUTP OFF,(@{ch})"]
+
+[[reading]]
+name = "voltage"
+label = "Voltage"
+query = "MEAS:VOLT? (@{ch})"
+unit = "V"
+sim = "(vset{ch} if out{ch} else 0) + noise(1e-4)"
+
+[[reading]]
+name = "current"
+label = "Current"
+query = "MEAS:CURR? (@{ch})"
+unit = "A"
+sim = "(min(vset{ch} / 100.0, iset{ch}) if out{ch} else 0) + noise(5e-6)"
+
+[[setting]]
+name = "vset"
+label = "Voltage"
+kind = "number"
+unit = "V"
+min = 0
+max = 25
+set = "VOLT {value},(@{ch})"
+query = "VOLT? (@{ch})"
+sim = "3.3"
+
+[[setting]]
+name = "iset"
+label = "Current limit"
+kind = "number"
+unit = "A"
+min = 0.002
+max = 5.15
+set = "CURR {value},(@{ch})"
+query = "CURR? (@{ch})"
+sim = "1.0"
+
+[[setting]]
+name = "ovp"
+label = "OVP level"
+kind = "number"
+unit = "V"
+set = "VOLT:PROT {value},(@{ch})"
+query = "VOLT:PROT? (@{ch})"
+sim = "27"
+
+[[setting]]
+name = "ocp_on"
+label = "OCP on"
+kind = "bool"
+set = "CURR:PROT:STAT {on_off},(@{ch})"
+query = "CURR:PROT:STAT? (@{ch})"
+sim = "0"
+
+[[setting]]
+name = "out"
+label = "Output"
+kind = "bool"
+set = "OUTP {on_off},(@{ch})"
+query = "OUTP? (@{ch})"
+output = true
+sim = "0"

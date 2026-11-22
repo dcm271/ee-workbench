@@ -192,7 +192,7 @@ class FgenPanel(PanelBase):
         self.title_changed.emit(self.display_name())
         self.settings_changed.emit()
 
-    def display_name(self) -> str:
+    def base_name(self) -> str:
         model = getattr(self.caps, "model", "") or "FGEN"
         t = self.name_edit.text().strip()
         return f"{model} · {t}" if t else model

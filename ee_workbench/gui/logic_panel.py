@@ -678,7 +678,7 @@ class LogicPanel(PanelBase):
         self.title_changed.emit(self._title())
         self.settings_changed.emit()
 
-    def display_name(self) -> str:
+    def base_name(self) -> str:
         text = self.name_edit.text().strip()
         return f"Logic · {text}" if text else f"Logic {self.caps.model or ''} ({self.resource})"
 

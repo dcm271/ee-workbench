@@ -55,6 +55,17 @@ class SimBase:
         data, self._bin = self._bin, None
         return list(data)
 
+    def query_raw(self, cmd: str) -> bytes:
+        """Simulators put bytes in self._bin for block queries (waveforms)."""
+        self._out.clear()
+        self._bin = None
+        self.write(cmd)
+        if self._bin is None:
+            self._out.clear()
+            raise TransportTimeout(f"No reply to {cmd!r}")
+        data, self._bin = self._bin, None
+        return bytes(data)
+
     def read_stb(self) -> int:
         s, self.stb = self.stb, 0
         return s

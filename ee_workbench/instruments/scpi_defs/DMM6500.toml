@@ -1,0 +1,45 @@
+# Keithley DMM6500 / DAQ6510 with the SCPI command set selected
+# (MENU > System > Settings > Command Set = SCPI).
+id = "DMM6500"
+name = "Keithley DMM6500 / DMM7510 / DAQ6510 (SCPI command set)"
+maker = "Keithley"
+type = "meter"
+idn = ["DMM6500", "DMM7510", "DAQ6510"]
+init = ["*CLS"]
+error_query = ":SYST:ERR?"
+notes = "Needs the SCPI command set (not TSP): MENU > System > Settings > Command Set."
+
+[[reading]]
+name = "value"
+label = "Reading"
+query = ":READ?"
+unit = "V"
+unit_from = "function"
+sim = "{'DC V': 1.8, 'AC V': 0.12, 'DC I': 0.002, 'AC I': 0.001, '2W ohm': 4700, '4W ohm': 4700, 'Frequency': 32768, 'Capacitance': 1e-8}.get(function, 0) * (1 + noise(1e-5))"
+
+[[setting]]
+name = "function"
+label = "Function"
+kind = "choice"
+query = ":SENS:FUNC?"
+options = [
+  { label = "DC V", set = ":SENS:FUNC \"VOLT:DC\"", reply = 'VOLT:DC', unit = "V" },
+  { label = "AC V", set = ":SENS:FUNC \"VOLT:AC\"", reply = 'VOLT:AC', unit = "V" },
+  { label = "DC I", set = ":SENS:FUNC \"CURR:DC\"", reply = 'CURR:DC', unit = "A" },
+  { label = "AC I", set = ":SENS:FUNC \"CURR:AC\"", reply = 'CURR:AC', unit = "A" },
+  { label = "2W ohm", set = ":SENS:FUNC \"RES\"", reply = '^"?RES', unit = "Ω", sim = '"RES"' },
+  { label = "4W ohm", set = ":SENS:FUNC \"FRES\"", reply = 'FRES', unit = "Ω" },
+  { label = "Frequency", set = ":SENS:FUNC \"FREQ:VOLT\"", reply = 'FREQ', unit = "Hz" },
+  { label = "Capacitance", set = ":SENS:FUNC \"CAP\"", reply = 'CAP', unit = "F" },
+]
+sim = "DC V"
+
+[[setting]]
+name = "nplc"
+label = "Integration (DC V)"
+kind = "number"
+unit = "PLC"
+set = ":SENS:VOLT:DC:NPLC {value}"
+query = ":SENS:VOLT:DC:NPLC?"
+values = [0.0005, 0.01, 0.1, 1, 10]
+sim = "1"

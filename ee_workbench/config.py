@@ -98,7 +98,15 @@ class Config:
 
 def norm_model(m: str) -> str:
     m = MODEL_ALIASES.get(str(m), str(m))
-    return m if m in MODEL_KEYS else "auto"
+    if m in MODEL_KEYS:
+        return m
+    # generic SCPI definitions ("SCPI:34461A", or just "34461A") and scopes
+    try:
+        from .instruments import resolve_model
+        r = resolve_model(m)
+    except Exception:       # noqa: BLE001 - a broken definition must not stop start-up
+        return "auto"
+    return r if r.startswith(("SCPI:", "SCOPE:")) else "auto"
 
 
 def load_config(path: Path | None = None) -> Config:

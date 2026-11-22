@@ -25,6 +25,8 @@ MainWindow
  └─ LogicPanel  (sigrok) ── worker thread ── SigrokLogic ── sigrok-cli subprocess ── USB
  └─ FgenPanel   (FGEN)   ── worker thread ── FunctionGenerator ── VisaTransport (LAN / USB-TMC / GPIB)
  └─ GpioPanel   (GPIO)   ── worker thread ── GpioDriver ── GpioLink ── libgpiod ── /dev/gpiochipN
+ └─ ScpiPanel   (SCPI:…) ── worker thread ── ScpiDriver(Definition) ── VisaTransport
+ └─ ScopePanel  (SCOPE:…)── worker thread ── ScopeDriver(dialect) ──── VisaTransport (query_raw for bytes)
 
  every panel's readings ─► hub ─► Watchdog (rules ─► trip ─► MainWindow actions)
                               └─► LiveMath (channels ─► MathWindow, session "Math" stream)
@@ -72,6 +74,172 @@ MainWindow
 | `gui/sequencer_window.py`, `session_viewer.py` | Sequencer window; session viewer (cursors, math, export) |
 | `gui/fgen_panel.py`, `gpio_panel.py`, `profile_box.py`, `events_tab.py` | Generator and GPIO tabs; the Profile and PPK2 Events tabs |
 | `gui/watchdog_window.py`, `math_window.py`, `setups_dialog.py`, `report_dialog.py` | Tools-menu windows |
+| `instruments/scpi_generic.py`, `instruments/scpi_defs/*.toml` | Generic SCPI driver and the [definition files](#instrument-definition-files-toml) it reads; `self_test()` |
+| `instruments/scopes.py` | Oscilloscopes: four command dialects, waveform decoding, measurements |
+| `check_instruments.py` | `python -m ee_workbench.check_instruments`: validate and self-test definition files |
+| `sim/sscpi.py`, `sim/sscope.py` | Simulator for any definition; four-dialect scope simulator |
+| `gui/scpi_panel.py`, `gui/scope_panel.py` | The meter / load / supply tab built from a definition; the scope tab |
+| `production.py`, `gui/production_window.py` | Production-test results database and yield; the station window |
+| `safety.py`, `gui/safety_dialog.py` | Unattended-run settings, crash marker, reconnect back-off |
+| `gui/record_dialog.py` | Record everything or only around events |
+
+## Instrument definition files (TOML)
+
+Meters, loads, supplies and other SCPI instruments that only need "set this, read that" are described by a [TOML](https://toml.io) file instead of a Python driver. The built-in ones are in `ee_workbench/instruments/scpi_defs/`; your own go in `~/.config/ee-workbench/instruments/*.toml` and are read at start-up. A file of yours with the same `id` as a built-in replaces it, so the easiest start is to copy the closest built-in and edit it. Check a file with `python -m ee_workbench.check_instruments FILE` (it also runs the file against its simulator), and see the [how-to](06-howtos.md#add-your-own-scpi-instrument) for a worked example.
+
+A complete small example:
+
+```toml
+id = "MY-LOAD"                       # model key SCPI:MY-LOAD, simulator SIM::MY-LOAD
+name = "Acme EL-150 electronic load"
+type = "load"                        # meter | load | supply | source | other
+idn = ["EL-150"]                     # *IDN? containing this → Auto-detect picks this file
+init = ["*CLS"]                      # sent once after connecting
+error_query = "SYST:ERR?"            # read until it answers 0 ("" if there is none)
+off = ["INP OFF"]                    # what All outputs OFF (Esc) sends
+poll_ms = 100                        # default poll delay (the tab can change it)
+notes = "Set the level before switching the input on."
+
+[[reading]]
+name = "voltage"
+label = "Voltage"
+query = "MEAS:VOLT?"
+unit = "V"
+sim = "12.0 - 0.1 * cc * input"      # simulator only
+
+[[reading]]
+name = "current"
+query = "MEAS:CURR?"
+unit = "A"
+sim = "cc * input + noise(1e-4)"
+
+[[setting]]
+name = "cc"
+label = "CC current"
+kind = "number"
+unit = "A"
+min = 0
+max = 30
+set = "CURR {value}"
+query = "CURR?"
+sim = "1.0"                          # simulator: starting value
+
+[[setting]]
+name = "input"
+label = "Input"
+kind = "bool"
+set = "INP {on_off}"
+query = "INP?"
+output = true                        # an output switch: a red/green button, and Esc turns it off
+```
+
+### Top-level keys
+
+| Key | Required | Meaning |
+|---|---|---|
+| `id` | yes | Short identifier: letters, digits, `.` `_` `+` `-`. The model key is `SCPI:<id>`, the simulator `SIM::<id>`. |
+| `name` | | Shown in the model lists. Defaults to `id`. |
+| `type` | | `meter`, `load`, `supply`, `source` or `other` (default). Decides the readout colours and how the tab names its output buttons (**Output** / **Input**). |
+| `maker` | | Free text. |
+| `idn` | | List of strings; if the `*IDN?` answer contains one of them (any case), *Auto-detect* uses this definition. Without it the model has to be chosen by hand. |
+| `channels` | | 1 to 16 (default 1). With more than 1, every reading and setting whose text contains `{ch}` is repeated per channel (see below). |
+| `init` | | Commands sent once after connecting and after `*IDN?` (e.g. `*CLS`, switching continuous triggering off). |
+| `error_query` | | The error-queue query (default `SYST:ERR?`). It is read after every command until it answers a code of 0; `""` turns error checking off (for instruments without one). |
+| `off` | | Commands **All outputs OFF (Esc)** sends; `{ch}` repeats them per channel. If missing, Esc turns off every setting marked `output = true` instead. A supply or load should always have one of the two. |
+| `poll_ms` | | Default delay between polls in ms (default 0: as fast as the instrument answers). |
+| `notes` | | Shown under the instrument's ID on the tab: anything the user should know. |
+| `tested` | | The hardware it has been checked on, e.g. `"DL3021A fw 00.01.04"`. Left empty, the tab says the definition hasn't been checked on this model yet. |
+
+### `[[reading]]`: polled values
+
+One table per value. Each poll sends every reading's query, in file order, and parses the first number in the answer. `9.9E37` or more (SCPI's overload) is shown as **OVLD**.
+
+| Key | Meaning |
+|---|---|
+| `name` | Identifier (letters, digits, `_`): the name in the sequencer, watchdog, math, CSV and sessions. Unique among readings *and* settings. |
+| `label` | Shown on the readout (default: `name`). |
+| `query` | The query to send. |
+| `unit` | `V`, `A`, `W`, `Ω`, `Hz`, `F`, … (SI prefixes are added for display). |
+| `unit_from` | Name of a `choice` setting: the unit is that setting's current option's `unit` (a meter whose unit follows its function). |
+| `query_from` | Name of a `choice` setting: the query is that setting's current option's `read` (meters that read with `MEAS:VOLT:DC?`, `MEAS:CURR:AC?`, … instead of `READ?`). `query` is then the fallback. |
+| `sim` | Simulator only: a Python expression for the value (see below). |
+
+### `[[setting]]`: things the panel can set
+
+| Key | Meaning |
+|---|---|
+| `name`, `label`, `unit` | As for readings. |
+| `kind` | `number` (default), `choice` or `bool`. |
+| `set` | The command template. `{value}` is the number (`number`), `{on_off}` gives `ON`/`OFF` and `{1_0}` gives `1`/`0` (`bool`). Not used by `choice` (each option has its own). |
+| `query` | Reads the setting back. Optional, but without it the panel can only show what was last sent. A `number` answer is parsed as a number, a `bool` answer accepts `1`/`0`/`ON`/`OFF`, and a `choice` answer is matched against the options' `reply`. |
+| `min`, `max` | Limits for a number: the panel's box and the sequencer refuse values outside them. |
+| `values` | A list of numbers offered as a list instead of a free number box (NPLC: `[0.02, 0.2, 1, 10, 100]`). |
+| `options` | For `choice`: a list of option tables (below). |
+| `output` | `true` for the instrument's output / input switch: shown as a button, turned off by **Esc** (if `off` is missing), and used by the watchdog's **turn off**. |
+| `sim` | Simulator only: the starting value (a number, `0`/`1`, or an option label). |
+
+**Options** (`options = [{…}, {…}]`):
+
+| Key | Meaning |
+|---|---|
+| `label` | Shown in the list, and the value used in the sequencer (`function` = `DC V`). |
+| `set` | The command that selects it. |
+| `reply` | A regular expression ([Python syntax](https://docs.python.org/3/library/re.html#regular-expression-syntax), case-insensitive) searched in the setting's `query` answer; the first option that matches is the current one. Without it, the answer must equal the label. Put the most specific options first, or anchor them (`'^"?VOLT '` vs `'^"?VOLT:AC'`). |
+| `unit` | The unit for readings with `unit_from` this setting. |
+| `read` | The reading query for readings with `query_from` this setting. |
+| `sim` | Simulator only: what the simulator answers to the query while this option is selected (default: built from `reply`). |
+
+### Channels
+
+With `channels = 3`, a reading or setting whose text contains `{ch}` becomes three, named with the channel number appended (`vset` → `vset1`, `vset2`, `vset3`) and labelled `Voltage CH1`, … The `{ch}` is replaced in every command:
+
+```toml
+channels = 3
+off = ["OUTP OFF,CH{ch}"]        # sent three times
+[[setting]]
+name = "vset"
+set = ":SOUR{ch}:VOLT {value}"   # vset2 = 5 sends :SOUR2:VOLT 5
+query = ":SOUR{ch}:VOLT?"
+```
+
+Readings and settings without `{ch}` stay single. The panel groups readouts and settings per channel. For the [watchdog's In HW](03-users-guide.md#limits-in-the-instrument-in-hw) limits a supply's settings must be called `vset`, `iset`, `ovp`, `ovp_on`, `ocp`, `ocp_on` (any of the last four may be missing), and its readings `voltage` and `current`.
+
+### Simulator expressions
+
+Every definition runs on its own simulator (`SIM::<id>`), which turns each `set` template back into a pattern (so the sim accepts exactly the commands the file sends), stores the value, and answers `query` with it. Unknown commands put `-113,"Undefined header"` in the error queue, as a real instrument would. A reading's `sim` is a Python expression evaluated with:
+
+- every setting by name (numbers as floats, bools as `True`/`False`, choices as the option label), with `{ch}` replaced by the channel (`"vset{ch} if out{ch} else 0"`),
+- `t` (seconds since the simulator started), `noise(sd)` (Gaussian noise), `min`, `max`, `abs` and `math`.
+
+The simulator only shows that the file is consistent with itself. Whether the commands are right for the real instrument is only shown by the real instrument: open it and watch the tab's **Console**.
+
+### How the driver uses a definition
+
+`ScpiDriver.identify()` sends `*IDN?`, then `init`, empties the error queue, and reads every setting. `poll()` sends every reading's query (per channel), parses the numbers and fills in units. `set(name, value)` checks the value against the setting (kind, option, `min`/`max`), sends the filled-in template, reads the setting back (if it has a `query`), and the worker then drains the error queue, so an instrument error appears in the tab's log at once. `set_output(False)` sends `off`, or turns off every `output` setting. Answers are parsed leniently: the first number in the text, so `+1.23456E+00`, `1.23456 V` and `VOLT 1.2` all work.
+
+## Oscilloscopes (`instruments/scopes.py`)
+
+One driver, four command dialects. Each fetches a channel's waveform as bytes (`query_raw`, an IEEE 488.2 `#N<len>` block) and scales it with the scope's own preamble:
+
+**Control commands:**
+
+- **`rigol`**: channel `:CHAN<n>:DISP`, `:CHAN<n>:SCAL`, `:CHAN<n>:OFFS`; timebase `:TIM:SCAL`, `:TIM:OFFS`; trigger `:TRIG:EDG:SOUR`, `:TRIG:EDG:LEV`, `:TRIG:EDG:SLOP`, `:TRIG:SWE`; `:RUN`, `:STOP`, `:SING`; status `:TRIG:STAT?` (TD, WAIT, RUN, AUTO, STOP).
+- **`keysight`**: channel `:CHAN<n>:DISP`, `:CHAN<n>:SCAL`, `:CHAN<n>:OFFS`; timebase `:TIM:SCAL`, `:TIM:POS`; trigger `:TRIG:EDGE:SOUR`, `:TRIG:EDGE:LEV`, `:TRIG:EDGE:SLOP`, `:TRIG:SWE`; `:RUN`, `:STOP`, `:SING`; status `:OPER:COND?` bit 3 (running).
+- **`tek`**: channel `SEL:CH<n>`, `CH<n>:SCA`, `CH<n>:OFFS`; timebase `HOR:SCA`, `HOR:DEL:TIM`; trigger `TRIG:A:EDGE:SOU`, `TRIG:A:EDGE:SLO`, `TRIG:A:LEV:CH<n>`, `TRIG:A:MOD`; run `ACQ:STOPA RUNST;:ACQ:STATE RUN`, stop `ACQ:STATE STOP`, single `ACQ:STOPA SEQ;:ACQ:STATE RUN`; status `ACQ:STATE?`.
+- **`siglent`**: channel `C<n>:TRA`, `C<n>:VDIV`, `C<n>:OFST`; timebase `TDIV`, `TRDL`; trigger `TRSE EDGE,SR,C<n>,HT,OFF`, `C<n>:TRLV`, `C<n>:TRSL`, `TRMD`; run `TRMD AUTO`, `STOP`, single `TRMD SINGLE;ARM`; status `SAST?`.
+
+**Waveforms:**
+
+| Dialect | Waveform | Scaling |
+|---|---|---|
+| `rigol` | `:WAV:SOUR CHAN<n>; :WAV:MODE NORM; :WAV:FORM BYTE`, `:WAV:PRE?`, `:WAV:DATA?` (unsigned bytes, the screen record) | v = (byte − yorigin − yreference) × yincrement; t₀ = −xreference × xincrement + xorigin |
+| `keysight` | `:WAV:SOUR CHAN<n>; :WAV:POIN:MODE NORM; :WAV:UNS 1; :WAV:FORM BYTE`, `:WAV:PRE?`, `:WAV:DATA?` | v = (byte − yreference) × yincrement + yorigin |
+| `tek` | `DATA:SOU CH<n>; DATA:ENC RIB; DATA:WID 1; DATA:STAR 1; DATA:STOP <HOR:RECO?>`, `WFMO:XIN?/XZE?/YMU?/YOF?/YZE?`, `CURV?` (signed bytes, the whole record, at most 1 M points) | v = (code − YOFF) × YMULT + YZERO; t₀ = XZERO |
+| `siglent` | `C<n>:VDIV?`, `C<n>:OFST?`, `TDIV?`, `SARA?`, `TRDL?`, `C<n>:WF? DAT2` (signed bytes) | v = code × VDIV / 25 − OFST; t₀ = −7 × TDIV − TRDL; Δt = 1 / SARA |
+
+**Capture protocol** (the same as a logic analyzer's, so the sequencer, watchdog and sessions treat both alike): `arm()` starts a single acquisition; `capture_done()` polls `status()` until the scope has stopped; `fetch()` reads every displayed channel into a `LogicCapture` with one `AnalogTrace` per channel; `abort()` stops it. `grab()` fetches without arming. `measure("vpp1")` fetches one channel and runs `trace_stats()`: Vpp, max, min, mean, RMS, frequency, period and duty from crossings of the mid level, and 10–90 % rise and fall times.
+
+`detect_idn()` recognises the families from `*IDN?` (maker and model prefix); `resolve()` accepts `SCOPE:RIGOL`, `DS1054Z`, `TBS2000`, `scope:tek` and similar.
 
 ## Agilent 66321D (SCPI)
 
@@ -277,13 +445,16 @@ A session is one SQLite file (WAL mode) written from the GUI thread. Rows are bu
 
 | Table | Contents |
 |---|---|
-| `meta(key, value)` | `format` (1), `created`, `wall_t0` (Unix time of app t = 0) |
+| `meta(key, value)` | `format` (1), `created`, `wall_t0` (Unix time of app t = 0); `gate` (`{"pre_s", "post_s"}`) for a recording made only around events |
 | `streams(id, name, model, resource, columns, tbl)` | one per instrument (or sequencer layout); `columns` is JSON |
 | `s_<id>(t, …)` | that stream's rows: `t` = app time (s), then its columns, the same as its CSV without `timestamp` and `t_s` |
 | `notes(t, text)` | |
+| `events(t, t_from, t_to, why)` | only-around-events recordings: each event's time and the window kept around it |
 | `captures(id, t_app, t0, aligned, name, cfg, data, table_header, table_rows, note)` | `t0` = app time of the capture's t = 0 (PPK2-aligned if `aligned`, else the host's arming time); `cfg` = the LogicConfig as JSON; `data` = a compressed `.npz` of the traces (`d<ch>_t`, `d<ch>_l`, `d<ch>_end`, `a<ch>_v`, `a<ch>_td`, `x_ppk2_t`, `x_ppk2_i`) |
 
 Panels feed it through `PanelBase.record(row)`, the same row as their CSV, so a new instrument gets session recording by laying out its CSV row. Recording into an existing file shifts the new run's times by the difference in `wall_t0`, so one file keeps one time base. `SessionReader` loads it back for the viewer.
+
+**Only around events** (`recorder.start(path, gate=(pre, post))`): rows go into an in-memory ring per stream, trimmed to the last `pre` seconds. `recorder.trigger(t, why)` writes the ring from `t − pre`, records an `events` row, and keeps writing directly until `t + post`; overlapping windows merge. Notes, captures, sequence rows and math are written as usual. Callers: watchdog trips (every action), `capture()` (logic analyzer and scope), **✎ Note**.
 
 ## Sequencer (`sequencer.py`)
 
@@ -292,6 +463,9 @@ The engine doesn't import Qt. `Bench` holds one `Inst` per instrument tab and of
 - driver calls are queued on that tab's `InstrumentWorker` (`submit(job, refresh=True)`), and the thread waits on an event, so a sequence never talks to an instrument at the same time as its polling;
 - readings come from the tab's `last_reading`, and a measurement waits for one timed after it was asked for;
 - PPK2 averages come from its sample ring, and captures from the logic tab's own Capture, both through a queued call onto the GUI thread (`Invoker`).
+- A tab's names for **Set** / **Measure** / **Profile** come from the panel (`set_names()`, `measure_names()`, `setting_kinds()`, `profile_names()`), so SCPI and scope tabs offer exactly what their definition or channel count gives.
+
+`run_plan(plan, bench, start=0, extra=None, on_pass=None)`: `start` skips the passes before it (resuming); `extra` is a dict of names for the steps (production test: `serial`, `product`, `operator`; numbers can be used in values, any value replaces `{name}` in a Note, and `serial` becomes a result column); `on_pass(index)` is called after each finished pass (the window writes its checkpoint there). `run_script(code, bench, extra)` puts `extra` in the script's namespace.
 
 ## Function generators (`instruments/fgen.py`)
 
@@ -327,11 +501,56 @@ The engine doesn't import Qt. `Bench` holds one `Inst` per instrument tab and of
 
 **`signals.py`** turns any panel's reading into named arrays: `signals_of(kind, reading) → {quantity: (t, values)}`; for a PPK2 that's every 10 µs sample of the block (`t0 + k·10 µs`). `slug(name)` makes the identifiers used in expressions. `gui/hub.py` is the one place readings arrive: `PanelBase._on_reading` calls `hub.feed(panel, reading)`, which feeds the watchdog and the live math.
 
-**`watchdog.py`**: `Rule(source, quantity, op, limit, hold_ms, action, target, enabled)`. `Watchdog.feed(name, kind, reading)` checks each enabled, un-tripped rule on that instrument's signals, vectorised over the block: it finds the runs of samples past the limit (carrying a run that's still going across blocks), and trips when a run has lasted `hold_ms` (for one-reading-per-block instruments, from the first past-limit reading's time to the current one's). A trip latches (`rule.tripped`, `rule.trip_t`, `rule.trip_value`) and is returned; the main window carries out the action through the same paths as Esc. Rules serialise with `to_list()` / `from_list()`.
+**`watchdog.py`**: `Rule(source, quantity, op, limit, hold_ms, action, target, enabled, hw, rearm_s)`. `ACTIONS`: `all outputs off`, `turn off`, `stop sequence`, `capture`, `mark session`, `note only` (the first three show a message box: `SAFETY_ACTIONS`). `Watchdog.auto_rearm(now)` re-arms rules whose `rearm_s` has passed since they tripped (the main window calls it every second). `hw_plan(rule, kind, settings)` returns `(job, text)`, where `job(driver)` sets the instrument's own limit on its I/O thread, or `(None, why)`: for a built-in supply `set_ovp(L)` or `set_current(min(current, L))` + `set_ocp(True)`; for a SCPI definition the settings `ovp`/`ovp_on` or `iset`/`ocp`/`ocp_on` (with the channel number when the quantity has one). `MainWindow.apply_hw_limits()` runs the jobs once per rule and connection. `Watchdog.feed(name, kind, reading)` checks each enabled, un-tripped rule on that instrument's signals, vectorised over the block: it finds the runs of samples past the limit (carrying a run that's still going across blocks), and trips when a run has lasted `hold_ms` (for one-reading-per-block instruments, from the first past-limit reading's time to the current one's). A trip latches (`rule.tripped`, `rule.trip_t`, `rule.trip_value`) and is returned; the main window carries out the action through the same paths as Esc. Rules serialise with `to_list()` / `from_list()`.
 
 **`events.py`**: `find_events(t, i, threshold, min_gap, min_len, hysteresis)`: a Schmitt trigger (rise above `threshold`, fall below `threshold × (1 − hysteresis)`), done with numpy over the whole buffer; events closer than `min_gap` are merged, shorter than `min_len` dropped. Each `Event` has `t0, t1, duration, peak, mean, charge` (trapezoidal integral). `summary(events, t, i)` gives the counts, rate and the mean current outside events. `attach_bus(events, rows, offset, pad)` fills each event's `bus` with the decoded rows (from an aligned capture, times shifted by its `offset`) within `pad` of it. `histogram(events, field, bins)`.
 
 **`mathchannels.py`**: `evaluate(expr, series, grid)`: each `inst.quantity` series is first put on the evaluation `grid` by `resample()`: bin-averaged when the series has several samples per grid step (a PPK2), else linearly interpolated, so a 50 µs burst counts in proportion to its charge rather than depending on whether a grid point happened to land on it. The expression is evaluated with numpy functions only (`__builtins__` empty) and `inst.quantity` attribute access via `_Inst` objects, which name the missing signal in the error if one doesn't exist. `avg(x, s)` is a rolling mean over `s` seconds of grid. `integrate(t, y)` is the cumulative trapezoid. `LiveMath` keeps 60 s of each signal (a PPK2 reduced to 1 ms means as it arrives) and `tick(now)` evaluates every channel on a 50 ms grid; integrated channels keep their running total across ticks.
+
+## Production results database
+
+`production.py`: one SQLite file, `~/.config/ee-workbench/results.db` by default (`"production": {"db": "…"}` in `bench.json` moves it):
+
+```sql
+CREATE TABLE units(
+  id INTEGER PRIMARY KEY, serial TEXT, product TEXT, operator TEXT,
+  station TEXT,        -- the computer's host name
+  started TEXT, finished TEXT,   -- ISO 8601 local time
+  seconds REAL, result TEXT,     -- PASS | FAIL | ERROR
+  failures TEXT,       -- "; "-joined failure texts of the FAIL rows (or why it was an ERROR)
+  outcome TEXT,        -- how the sequence ended: "Finished", "Stopped", "Failed: …", …
+  data TEXT,           -- the sequence's result rows, JSON
+  report TEXT);        -- path of the unit's HTML report, if one was saved
+CREATE INDEX units_serial ON units(product, serial);
+```
+
+`verdict(outcome, passed, failed)`: FAIL if any pass failed a limit, ERROR if the sequence didn't finish (other than *Stopped at the first fail*), else PASS. `ResultsDB.yield_stats(product, since)` counts runs (`tested`, `passed`, `failed`, `errors`) and units (`units`, `first_pass`: first run passed, `final_pass`: latest run passed). Examples:
+
+```bash
+sqlite3 ~/.config/ee-workbench/results.db \
+  "select serial, result, finished, failures from units where product='Sensor board rev C' order by id desc limit 20"
+sqlite3 -csv ~/.config/ee-workbench/results.db "select * from units" > all-units.csv
+```
+
+## Safety and crash recovery (`safety.py`)
+
+**`running.json`** (the crash marker), written at start-up and whenever the open instruments change, removed by a normal quit:
+
+```json
+{"pid": 12345, "started": "2026-11-21T08:00:03", "updated": "2026-11-21T08:14:52",
+ "open": [{"resource": "TCPIP::192.168.1.61::INSTR", "model": "SCPI:DL3021", "settings": {…}}],
+ "sequence": false}
+```
+
+At start-up, a marker whose `pid` is no longer running means the last run didn't quit normally (`previous_run()`); one whose `pid` is still running means another copy of the app is open, and it is left alone. A damaged marker counts as a crash with nothing known to be open.
+
+**`sequence-run.json`** (the checkpoint), written after each pass of a steps-mode run when *resume* is on, removed when the run ends:
+
+```json
+{"plan": {…the sequencer's state…}, "next_pass": 37, "total": 100, "saved": "2026-11-21T03:12:09"}
+```
+
+**Reconnect back-off** (`Backoff`): 3, 6, 12, 24, 48, then 60 s per resource, reset when it answers again. `device_path(resource)` gives the `/dev/…` path of a serial resource (`PPK2::/dev/ttyACM0`, `ASRL/dev/ttyUSB0::INSTR`), which must exist again before a reconnect is tried.
 
 ## Reports (`report.py`)
 
@@ -354,7 +573,15 @@ A setup is a JSON file in `~/.config/ee-workbench/setups/<name>.json`:
  "math": [{"name": "P", "expr": "…", "unit": "W", "integrate": false, "enabled": true}]}
 ```
 
-`settings` is each panel's `session_settings()` (what `last-session.json` keeps too). Recall (`gui/setups_dialog.apply_bench`) closes the tabs, opens the listed instruments through the normal connect path (which reads each instrument's state and never writes setpoints or outputs), applies the settings, then the sequence, rules and channels. The current watchdog rules and math channels are also kept in `~/.config/ee-workbench/bench.json`, saved whenever they change.
+`settings` is each panel's `session_settings()` (what `last-session.json` keeps too). Recall (`gui/setups_dialog.apply_bench`) closes the tabs, opens the listed instruments through the normal connect path (which reads each instrument's state and never writes setpoints or outputs), applies the settings, then the sequence, rules and channels. The current watchdog rules and math channels are also kept in `~/.config/ee-workbench/bench.json`, saved whenever they change. Its keys:
+
+| Key | |
+|---|---|
+| `watchdog`, `watchdog_armed` | the rules (as in a setup, plus `hw` and `rearm_s`) and whether armed |
+| `math` | the math channels |
+| `recording` | `{"gated": bool, "pre_s", "post_s"}`: the Record dialog's last choice |
+| `safety` | `{"off_on_quit", "off_after_crash", "heartbeat_tab", "heartbeat_pin", "heartbeat_period", "auto_reconnect", "resume_sequence"}` |
+| `production` | `{"product", "operator", "pattern", "reports", "report_dir", "db"}` |
 
 ## Remote API (`api.py`, `client.py`)
 
@@ -410,7 +637,11 @@ Other measures, by place:
 |---|---|
 | `~/.config/ee-workbench/config.toml` | Start-up settings (created with comments on first run) |
 | `~/.config/ee-workbench/last-session.json` | The open instruments and their panel settings, for the next start |
-| `~/.config/ee-workbench/bench.json` | Watchdog rules (and whether armed) and math channels |
+| `~/.config/ee-workbench/bench.json` | Watchdog rules (and whether armed), math channels, and the record, safety and production settings ([keys](#setups-and-bench-state-setupspy)) |
+| `~/.config/ee-workbench/instruments/*.toml` | Your own [instrument definitions](#instrument-definition-files-toml) (read, never written) |
+| `~/.config/ee-workbench/results.db` | [Production-test results](#production-results-database) |
+| `~/.config/ee-workbench/running.json` | The [crash marker](#safety-and-crash-recovery-safetypy), only while the app runs |
+| `~/.config/ee-workbench/sequence-run.json` | A running sequence's checkpoint, with *resume* on |
 | `~/.config/ee-workbench/sequence.json` | The sequencer's steps and script as last run (`sequence.bad`: a damaged one, set aside at start-up) |
 | `~/.config/ee-workbench/presets.json` | 663xx System-tab presets |
 | `~/.config/ee-workbench/setups/*.json` | Named [setups](#setups-and-bench-state-setupspy) |
@@ -450,6 +681,11 @@ Colours are tokens in `theme.py`, and one application stylesheet uses them. Butt
 | `SIM::GPIO` | A Pi header with 26 lines, honouring direction, pull and active-low, wired as a small jig: GPIO21 follows GPIO20, GPIO12 is GPIO16 inverted, GPIO26 a button (low 0.2 s every 2 s); the rest float to their pull |
 | `SIM::SIGROK` | A fake `sigrok-cli` with an 8-channel 24 MHz fx2lafw analyzer: answers `--scan` / `--show` like the real program, writes real `.sr` files with the Saleae simulator's signals, triggers in software like libsigrok, ends a continuous capture on SIGINT, and decodes UART |
 
+| `SIM::<id>` of any definition | `sim/sscpi.py`: built from the definition (see [Simulator expressions](#simulator-expressions)) |
+| `SIM::SCOPE` / `DS1054Z`, `SIM::DSOX`, `SIM::TBS`, `SIM::SDS` | `sim/sscope.py`: a four-channel scope in the Rigol, Keysight, Tektronix or Siglent dialect (CH1 1 kHz 0–3.3 V square, CH2 2 kHz sine, CH3 triangle, CH4 DC, with noise), answering the dialect's channel, timebase, trigger, run/stop/single and status commands and sending its waveform bytes and preamble in that dialect's format |
+
+`#n` after any simulator name opens another unit of it (`SIM::PPK2#2`); the number is only part of the resource name.
+
 All three logic/power simulators share a **debug pin** (`sim/shared.py`): an irregular signal on app time, toggling about every 1 ms, that appears on the simulated analyzers' D7 and the simulated PPK2's D7, as if one DUT pin were wired to both. Use it to try PPK2 alignment without hardware: D7 ↔ PPK2 D7.
 
 ## Tests
@@ -458,9 +694,13 @@ All three logic/power simulators share a **debug pin** (`sim/shared.py`): an irr
 .venv/bin/python -m pytest tests
 ```
 
-The tests run each driver against its simulator: identification, CV/CC, protection trips and events, error decoding, every 663xx setting, saved setups, immediate/level/segmented/output-step captures with pre-trigger, abort, capture validation, the waveform measurements in `analysis.py`, the config files, and the 3456A reading formats. PPK2 tests cover metadata captured from a real unit, word decoding, the calibration formula, the spike filter against a sample-by-sample reference (across chunk boundaries), and the driver against the simulator: sample count, timing, levels, logic, lost samples, modes, and stop/start. `test_bench_features.py` covers profiles (parsing, timing, skipping), GPIO and both generator dialects against their simulators, limits and stop-on-fail, Wait for, the watchdog's hold logic across blocks, event finding and bus attachment, math evaluation and resampling, reports (HTML, and PDF when WeasyPrint is present), setups, and the Remote API end to end over HTTP. Saleae tests cover both binary-format versions (including multi-chunk files), the edge measurements and lane envelope, resource parsing, and timed, triggered, manual and aborted captures, decoding and save/export through the simulator and the real worker thread. `test_robustness.py` covers the error handling: crash-log rate limiting and rotation, damaged `last-session.json` / `config.toml` / watchdog / math / sequence / setup data, math expressions that fail after evaluating, a session file whose last write fails, foreign session files, malformed Remote API requests, and, in an offscreen Qt window, an exception in a slot not aborting, a GPIO tab's lost link offering ⟳ Reconnect and clearing it on recovery, and Esc still reaching every instrument when one fails.
+The tests run each driver against its simulator: identification, CV/CC, protection trips and events, error decoding, every 663xx setting, saved setups, immediate/level/segmented/output-step captures with pre-trigger, abort, capture validation, the waveform measurements in `analysis.py`, the config files, and the 3456A reading formats. PPK2 tests cover metadata captured from a real unit, word decoding, the calibration formula, the spike filter against a sample-by-sample reference (across chunk boundaries), and the driver against the simulator: sample count, timing, levels, logic, lost samples, modes, and stop/start. `test_bench_features.py` covers profiles (parsing, timing, skipping), GPIO and both generator dialects against their simulators, limits and stop-on-fail, Wait for, the watchdog's hold logic across blocks, event finding and bus attachment, math evaluation and resampling, reports (HTML, and PDF when WeasyPrint is present), setups, and the Remote API end to end over HTTP. Saleae tests cover both binary-format versions (including multi-chunk files), the edge measurements and lane envelope, resource parsing, and timed, triggered, manual and aborted captures, decoding and save/export through the simulator and the real worker thread. `test_instruments_generic.py` loads every definition, round-trips every setting and option through its simulator, checks multi-channel expansion, units that follow a function, `query_from`, the scope dialects' decoding (Vpp and frequency for all four), the model names and auto-detect, the sequencer with SCPI and scope tabs, two units of one model, and two PPK2s aligning. `test_unattended.py` covers watchdog HW plans and re-arm, only-around-events sessions, the crash marker, safety settings and back-off, the results database and verdicts, resuming and `extra` in `run_plan`, and in an offscreen window: a limit pushed into a supply, outputs off on quit, outputs off after a crash, and a production run with the serial-format check. `test_robustness.py` covers the error handling: crash-log rate limiting and rotation, damaged `last-session.json` / `config.toml` / watchdog / math / sequence / setup data, math expressions that fail after evaluating, a session file whose last write fails, foreign session files, malformed Remote API requests, and, in an offscreen Qt window, an exception in a slot not aborting, a GPIO tab's lost link offering ⟳ Reconnect and clearing it on recovery, and Esc still reaching every instrument when one fails.
 
 ## Adding an instrument
+
+**A SCPI instrument that only needs "set this, read that"** (a meter, a load, a supply, a switch box, a temperature chamber): write a [definition file](#instrument-definition-files-toml). No code, and its tab, simulator, sequencer and watchdog support come with it. To have it built in, add the file to `instruments/scpi_defs/`; `tests/test_instruments_generic.py` runs every built-in definition against its simulator.
+
+**Anything else** (streaming data, waveforms, a binary protocol) needs a driver:
 
 1. **Driver:** write a class in `instruments/` with `kind = "supply"` or `"dmm"` (or a new kind with its own panel, like `"fgen"` and `"gpio"`), plus `family`, `identify()`, `poll(t, cfg)`, `errors()`, and the setters the panel calls. Return the shared data types from `base.py`. A streaming device brings its own panel and data types instead; see the PPK2 (`kind = "ppk2"`, a `cfg` property for the worker to re-read, and `close()` to stop the stream).
 2. **Capabilities:** fill in `SupplyCaps`. The supply panel hides what's unsupported (DVM, digitizer, waveform, resistance) and handles `setpoint_readback=False`.

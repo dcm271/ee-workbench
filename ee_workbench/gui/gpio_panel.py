@@ -222,7 +222,7 @@ class GpioPanel(PanelBase):
         self.name_edit.setText(str(s.get("name", "")))
         self.used_only.setChecked(bool(s.get("used_only", False)))
 
-    def display_name(self) -> str:
+    def base_name(self) -> str:
         t = self.name_edit.text().strip()
         return f"GPIO · {t}" if t else "GPIO"
 
@@ -269,6 +269,9 @@ class GpioPanel(PanelBase):
         self._refresh_rows()
         self._rebuild_curves()
         self.settings_changed.emit()
+
+    def quantities(self) -> list[str]:
+        return [f"gpio{g}" for g in self._used()]
 
     def _used(self) -> list[int]:
         return [g for g in self.lines if self.state.pins.get(g, PinConfig(g)).mode != "off"]

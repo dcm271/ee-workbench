@@ -1,0 +1,96 @@
+# Siglent SDL1000X-series DC electronic loads.
+id = "SDL1020"
+name = "Siglent SDL1020X / SDL1020X-E / SDL1030X / SDL1030X-E electronic load"
+maker = "Siglent"
+type = "load"
+idn = ["SDL1020", "SDL1030"]
+init = ["*CLS"]
+error_query = "SYST:ERR?"
+off = [":SOUR:INP:STAT OFF"]
+
+[[reading]]
+name = "voltage"
+label = "Voltage"
+query = "MEAS:VOLT:DC?"
+unit = "V"
+sim = "12.0 + noise(5e-4)"
+
+[[reading]]
+name = "current"
+label = "Current"
+query = "MEAS:CURR:DC?"
+unit = "A"
+sim = "({'CC': cc, 'CR': 12.0 / max(cr, 1e-3), 'CP': cp / 12.0, 'CV': 0.5}.get(function, 0) if input else 0) + noise(2e-5)"
+
+[[reading]]
+name = "power"
+label = "Power"
+query = "MEAS:POW:DC?"
+unit = "W"
+sim = "(12.0 * {'CC': cc, 'CR': 12.0 / max(cr, 1e-3), 'CP': cp / 12.0, 'CV': 0.5}.get(function, 0) if input else 0) + noise(1e-4)"
+
+[[setting]]
+name = "function"
+label = "Mode"
+kind = "choice"
+query = ":SOUR:FUNC?"
+options = [
+  { label = "CC", set = ":SOUR:FUNC CURRent", reply = '^CURR' },
+  { label = "CV", set = ":SOUR:FUNC VOLTage", reply = '^VOLT' },
+  { label = "CR", set = ":SOUR:FUNC RESistance", reply = '^RES' },
+  { label = "CP", set = ":SOUR:FUNC POWer", reply = '^POW' },
+]
+sim = "CC"
+
+[[setting]]
+name = "cc"
+label = "CC current"
+kind = "number"
+unit = "A"
+min = 0
+max = 30
+set = ":SOUR:CURR:LEV:IMM {value}"
+query = ":SOUR:CURR:LEV:IMM?"
+sim = "0.1"
+
+[[setting]]
+name = "cv"
+label = "CV voltage"
+kind = "number"
+unit = "V"
+min = 0
+max = 150
+set = ":SOUR:VOLT:LEV:IMM {value}"
+query = ":SOUR:VOLT:LEV:IMM?"
+sim = "1.0"
+
+[[setting]]
+name = "cr"
+label = "CR resistance"
+kind = "number"
+unit = "Ω"
+min = 0.03
+max = 10000
+set = ":SOUR:RES:LEV:IMM {value}"
+query = ":SOUR:RES:LEV:IMM?"
+sim = "100"
+
+[[setting]]
+name = "cp"
+label = "CP power"
+kind = "number"
+unit = "W"
+min = 0
+max = 300
+set = ":SOUR:POW:LEV:IMM {value}"
+query = ":SOUR:POW:LEV:IMM?"
+sim = "1"
+
+[[setting]]
+name = "input"
+label = "Input"
+kind = "bool"
+set = ":SOUR:INP:STAT {on_off}"
+query = ":SOUR:INP:STAT?"
+output = true
+sim = "0"

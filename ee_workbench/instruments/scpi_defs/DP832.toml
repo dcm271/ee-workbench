@@ -1,0 +1,94 @@
+# Rigol DP800-series programmable supplies (DP832 / DP832A / DP831 / DP821 / DP811).
+id = "DP832"
+name = "Rigol DP832 / DP832A / DP831 / DP821 power supply (3 outputs)"
+maker = "Rigol"
+type = "supply"
+idn = ["DP832", "DP831", "DP821", "DP811"]
+channels = 3
+init = ["*CLS"]
+error_query = ":SYST:ERR?"
+off = [":OUTP CH{ch},OFF"]
+notes = "On a 2-output DP821 or 1-output DP811, the CH3 / CH2 rows report errors: use the console, or copy this file with channels set to match."
+
+[[reading]]
+name = "voltage"
+label = "Voltage"
+query = ":MEAS:VOLT? CH{ch}"
+unit = "V"
+sim = "(vset{ch} if out{ch} else 0) + noise(2e-4)"
+
+[[reading]]
+name = "current"
+label = "Current"
+query = ":MEAS:CURR? CH{ch}"
+unit = "A"
+sim = "(min(vset{ch} / 100.0, iset{ch}) if out{ch} else 0) + noise(1e-5)"
+
+[[setting]]
+name = "vset"
+label = "Voltage"
+kind = "number"
+unit = "V"
+min = 0
+max = 32
+set = ":SOUR{ch}:VOLT {value}"
+query = ":SOUR{ch}:VOLT?"
+sim = "3.3"
+
+[[setting]]
+name = "iset"
+label = "Current limit"
+kind = "number"
+unit = "A"
+min = 0
+max = 3.2
+set = ":SOUR{ch}:CURR {value}"
+query = ":SOUR{ch}:CURR?"
+sim = "1.0"
+
+[[setting]]
+name = "ovp"
+label = "OVP level"
+kind = "number"
+unit = "V"
+min = 0.01
+max = 33
+set = ":SOUR{ch}:VOLT:PROT {value}"
+query = ":SOUR{ch}:VOLT:PROT?"
+sim = "33"
+
+[[setting]]
+name = "ovp_on"
+label = "OVP on"
+kind = "bool"
+set = ":SOUR{ch}:VOLT:PROT:STAT {on_off}"
+query = ":SOUR{ch}:VOLT:PROT:STAT?"
+sim = "0"
+
+[[setting]]
+name = "ocp"
+label = "OCP level"
+kind = "number"
+unit = "A"
+min = 0.001
+max = 3.3
+set = ":SOUR{ch}:CURR:PROT {value}"
+query = ":SOUR{ch}:CURR:PROT?"
+sim = "3.3"
+
+[[setting]]
+name = "ocp_on"
+label = "OCP on"
+kind = "bool"
+set = ":SOUR{ch}:CURR:PROT:STAT {on_off}"
+query = ":SOUR{ch}:CURR:PROT:STAT?"
+sim = "0"
+
+[[setting]]
+name = "out"
+label = "Output"
+kind = "bool"
+set = ":OUTP CH{ch},{on_off}"
+query = ":OUTP? CH{ch}"
+output = true
+sim = "0"

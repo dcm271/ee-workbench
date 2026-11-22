@@ -2,6 +2,7 @@
 toolbar, CSV recording and the readings-per-second counter."""
 from __future__ import annotations
 
+import re
 import time
 
 from PyQt6.QtCore import QTimer, pyqtSignal
@@ -29,13 +30,14 @@ def open_panels() -> list:
 
 
 class PanelBase(QWidget):
-    KIND = ""                          # supply | ppk2 | dmm | logic | gpio | fgen
+    KIND = ""                          # supply | ppk2 | dmm | logic | gpio | fgen | scpi | scope
     title_changed = pyqtSignal(str)
     settings_changed = pyqtSignal()    # something worth remembering for next start
     message = pyqtSignal(str)
     failed = pyqtSignal(str)
     link_lost = pyqtSignal(str)        # polling stopped after an error (unplugged?)
     link_ok = pyqtSignal()             # readings arrive again after `link_lost`
+    reopen_as = pyqtSignal(str)        # auto-detect found another kind of instrument: model key
 
     def __init__(self, resource: str, model: str, baud: int):
         super().__init__()
@@ -58,6 +60,10 @@ class PanelBase(QWidget):
         self._x_plot = None                   # the plot whose X range scrolls (others link to it)
         self._steady: list[SteadyY] = []
         self._lost = False
+        # Several of one model can be open: the first is plain "PPK2", then
+        # "PPK2 #2", … The number is kept with the tab's settings, so rules,
+        # steps and math that name "PPK2 #2" find the same unit next time.
+        self.instance = self._free_instance()
 
         _OPEN.append(self)
         self.worker = InstrumentWorker(resource, model, baud)
@@ -93,12 +99,67 @@ class PanelBase(QWidget):
 
     def restore_settings(self, settings: dict): ...
 
+    # ---- what the sequencer, watchdog and math channels can use ------------------
+    # Fixed per kind for the built-in drivers; a generic SCPI tab or a scope
+    # tab works them out from its definition / channel count.
+    def quantities(self) -> list[str]:
+        from ..signals import QUANTITIES
+        return list(QUANTITIES.get(self.KIND, []))
+
+    def set_names(self) -> list[str]:
+        from ..sequencer import SET_WHAT
+        return list(SET_WHAT.get(self.KIND, []))
+
+    def setting_kinds(self) -> dict:
+        """name -> "choice" for settings whose value is text, not a number."""
+        return {"function": "choice"} if self.KIND == "fgen" else {}
+
+    def measure_names(self) -> list[str]:
+        from ..sequencer import MEASURE_WHAT
+        return list(MEASURE_WHAT.get(self.KIND, []))
+
+    def profile_names(self) -> list[str]:
+        from ..sequencer import PROFILE_WHAT
+        return list(PROFILE_WHAT.get(self.KIND, []))
+
+    # ---- several of one model -----------------------------------------------------
+    def _free_instance(self, want: int | None = None) -> int:
+        used = {p.instance for p in _OPEN if p is not self and p.model == self.model}
+        if want and want not in used:
+            return want
+        n = 1
+        while n in used:
+            n += 1
+        return n
+
+    def claim_instance(self, want):
+        """Take the instance number remembered for this tab, if it is free."""
+        try:
+            want = int(want)
+        except (TypeError, ValueError):
+            return
+        if want >= 1:
+            self.instance = self._free_instance(want)
+
+    def saved_settings(self) -> dict:
+        """session_settings() plus what every tab keeps (its instance number)."""
+        d = dict(self.session_settings())
+        if self.instance > 1:
+            d["instance"] = self.instance
+        return d
+
     def output_off(self):
         """Esc / ALL OUTPUTS OFF (tabs with outputs override this)."""
     def csv_name(self) -> str: return "reading_%Y%m%d_%H%M%S.csv"
 
     # ---- worker callbacks ----------------------------------------------------
     def _on_connected(self, family, caps, state):
+        # Opened as "Auto" but it turned out to be a meter / load / scope: the
+        # main window reopens it with the right kind of tab.
+        key = getattr(caps, "model_key", "")
+        if key and self.model == "auto" and self.KIND == "supply":
+            self.reopen_as.emit(key)
+            return
         self.connected = True
         self.caps = caps
         self.set_enabled(True)
@@ -341,12 +402,30 @@ class PanelBase(QWidget):
             session.add(self, float(row[hdr.index("t_s")]),
                         [v for c, v in zip(hdr, row) if c not in skip])
 
-    def display_name(self) -> str:
-        """How the tab is known in the sequencer and session files."""
-        name = getattr(self, "name_edit", None)
-        text = name.text().strip() if name is not None else ""
+    def base_name(self) -> str:
+        """The tab's name before any instance number (subclasses override)."""
+        text = self.user_name()
         model = getattr(self.caps, "model", "") or self.model
         return f"{model} · {text}" if text else f"{model} ({self.resource})"
+
+    def user_name(self) -> str:
+        name = getattr(self, "name_edit", None)
+        return name.text().strip() if name is not None else ""
+
+    def display_name(self) -> str:
+        """How the tab is known in the sequencer, watchdog, math and session
+        files. A second unit of a model gets " #2" unless the user named it
+        (and the name isn't the same as another tab's)."""
+        name = self.base_name()
+        if self.instance <= 1:
+            return name
+        if self.user_name():
+            from ..signals import slug
+            mine = slug(name)
+            if not any(p is not self and slug(p.base_name()) == mine for p in _OPEN):
+                return name
+        m = re.match(r"^(.*?)(\s*\([^()]*\))?$", name)
+        return f"{m.group(1)} #{self.instance}{m.group(2) or ''}"
 
     def shutdown(self):
         """Closing the tab: stop everything that runs on its behalf. Each part
