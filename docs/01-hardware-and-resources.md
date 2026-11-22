@@ -17,6 +17,7 @@ This guide lists the hardware EE Workbench supports, what each instrument can do
 | Agilent 66311B / 66321B | Same family without DVM | GPIB / RS-232 | Supported by the same driver; DVM hidden if absent |
 | **HP 6632A** System DC Power Supply (also 6633A, 6634A) | Second supply, 20 V / 5 A | GPIB only | Supported. Written from the manual and tested on the simulator |
 | **HP 3456A** 6½-digit DMM | Precision voltage / resistance | GPIB only | Supported. Written from the manual and tested on the simulator |
+| **FNIRSI DPS-150** USB-C bench supply | 30 V / 5.1 A / 150 W programmable supply | USB (ID `2e3c:5740`, serial) | Supported. Written from the community-documented protocol and tested on the simulator; not yet tried on real hardware |
 | **Nordic Power Profiler Kit II** (PPK2) | 100 kS/s current profiler and 0.8–5 V source | USB (ID `1915:c00a`, serial) | Supported. Tested on real hardware (HW 8682) |
 | **Saleae Logic 8 / Logic Pro 8 / Logic Pro 16** | Logic analyzer with analog inputs | USB, through the **Logic 2** software (automation API) | Supported. Written from Saleae's API and file-format docs and tested on the simulator; not yet tried on real hardware |
 | sigrok-supported logic analyzers (fx2lafw clones, DSLogic, …) | Logic analyzer | USB, through `sigrok-cli` | Supported, including on the Raspberry Pi. Tested on the simulator |
@@ -47,6 +48,7 @@ Every instrument below has a simulator, so its tab, the sequencer, the watchdog 
 | Agilent 66321D, 66321B, 66311B | `66321D` | yes | Tested (66321D, fw A.03.01) | `SIM::66321D` |
 | HP 6632A, 6633A, 6634A | `6632A` | yes (`ID?`) | Simulator | `SIM::6632A` |
 | HP 3456A | `3456A` | **no**: choose by hand (it doesn't answer `*IDN?`) | Simulator | `SIM::3456A` |
+| FNIRSI DPS-150 | `DPS150` | yes (USB ID) | Simulator | `SIM::DPS150` |
 | Nordic PPK2 | `PPK2` | yes (USB ID) | Tested (HW 8682) | `SIM::PPK2` |
 | Saleae Logic 8 / Pro 8 / Pro 16 | `SALEAE` | through Logic 2 | Simulator | `SIM::SALEAE` |
 | sigrok analyzers | `SIGROK` | through `sigrok-cli --scan` | Simulator | `SIM::SIGROK` |
@@ -140,6 +142,22 @@ What the app uses: essentially everything. Setpoints, output on/off, voltage lim
 | 6634A | 0 to 102.38 V | 0.004 to 1.024 A | 0 to 110 V |
 
 These supplies use HP's command language from before SCPI (`VSET`, `ISET`, `VOUT?`, `STS?` …). **They cannot report their setpoints back**, so the app shows the values it last sent and treats them as unknown until you set them. The supply reports its model with `ID?`, so the app's auto-detect works.
+
+### FNIRSI DPS-150
+
+| | |
+|---|---|
+| Output | 0 to 30 V (never above the input voltage minus about 1 V), 0 to 5.1 A, 150 W |
+| Protection | OVP, OCP, OPP, OTP and LVP thresholds; a trip turns the output off |
+| Readback | Setpoints, output V / I / P, CC/CV mode, output state and protection state |
+
+The DPS-150 is a USB serial device with FNIRSI's own binary protocol (not SCPI). The app lists it as `DPS150::/dev/serial/by-id/…` when it is plugged in; from the command line or `config.toml` use `DPS150@/dev/ttyACM0` or `resource = "DPS150::/dev/ttyACM0"`. You need to be in the `dialout` group, and FNIRSI's PC software must be closed. While the app is connected, the supply is in remote mode; closing the tab hands control back to the front panel.
+
+- **OCP** works differently from the 663xx. The DPS-150 has an OCP *threshold*. Ticking **OCP** sets that threshold to the current limit (and keeps it there as you change the limit), so the output trips off instead of regulating in CC. Unticking it moves the threshold above 5.1 A.
+- **Clear trip** turns the output off. The supply has no clear command: fix the cause, then turn the output on again.
+- **Safe state** (the reset button) turns the output off, sets 0 V and opens the protection thresholds up. There is no `*RST`.
+- The **Console** tab takes hex frames: `START CMD [DATA…]`, and the app adds the length and checksum. For example `a1 de 00` asks for the model name and `b1 d6 0c` sets the brightness to 12. A line starting with `f1` is sent exactly as typed.
+- FNIRSI doesn't publish the protocol. The driver follows [cho45/fnirsi-dps-150](https://github.com/cho45/fnirsi-dps-150) and [Philipp-IoT/fnirsi_protocol](https://philipp-iot.github.io/fnirsi_protocol/).
 
 ### HP 3456A digital multimeter
 

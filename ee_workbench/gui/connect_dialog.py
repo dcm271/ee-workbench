@@ -13,7 +13,7 @@ from .theme import set_role
 from .widgets import C_MUTED
 
 SHORT_MODELS = {"auto": "Auto-\ndetect", "663xx": "66321D\n66311B/21B",
-                "6632A": "6632A\n33A/34A", "3456A": "3456A\nDMM", "PPK2": "PPK2\nNordic",
+                "6632A": "6632A\n33A/34A", "DPS150": "DPS-150\nFNIRSI", "3456A": "3456A\nDMM", "PPK2": "PPK2\nNordic",
                 "SALEAE": "Saleae\nLogic", "SIGROK": "sigrok\nlogic",
                 "FGEN": "Function\ngenerator", "GPIO": "Pi GPIO\nheader"}
 

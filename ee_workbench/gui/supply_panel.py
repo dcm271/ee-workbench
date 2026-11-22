@@ -68,7 +68,10 @@ class SupplyPanel(PanelBase):
         root = QHBoxLayout(self)
         root.setContentsMargins(0, 4, 0, 0)
         console = self.build_console_tab(
-            "Command, e.g.  MEAS:CURR:ACDC?   (6632A: VOUT?  STS?)")
+            "Hex frame: START CMD [DATA], e.g.  a1 de 00  (model name)"
+            if self.model == "DPS150" else
+            "Command, e.g.  MEAS:CURR:ACDC?   (6632A: VOUT?  STS?)",
+            read_button=self.model == "DPS150")
         self.capture_tab = CaptureTab(self)
         self.tests_tab = TestsTab(self)
         self.system_tab = SystemTab(self)

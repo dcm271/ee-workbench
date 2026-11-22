@@ -32,6 +32,10 @@ def open_sim(resource: str):
         from .slogic import SimLogic2
 
         return SimLogic2()
+    if "DPS150" in name:
+        from .sdps150 import SimDPS150
+
+        return SimDPS150()
     if "PPK2" in name:
         from .sppk2 import SimPPK2
 

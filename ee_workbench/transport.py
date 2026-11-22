@@ -22,7 +22,7 @@ class TransportError(Exception):
 
 
 SIM_RESOURCES = ["SIM::66321D", "SIM::6632A", "SIM::3456A", "SIM::PPK2", "SIM::SALEAE",
-                 "SIM::SIGROK", "SIM::FGEN", "SIM::GPIO"]
+                 "SIM::SIGROK", "SIM::FGEN", "SIM::GPIO", "SIM::DPS150"]
 
 
 def _visa_library() -> str:
@@ -138,6 +138,9 @@ def list_resources(scan: bool = True) -> list[str]:
         found.append("GPIB0::5::INSTR")
     ppk_data, ppk_all = find_ppk2()
     found += [f"PPK2::{dev}" for dev in ppk_data]
+    dps = find_dps150()
+    found += [f"DPS150::{dev}" for dev in dps]
+    taken = set(ppk_all) | {os.path.realpath(d) for d in dps}
     from .instruments.saleae import find_logic2
 
     found += find_logic2()          # analyzers a running Logic 2 can see
@@ -148,7 +151,7 @@ def list_resources(scan: bool = True) -> list[str]:
 
     found += find_gpio()            # the Raspberry Pi's 40-pin header, on a Pi
     for dev in sorted(glob.glob("/dev/ttyUSB*") + glob.glob("/dev/ttyACM*")):
-        if dev not in ppk_all:
+        if dev not in taken:
             found.append(f"ASRL{dev}::INSTR")
     return found + SIM_RESOURCES
 
@@ -174,6 +177,18 @@ def find_ppk2() -> tuple[list[str], set[str]]:
     return data, {dev for ports in by_unit.values() for _, dev in ports}
 
 
+def find_dps150() -> list[str]:
+    """FNIRSI DPS-150 supplies (their AT32 virtual COM port's VID:PID)."""
+    try:
+        from serial.tools import list_ports
+    except ImportError:
+        return []
+    from .instruments.dps150 import USB_PID, USB_VID
+
+    return sorted(_stable_path(p.device) for p in list_ports.comports()
+                  if p.vid == USB_VID and p.pid == USB_PID)
+
+
 def _stable_path(dev: str) -> str:
     """/dev/serial/by-id/... for `dev` if udev made one: ttyACM numbers change
     when things are replugged, the by-id name (which has the serial number)
@@ -197,6 +212,9 @@ def describe(resource: str) -> str:
         path = resource[6:]
         m = re.search(r"PPK2_([0-9A-F]+)", path, re.I)
         return f"PPK2 {m.group(1)[-6:]}" if m else path.removeprefix("/dev/")
+    if resource.upper().startswith("DPS150::"):
+        path = os.path.realpath(resource[8:])
+        return f"DPS-150 {path.removeprefix('/dev/')}"
     if resource.upper().startswith("SALEAE::"):
         return f"Saleae {resource[8:]}".strip()
     if resource.upper().startswith("SIGROK::"):
@@ -210,10 +228,13 @@ def describe(resource: str) -> str:
 
 
 def serial_path(resource: str) -> str:
-    """'PPK2::/dev/ttyACM0' or 'ASRL/dev/ttyACM0::INSTR' -> '/dev/ttyACM0'."""
+    """'PPK2::/dev/ttyACM0', 'DPS150::/dev/ttyACM0' or 'ASRL/dev/ttyACM0::INSTR'
+    -> '/dev/ttyACM0'."""
     r = resource.strip()
     if r.upper().startswith("PPK2::"):
         return r[6:]
+    if r.upper().startswith("DPS150::"):
+        return r[8:]
     m = re.match(r"ASRL(.+?)(::INSTR)?$", r, re.I)
     return m.group(1) if m else r
 
@@ -225,6 +246,10 @@ def open_transport(resource: str, baud: int = 9600, model: str = "auto"):
         return sim.open_sim(resource)
     if resource.upper().startswith("PPK2::") or model == "PPK2":
         return SerialStream(serial_path(resource))
+    if resource.upper().startswith("DPS150::") or model == "DPS150":
+        from .instruments.dps150 import BAUD
+
+        return SerialStream(serial_path(resource), baud=BAUD)
     if resource.upper().startswith("GPIO::") or model == "GPIO":
         from .instruments.gpio import GpioLink, resource_chip
 
@@ -251,7 +276,7 @@ class SerialStream:
 
     MAX_BUFFER = 16 * 1024 * 1024        # ~40 s of PPK2 data if nobody reads
 
-    def __init__(self, path: str):
+    def __init__(self, path: str, baud: int = 9600):
         try:
             import serial
         except ImportError as e:
@@ -259,14 +284,14 @@ class SerialStream:
         self.resource = path
         try:
             # exclusive: a second program reading the same stream would steal samples
-            self.port = serial.Serial(path, timeout=0.05, write_timeout=2, exclusive=True)
+            self.port = serial.Serial(path, baudrate=baud, timeout=0.05, write_timeout=2, exclusive=True)
         except serial.SerialException as e:
             hint = ""
             if "ermission" in str(e):
                 hint = (" You need to be in the 'dialout' group: "
                         "sudo usermod -aG dialout $USER, then log out and back in.")
             elif "busy" in str(e).lower() or "lock" in str(e).lower():
-                hint = " Another program has it open (nRF Connect Power Profiler?)."
+                hint = " Another program has it open (nRF Connect Power Profiler, FNIRSI's PC app?)."
             raise TransportError(f"Could not open {path}: {e}.{hint}") from e
         self.timeout_s = 2.0
         self.overflow_bytes = 0

@@ -257,6 +257,9 @@ class InstrumentWorker(QThread):
 
     def request_raw(self, cmd: str, read: bool):
         def job(drv):
+            if hasattr(drv, "raw"):         # binary protocols parse the console line
+                self.reply.emit(cmd, drv.raw(cmd, read))
+                return
             if read:
                 drv.t.write(cmd)
                 self.reply.emit(cmd, drv.t.read())

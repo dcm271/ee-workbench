@@ -1047,9 +1047,12 @@ def parse_target(s: str) -> tuple[str, str]:
         model, res = s.split("@", 1)
         model = {"66321D": "663xx", "66321B": "663xx", "66311B": "663xx",
                  "6633A": "6632A", "6634A": "6632A", "ppk2": "PPK2", "fgen": "FGEN",
-                 "gpio": "GPIO"}.get(model, model)
+                 "gpio": "GPIO", "DPS-150": "DPS150", "dps150": "DPS150",
+                 "dps-150": "DPS150"}.get(model, model)
         if model == "PPK2" and not res.upper().startswith(("PPK2::", "SIM")):
             res = "PPK2::" + res           # PPK2@/dev/ttyACM0
+        if model == "DPS150" and not res.upper().startswith(("DPS150::", "SIM")):
+            res = "DPS150::" + res         # DPS150@/dev/ttyACM0
         if model.upper() == "SALEAE":
             model = "SALEAE"
             if not res.upper().startswith(("SALEAE::", "SIM")):
@@ -1059,7 +1062,7 @@ def parse_target(s: str) -> tuple[str, str]:
             if not res.upper().startswith(("SIGROK::", "SIM")):
                 res = "SIGROK::" + (res or "fx2lafw")   # SIGROK@fx2lafw
         if model not in ("PPK2", "SALEAE", "SIGROK", "FGEN", "GPIO", "663xx", "6632A",
-                         "3456A", "auto"):
+                         "DPS150", "3456A", "auto"):
             from ..instruments import resolve_model
             model = resolve_model(model)        # 34461A@…, DS1054Z@…, SCPI:DP832@…
         return model, res

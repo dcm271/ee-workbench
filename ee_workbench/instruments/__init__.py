@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from ..transport import TransportTimeout
 from .agilent663xx import Agilent663xx
+from .dps150 import DPS150
 from .fgen import FunctionGenerator, looks_like_fgen
 from .gpio import GpioDriver
 from .hp3456a import HP3456A
@@ -17,6 +18,7 @@ MODELS = {
     "auto": "Auto-detect (asks *IDN?)",
     "663xx": "Agilent 66311B / 66321B / 66321D",
     "6632A": "HP 6632A / 6633A / 6634A",
+    "DPS150": "FNIRSI DPS-150 (USB)",
     "3456A": "HP 3456A DMM",
     "PPK2": "Nordic Power Profiler Kit II",
     "SALEAE": "Saleae Logic 8 / Pro 8 / Pro 16 (via Logic 2)",
@@ -55,14 +57,14 @@ def resolve_model(name: str) -> str:
         return d.model_key
     return s
 
-_CLASSES = {"663xx": Agilent663xx, "6632A": HP6632A, "3456A": HP3456A, "PPK2": PPK2,
+_CLASSES = {"663xx": Agilent663xx, "6632A": HP6632A, "DPS150": DPS150, "3456A": HP3456A, "PPK2": PPK2,
             "SALEAE": SaleaeLogic, "SIGROK": SigrokLogic, "FGEN": FunctionGenerator,
             "GPIO": GpioDriver}
 
 SIM_MODELS = {"SIM::66321D": "663xx", "SIM::6632A": "6632A", "SIM::3456A": "3456A",
               "SIM::PPK2": "PPK2", "SIM::SALEAE": "SALEAE",
               "SIM::SIGROK": "SIGROK", "SIM::FGEN": "FGEN", "SIM::SDG": "FGEN",
-              "SIM::GPIO": "GPIO"}
+              "SIM::GPIO": "GPIO", "SIM::DPS150": "DPS150"}
 
 
 def detect(transport) -> str:
@@ -105,6 +107,8 @@ def model_for(resource: str, model: str = "auto") -> str:
         return "PPK2"
     if resource.upper().startswith("SALEAE::"):
         return "SALEAE"
+    if resource.upper().startswith("DPS150::"):
+        return "DPS150"
     if resource.upper().startswith("SIGROK::"):
         return "SIGROK"
     if resource.upper().startswith("GPIO::"):

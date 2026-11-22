@@ -17,12 +17,13 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 OPEN_MODES = ("last", "list", "scan", "none")
-MODEL_KEYS = ("auto", "663xx", "6632A", "3456A", "PPK2", "SALEAE", "SIGROK", "FGEN", "GPIO")
+MODEL_KEYS = ("auto", "663xx", "6632A", "DPS150", "3456A", "PPK2", "SALEAE", "SIGROK", "FGEN", "GPIO")
 MODEL_ALIASES = {"66321D": "663xx", "66321B": "663xx", "66311B": "663xx",
                  "6633A": "6632A", "6634A": "6632A", "ppk2": "PPK2",
                  "saleae": "SALEAE", "Saleae": "SALEAE",
                  "sigrok": "SIGROK", "fgen": "FGEN", "gpio": "GPIO", "SDG": "FGEN",
-                 "33500": "FGEN", "DG1000Z": "FGEN"}
+                 "33500": "FGEN", "DG1000Z": "FGEN",
+                 "DPS-150": "DPS150", "dps150": "DPS150", "dps-150": "DPS150"}
 
 
 def config_dir() -> Path:
@@ -54,9 +55,10 @@ api_port = 8765
 
 # Instruments for open = "list" (also tells "scan" which model is where).
 # model: "auto" (supplies and function generators identify themselves), "663xx",
-# "6632A", "3456A", "PPK2", "SALEAE", "SIGROK", "FGEN" or "GPIO".
+# "6632A", "DPS150", "3456A", "PPK2", "SALEAE", "SIGROK", "FGEN" or "GPIO".
 # The 3456A cannot identify itself, so always give its model.
 # A Nordic PPK2 is a serial port: resource = "PPK2::/dev/ttyACM0".
+# So is a FNIRSI DPS-150 supply: resource = "DPS150::/dev/ttyACM0".
 # A Saleae logic analyzer goes through a running Logic 2 (automation server on):
 # resource = "SALEAE::<device id>" (or "SALEAE::" for the first one it sees).
 # Anything sigrok supports: resource = "SIGROK::fx2lafw" (driver[:conn=bus.addr]).
