@@ -371,6 +371,16 @@ The right side has the **Trend**: one plot per reading, with a curve per output,
 
 **In the sequencer and scripts** the names are those of the definition: `vset1`, `iset2`, `out3`, `function`, `cc`, `input` for **Set**; `voltage1`, `current2`, `value`, `power` for **Measure**. The step editor's lists show exactly which ones each instrument has.
 
+## Serial console panel (UART)
+
+Open `UART::/dev/ttyUSB0@115200` (or choose **Serial console** in **＋ Add instrument**). The **Console** shows what the DUT prints, with the app's time in front, the same clock as every other instrument's readings. Type in the bottom line and press Enter to send; **↑** brings back earlier lines. **Line end** is what is added to each line. **Pulse DTR** resets most boards (it is a reset line on Arduinos).
+
+**Values in the text.** Each row turns printed text into a signal: a name, a [regular expression](https://docs.python.org/3/library/re.html#regular-expression-syntax) and a unit. The first `(group)` is the value (`vbat=([\d.]+)`; hex `0x…` works). A pattern without a group is 1 each time a line matches: name `panic`, pattern `PANIC|Guru Meditation`, and a watchdog rule `panic > 0.5` switches the DUT off. Values appear in the trend, the watchdog, math, **Measure**, CSV files and sessions.
+
+Recording (CSV or a session) keeps every line. The session viewer lists them under **Serial**; click a line to go to that moment in the current and voltage traces.
+
+In the [sequencer](#sequencer): **Send** a line, then **Wait for** a pattern. In a script: `bench.send("DUT", "adc")`, `bench.wait_text("DUT", r"adc=(\d+)", timeout=2)`.
+
 ## Oscilloscope panel
 
 ![Oscilloscope](images/scope.png)
@@ -460,6 +470,8 @@ The search ends events with 10 % hysteresis, so a burst that dips just under the
 | **Capture** | logic analyzer, scope | | (uses that tab's settings and decoders); the column is the number of decoded rows (a scope: samples fetched) |
 | **Profile** | supply, PPK2, function generator | what to vary: `voltage`, `current`; generator `frequency` … | a [profile](#profiles-varying-a-setpoint-over-time), e.g. `ramp 3.0..3.6 for=10`. The step ends when the profile does. |
 | **Wait for** | GPIO | an input pin | the level: `1` / `0` / `high` / `low`, optionally `timeout=10` (default 60 s). Fails if the pin doesn't get there in time. With a **Results column**, records how long it took. |
+| **Wait for** | serial console | | a regular expression, optionally `timeout=2` (default 10 s), e.g. `adc=(\d+) timeout=2`. Looks at what came in since the last **Send**. The **Results column** gets the number (or text) in the parentheses; **Min** / **Max** judge it. No answer in time fails the pass and the sequence goes on. |
+| **Send** | serial console, SCPI tab | | a line of text (a SCPI command on a SCPI tab); `{x}`, `{i}` and, in a production test, `{serial}` are filled in |
 | **Note** | | | text; `{x}`, `{i}` and, in a [production test](#production-test), `{serial}`, `{product}` and `{operator}` are filled in. It goes into the session being recorded. |
 
 **Run once**, **Repeat** N times, or **Sweep x** from / to / step. Values can be expressions in `x` (the sweep value), `i` (the pass, from 0), `n` and math functions, e.g. `x`, `x / 2`, `3.3 + 0.1 * i`, `10 ** x` (a log sweep: x from 1 to 5 is 10 Hz to 100 kHz). Each pass adds one row to **Results**: the measured values (named by **Results column**, or automatically). Plot any column against another, and **Save CSV…**.
@@ -593,6 +605,42 @@ A **report** is one page with everything about a test, as **HTML** (a single fil
 
 **Open it** opens the saved report in your browser. Plots keep their spikes (each is drawn from a min/max envelope).
 
+## Bode plot
+
+**Tools ▾ → Bode plot…** measures gain and phase against frequency with a [function generator](#function-generator-panel) and an [oscilloscope](#oscilloscope-panel), both open as tabs. Put the generator on the circuit's input, and the scope's two channels on its input and output.
+
+At each frequency the generator is set, the scope's time base follows, and a sine is fitted to both traces, so noise and distortion matter little. With **Follow the signal** ticked, V/div and the offset follow too. The scope's settings are changed. The line above the plots gives the peak, −3 dB points, unity-gain frequency, and phase and gain margins. The phase margin shown is 180° + phase, for a loop gain without the inversion in it; if your measurement already contains it (injecting into a feedback loop, output over input), the margin is the phase itself, which is shown too.
+
+**Use as reference**: sweep once with both probes on the input and press it; later sweeps are divided by it, which takes out probe and cable differences. A point where the output is distorted, or couldn't be brought on screen, says so in its note (in the CSV).
+
+## Regulator test
+
+**Tools ▾ → Regulator test…** sweeps input voltage × load current with a supply and an electronic load. Values are lists (`5, 9, 12`), ranges (`4.5 … 16 step 0.5`) or a number of points (`0..2 x 11`). At 0 A the load is off.
+
+The load is off whenever the input changes. An output above **Stop above** switches everything off at once; an output below half its nominal value skips the higher loads at that input. However the test ends, the load goes off, then the supply.
+
+For efficiency, voltage drop in the leads counts: use remote sense on both instruments, or choose meters at the board's terminals. **Limits** give PASS / FAIL; a point that couldn't be measured properly (current limit, output low, more power out than in) never passes. **Report…** has the curves, regulation tables and every point.
+
+## Battery tester
+
+**Tools ▾ → Battery tester…** charges, rests and discharges a battery, one or many times, and gives capacity, energy, coulombic efficiency and internal resistance per cycle. Leave the charger or the load out to do only the other.
+
+- **Load**: an electronic load (constant current), or a 66321D / 66321B, which sinks. Its sink current isn't programmable (2.8 A at 0 V, falling to 1.2 A at 15 V), so it is trimmed with the output voltage after each reading; expect some seconds until the current is right. The same 66321D can be the charger as well. This has been checked against a simulated battery only: try it first with one that can't be hurt, and watch it.
+- **Resistance** is the voltage step when the load goes on (*R start*) and off (*R end*), read **Resistance after** seconds later.
+- A phase ends at its voltage or current, or at **Phase ends at / after**. Over-temperature, over-voltage, no charge current or a reversed battery stop the test. Everything goes off at the end, on **Stop**, **Esc** and any error.
+
+> **Warning.** These limits are software, and a computer can stop. A lithium battery needs its own protection circuit, a fuse, a surface that can't burn, and someone nearby. A load with its own cut-off (PX-100) has that set as well. Check that your supply isolates its output when off; one that doesn't drains the battery while it rests.
+
+## Calibration
+
+**Tools ▾ → Calibration…** keeps when each instrument was calibrated and when it is due. **Add open instruments**, then **New calibration…** for each: date, interval, who, certificate. Earlier ones stay in its history. An instrument is recognised by its serial number, or by its resource when it reports none. Sequence, session, regulator, battery and Bode reports then state each instrument's status.
+
+**Check against a reference** reads one instrument beside a better one, at the levels a supply gives or at one point as it is. Connect voltmeters in parallel, ammeters in series. The reference is read before and after, so slow drift cancels. **Keep in log** stores the result with the instrument; it doesn't change its calibration date. This is a record and a cross-check, not a calibration.
+
+## Identify port
+
+When you don't know what is on a USB serial port, choose it and press **Identify…** in the toolbar (**Identify port…** in **＋ Add instrument**). The app listens first, then asks the ID or measurement question of each protocol it knows. It never sets anything, and only touches the port you chose. Don't use it on a port whose device could act on unexpected text (a DUT's command console, a 3D printer).
+
 ## Production test
 
 ![Production test](images/production.png)
@@ -647,7 +695,7 @@ On a touch screen the window fills the screen, and the banner is readable from a
 
 **Outputs**
 
-- **Switch all outputs off when EE Workbench quits.** Closing the window (or a Ctrl+C, logout or `kill`) switches every output off, as **Esc** does, before releasing the instruments. Normally closing leaves outputs as they are, so a long-running DUT keeps its power while you restart the app.
+- **Switch all outputs off when OtterBench quits.** Closing the window (or a Ctrl+C, logout or `kill`) switches every output off, as **Esc** does, before releasing the instruments. Normally closing leaves outputs as they are, so a long-running DUT keeps its power while you restart the app.
 - **After a crash, switch off the outputs of every instrument that was open.** While it runs, the app keeps a list of its open instruments in `running.json`; a normal quit removes it. If the next start finds it (a crash, a power cut, `kill -9`), it reopens those instruments and switches their outputs off as soon as each one answers, then says so in the status bar and the session. With `./run.sh --restart-on-crash` this happens a few seconds after the crash; the [In HW](#limits-in-the-instrument-in-hw) watchdog limits protect the DUT before that.
 
 **Heartbeat pin**
@@ -826,9 +874,11 @@ Wire GPIO16 to the DUT's reset (through a transistor if the DUT isn't 3.3 V), GP
 
 ### Regulator efficiency
 
-Power the regulator's input from the 6632A (named "in") and load its output from the 66321D in CC sink or with a resistor, measuring with the 66321D (named "out"). **Math channels**: `eff = _66321d_out.power / _6632a_in.power * 100` (unit %). In the sequencer, sweep the load (*Set out current x*) and *Measure* both powers; or record a session and use the viewer's cursors on the math trace.
+With a supply and an electronic load, use the [Regulator test](#regulator-test). By hand: power the regulator's input from the 6632A (named "in") and load its output with an electronic load or a resistor, measuring with the 66321D (named "out"). **Math channels**: `eff = _66321d_out.power / _6632a_in.power * 100` (unit %). In the sequencer, sweep the load (*Set out current x*) and *Measure* both powers; or record a session and use the viewer's cursors on the math trace.
 
 ### Frequency response with the function generator and DMM
+
+With a scope, use the [Bode plot](#bode-plot), which gives phase too.
 
 1. Generator on the circuit's input (sine, the amplitude you want), DMM on its output in **ACV**.
 2. Sequencer: **Sweep x** from `1` to `5` step `0.1`; *Set FGEN frequency* `10 ** x`; *Wait 1*; *Measure 3456A value* with column `Vout`.
@@ -868,13 +918,13 @@ Switch on **Tools ▾ → Remote API**, then in the notebook `from ee_workbench.
 
 ## Simulators
 
-Open the resources `SIM::66321D`, `SIM::6632A`, `SIM::3456A`, `SIM::PPK2`, `SIM::SALEAE`, `SIM::SIGROK`, `SIM::FGEN`, `SIM::SDG` and `SIM::GPIO` to try every feature without hardware. The simulated 66321D drives a phone-like load drawing short current bursts. The 6632A drives a 10 Ω resistor. The 3456A reads a slightly drifting 5 V rail, about 1 kΩ, or 120 mV AC. The PPK2 powers a BLE-style sensor: 3 µA asleep, a 400 µA wake-up every 10 ms, and a 6–9 mA radio event every 100 ms (shown on D0). The Saleae is a Logic Pro 16 that needs no Logic 2: D0 sends `EE Workbench\r\n` at 115200 baud every 2 ms, D1 is 1 kHz at 25 % duty, D2 10 kHz, D3 bursts of eight 1 MHz clocks, A0 a 1 kHz sine and A1 the D1 signal through an RC filter. Its Async Serial decoder works on D0. `SIM::SIGROK` is a 16-channel fx2lafw-style analyzer whose D7 carries the same irregular debug pin as the simulated PPK2's D7, so [alignment](#lining-a-capture-up-with-a-ppk2) can be tried. `SIM::FGEN` is a two-channel Keysight 33522B (SCPI commands); `SIM::SDG` a Siglent SDG2042X (Siglent's commands). `SIM::GPIO` is a Pi header wired like a small test jig: GPIO21 reads what GPIO20 drives, GPIO12 reads GPIO16 inverted, and GPIO26 is a button pressed (low) for 0.2 s every 2 s.
+Open the resources `SIM::66321D`, `SIM::6632A`, `SIM::3456A`, `SIM::PPK2`, `SIM::SALEAE`, `SIM::SIGROK`, `SIM::FGEN`, `SIM::SDG` and `SIM::GPIO` to try every feature without hardware. The simulated 66321D drives a phone-like load drawing short current bursts. The 6632A drives a 10 Ω resistor. The 3456A reads a slightly drifting 5 V rail, about 1 kΩ, or 120 mV AC. The PPK2 powers a BLE-style sensor: 3 µA asleep, a 400 µA wake-up every 10 ms, and a 6–9 mA radio event every 100 ms (shown on D0). The Saleae is a Logic Pro 16 that needs no Logic 2: D0 sends `OtterBench\r\n` at 115200 baud every 2 ms, D1 is 1 kHz at 25 % duty, D2 10 kHz, D3 bursts of eight 1 MHz clocks, A0 a 1 kHz sine and A1 the D1 signal through an RC filter. Its Async Serial decoder works on D0. `SIM::SIGROK` is a 16-channel fx2lafw-style analyzer whose D7 carries the same irregular debug pin as the simulated PPK2's D7, so [alignment](#lining-a-capture-up-with-a-ppk2) can be tried. `SIM::FGEN` is a two-channel Keysight 33522B (SCPI commands); `SIM::SDG` a Siglent SDG2042X (Siglent's commands). `SIM::GPIO` is a Pi header wired like a small test jig: GPIO21 reads what GPIO20 drives, GPIO12 reads GPIO16 inverted, and GPIO26 is a button pressed (low) for 0.2 s every 2 s.
 
 Every [instrument definition](01-hardware-and-resources.md#meters-loads-and-supplies-instrument-definitions) has a simulator under its id: `SIM::34461A`, `SIM::K2000`, `SIM::DMM6500`, `SIM::DM3058`, `SIM::SDM3055`, `SIM::SCPI-DMM` (meters reading a fixed value for each function: 3.3 or 5 V DC, 10–15 mA, 1 kΩ, 1 kHz…), `SIM::DL3021`, `SIM::SDL1020`, `SIM::K2380` (loads on a 5 V source with 50 mΩ behind it), `SIM::DP832`, `SIM::E36312A`, `SIM::SPD3303X`, `SIM::SCPI-SUPPLY` (supplies into 100 Ω loads), and so does any definition of your own. The oscilloscopes: `SIM::SCOPE` (Rigol), `SIM::DSOX` (Keysight), `SIM::TBS` (Tektronix), `SIM::SDS` (Siglent), each with a 1 kHz 0–3.3 V square wave on CH1, a 2 kHz sine on CH2, a triangle on CH3 and DC on CH4, sent in that brand's own format. Add `#2`, `#3` to open several of one: `SIM::PPK2#2` is a second PPK2, whose D7 carries the same debug pin as the first, so [PPK2 alignment](#several-ppk2s-in-step) can be tried.
 
 ## Instruments at start-up
 
-EE Workbench remembers which instruments were open, and reopens them the next time it starts. Panel settings come back too: the 3456A's channel name, function, range, integration and filter/autozero; GPIO pin modes and names; analyzer decoders. The watchdog rules and math channels are kept too (`~/.config/ee-workbench/bench.json`). For several bench arrangements you switch between, use [setups](#setups-the-whole-bench-by-name). **Supply setpoints and outputs are never restored.** They are always read from the supply itself, so starting the app never changes what a supply is doing.
+OtterBench remembers which instruments were open, and reopens them the next time it starts. Panel settings come back too: the 3456A's channel name, function, range, integration and filter/autozero; GPIO pin modes and names; analyzer decoders. The watchdog rules and math channels are kept too (`~/.config/ee-workbench/bench.json`). For several bench arrangements you switch between, use [setups](#setups-the-whole-bench-by-name). **Supply setpoints and outputs are never restored.** They are always read from the supply itself, so starting the app never changes what a supply is doing.
 
 What happens at start-up is set in `~/.config/ee-workbench/config.toml`. The file is created, with comments, the first time the app runs:
 
@@ -916,7 +966,7 @@ Notes:
 
 ## When something goes wrong
 
-EE Workbench is built to keep running, and to keep the bench safe, when something fails.
+OtterBench is built to keep running, and to keep the bench safe, when something fails.
 
 **An instrument stops answering** (switched off, USB cable pulled, a GPIB timeout). Polling pauses instead of filling the log with errors, the tab title gets a **⚠**, and a **⟳ Reconnect** button appears on the tab. Fix the cause (switch it on, plug it back in), then:
 
@@ -927,7 +977,7 @@ GPIO tabs have no Resume button: they retry by themselves every 5 s. As soon as 
 
 **A file can't be written** (a full disk, a read-only folder, a removed USB stick). Saving or exporting shows a warning naming the file. A CSV recording that fails part way stops itself (the **● Record CSV** button comes back up) and says why in the status bar and the tab's console. A session recording that fails stops with a warning; everything up to the last second is in the file.
 
-**An internal error** (a bug in EE Workbench). The app does not close. A window titled *EE Workbench: internal error* says what happened; **Show Details…** has the technical details. Your instruments and their outputs are left as they were, and you can carry on working. The same error is reported at most once a minute, however often it happens. Everything is recorded in `~/.config/ee-workbench/crash.log`; please include that file if you report a problem.
+**An internal error** (a bug in OtterBench). The app does not close. A window titled *OtterBench: internal error* says what happened; **Show Details…** has the technical details. Your instruments and their outputs are left as they were, and you can carry on working. The same error is reported at most once a minute, however often it happens. Everything is recorded in `~/.config/ee-workbench/crash.log`; please include that file if you report a problem.
 
 **The app closes unexpectedly** (a crash inside Qt or a driver library). The stack of every thread is written to `~/.config/ee-workbench/fault.log`. Instrument outputs stay as they were, so check the bench. Start the app again and it reopens the same instruments. To have it restart by itself (an unattended Pi, for example), launch it as `./run.sh --restart-on-crash`: see [Raspberry Pi](05-raspberry-pi.md#start-again-after-a-crash).
 

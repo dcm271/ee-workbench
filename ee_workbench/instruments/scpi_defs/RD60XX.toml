@@ -1,0 +1,116 @@
+# Riden / Ruideng RD60xx: Modbus RTU over the USB port (instruments/adapters.py).
+id = "RD60XX"
+name = "Riden RD6006 / RD6012 / RD6018 / RD6024 / RK6006 supply (USB)"
+maker = "Riden"
+type = "supply"
+protocol = "riden"
+idn = ["Riden,"]
+error_query = ""
+off = ["OUT OFF"]
+poll_ms = 250
+notes = "The supply scales its registers by model (read at connect). Its USB interface must be selected in its menu, with address 1 and 115200 baud (else add @baud to the resource)."
+
+[[reading]]
+name = "voltage"
+label = "Voltage"
+query = "VOUT?"
+unit = "V"
+
+[[reading]]
+name = "current"
+label = "Current"
+query = "IOUT?"
+unit = "A"
+
+[[reading]]
+name = "power"
+label = "Power"
+query = "POUT?"
+unit = "W"
+
+[[reading]]
+name = "vin"
+label = "Input voltage"
+query = "VIN?"
+unit = "V"
+plot = "-"
+
+[[reading]]
+name = "ah"
+label = "Charge"
+query = "AH?"
+unit = "Ah"
+plot = "-"
+
+[[reading]]
+name = "wh"
+label = "Energy"
+query = "WH?"
+unit = "Wh"
+plot = "-"
+
+[[reading]]
+name = "temp"
+label = "External probe"
+query = "TEMP?"
+unit = "°C"
+
+[[reading]]
+name = "cc"
+label = "Constant current (1 = yes)"
+query = "CC?"
+plot = "-"
+
+[[reading]]
+name = "prot"
+label = "Protection (1 OVP, 2 OCP)"
+query = "PROT?"
+plot = "-"
+
+[[setting]]
+name = "vset"
+label = "Voltage"
+kind = "number"
+unit = "V"
+min = 0
+max = 61
+set = "VSET {value}"
+query = "VSET?"
+
+[[setting]]
+name = "iset"
+label = "Current limit"
+kind = "number"
+unit = "A"
+min = 0
+max = 24.1
+set = "ISET {value}"
+query = "ISET?"
+
+[[setting]]
+name = "ovp"
+label = "OVP level"
+kind = "number"
+unit = "V"
+min = 0
+max = 62.5
+set = "OVP {value}"
+query = "OVP?"
+
+[[setting]]
+name = "ocp"
+label = "OCP level"
+kind = "number"
+unit = "A"
+min = 0
+max = 24.4
+set = "OCP {value}"
+query = "OCP?"
+
+[[setting]]
+name = "out"
+label = "Output"
+kind = "bool"
+set = "OUT {on_off}"
+query = "OUT?"
+output = true

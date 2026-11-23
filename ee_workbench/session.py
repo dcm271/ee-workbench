@@ -2,7 +2,7 @@
 
 While a session is being recorded, every open instrument's readings, every
 logic-analyzer capture, the sequencer's results and the notes typed in go
-into one file, all on the app's own clock (seconds since EE Workbench
+into one file, all on the app's own clock (seconds since OtterBench
 started), so they can be laid over each other afterwards in the session
 viewer, or read with any SQLite tool:
 
@@ -136,8 +136,10 @@ class SessionWriter:
         return err
 
     # ---- data ------------------------------------------------------------
-    def stream(self, key, name: str, model: str, resource: str, columns: list[str]) -> int:
-        """The id of key's stream, made the first time it records."""
+    def stream(self, key, name: str, model: str, resource: str, columns: list[str],
+               calibration=None) -> int:
+        """The id of key's stream, made the first time it records. `calibration`
+        (a function) gives the instrument's calibration status to keep with it."""
         known = self._streams.get(key)
         if known and known[2] == columns:
             return known[0]
@@ -148,6 +150,9 @@ class SessionWriter:
         self.db.execute(f"CREATE TABLE {tbl}(t REAL, " +
                         ", ".join(_ident(c) for c in columns) + ")")
         self.db.execute("UPDATE streams SET tbl = ? WHERE id = ?", (tbl, sid))
+        cal = calibration() if calibration is not None else ""
+        if cal:
+            self.db.execute("INSERT OR REPLACE INTO meta VALUES (?, ?)", (f"cal:{sid}", cal))
         self._streams[key] = (sid, tbl, list(columns))
         return sid
 
@@ -275,6 +280,7 @@ class Stream:
     columns: list[str]
     t: np.ndarray
     data: dict[str, np.ndarray] = field(default_factory=dict)   # numeric columns only
+    lines: list = field(default_factory=list)     # a serial console: (t, "rx" | "tx", text)
 
 
 @dataclass
@@ -321,7 +327,7 @@ class SessionReader:
         path = self.path
         self.meta = dict(self.db.execute("SELECT key, value FROM meta"))
         if "wall_t0" not in self.meta:
-            raise ValueError(f"{path} isn't an EE Workbench session file")
+            raise ValueError(f"{path} isn't an OtterBench session file")
         self.wall_t0 = float(self.meta["wall_t0"])
         self.streams: list[Stream] = []
         for sid, name, model, res, cols, tbl in self.db.execute(
@@ -330,6 +336,8 @@ class SessionReader:
             rows = self.db.execute(f"SELECT * FROM {tbl} ORDER BY t").fetchall()
             t = np.array([r[0] for r in rows], float)
             s = Stream(sid, name, model, res, cols, t)
+            if cols[:2] == ["dir", "text"]:
+                s.lines = [(float(r[0]), str(r[1]), str(r[2])) for r in rows]
             for k, c in enumerate(cols):
                 vals = [r[k + 1] for r in rows]
                 if vals and all(isinstance(v, (int, float)) or v is None for v in vals):

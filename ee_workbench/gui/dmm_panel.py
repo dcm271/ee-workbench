@@ -1,4 +1,5 @@
-"""Tab for a digital multimeter (HP 3456A)."""
+"""Tabs for a digital multimeter: the HP 3456A, handhelds that only report what
+their own knob is set to (B&K 393 / 393B), and OWON XDM bench meters."""
 from __future__ import annotations
 
 import time
@@ -13,6 +14,7 @@ from PyQt6.QtWidgets import (QCheckBox, QComboBox, QFormLayout, QFrame, QGridLay
                              QWidget)
 
 from ..instruments.base import DmmConfig, DmmReading
+from ..instruments import xdm
 from ..instruments.hp3456a import FUNCTIONS, NPLC_CHOICES, ranges_for
 from . import touch
 from .panel_base import PanelBase
@@ -35,6 +37,9 @@ def _match(value, options):
 
 class DmmPanel(PanelBase):
     KIND = "dmm"
+    TITLE = "3456A"
+    CONSOLE_HINT = "3456A program codes, e.g.  F1 R4 T3   (Send + read fetches one reading)"
+    HAS_NULL = True
 
     def __init__(self, resource: str, model: str, baud: int):
         super().__init__(resource, model, baud)
@@ -46,8 +51,7 @@ class DmmPanel(PanelBase):
         root = QHBoxLayout(self)
         root.setContentsMargins(0, 4, 0, 0)
         console = self.build_console_tab(
-            "3456A program codes, e.g.  F1 R4 T3   (Send + read fetches one reading)",
-            read_button=True)
+            self.CONSOLE_HINT, read_button=True)
         split = QSplitter(Qt.Orientation.Horizontal)
         split.setChildrenCollapsible(False)
         inner = QWidget()
@@ -126,6 +130,8 @@ class DmmPanel(PanelBase):
                                  "E.g. short the leads, then press Null.")
         self.null_btn.clicked.connect(self._apply)
         gl.addWidget(self.null_btn)
+        if not self.HAS_NULL:
+            self.null_btn.hide()
         return g
 
     def _build_config_group(self):
@@ -205,7 +211,7 @@ class DmmPanel(PanelBase):
         self.cmd(lambda d, c: d.apply(c), cfg)
 
     def _name_changed(self, text):
-        self.title_changed.emit(f"3456A · {text}" if text else "3456A")
+        self.title_changed.emit(f"{self.TITLE} · {text}" if text else self.TITLE)
         self._update_axis()
         self.settings_changed.emit()
 
@@ -248,8 +254,8 @@ class DmmPanel(PanelBase):
     def on_connected(self, family, caps, cfg):
         self.idn_label.setText(f"{caps.idn}\n{caps.note}")
         self.idn_label.setStyleSheet("color:#c9ccd1;")
-        self.title_changed.emit(f"3456A · {self.name_edit.text()}" if self.name_edit.text()
-                                else "3456A")
+        self.title_changed.emit(f"{self.TITLE} · {self.name_edit.text()}"
+                                if self.name_edit.text() else self.TITLE)
         self._apply_pending()
 
     def on_state(self, cfg: DmmConfig):
@@ -273,7 +279,7 @@ class DmmPanel(PanelBase):
         return fmt_fixed(x, unit, sig, range_full_scale(self.cfg.range))
 
     def on_reading(self, r: DmmReading):
-        sig = NPLC_DIGITS.get(self.cfg.nplc, 7)
+        sig = NPLC_DIGITS.get(getattr(self.cfg, "nplc", 1), 7)
         if r.overload:
             self.readout.set("OVLD")
             self.ovld_label.setText("Overload: input exceeds the range")
@@ -292,7 +298,7 @@ class DmmPanel(PanelBase):
         return ["timestamp", "t_s", "channel", "function", "value", "unit", "overload"]
 
     def csv_name(self):
-        return "3456A_%Y%m%d_%H%M%S.csv"
+        return f"{self.TITLE}_%Y%m%d_%H%M%S.csv"
 
     def clear_trend(self):
         self.buf.clear()
@@ -311,7 +317,7 @@ class DmmPanel(PanelBase):
         y = d[start:, 1]
         y = y[np.isfinite(y)]
         if y.size:
-            sig = NPLC_DIGITS.get(self.cfg.nplc, 7)
+            sig = NPLC_DIGITS.get(getattr(self.cfg, "nplc", 1), 7)
             def f(x):
                 return self._fmt(x, self.unit, sig)
             self.stat_labels["Mean"].setText(f(y.mean()))
@@ -327,3 +333,224 @@ class DmmPanel(PanelBase):
                 w.setEnabled(on)
         for w in (self.span_combo, self.freeze_chk, self.trace_chk):
             w.setEnabled(True)
+
+
+class HandheldDmmPanel(DmmPanel):
+    """B&K 393 / 393B: function and range are set on the meter; the tab shows
+    and records whatever it reports."""
+    HAS_NULL = False
+
+    def __init__(self, resource: str, model: str, baud: int):
+        self.TITLE = model.removeprefix("BK")
+        self.CONSOLE_HINT = (
+            "393B read command in hex:  00 info   01 display   04 battery"
+            if model == "BK393B" else "The 393 takes no commands; Send + read shows its next frame")
+        self._last: DmmReading | None = None
+        super().__init__(resource, model, baud)
+        if model == "BK393B":
+            # It measures 3 times a second; asking faster only repeats readings.
+            self.poll_ms.setValue(300)
+
+    def _build_config_group(self):
+        g = QGroupBox("Meter")
+        form = QFormLayout(g)
+        form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
+        self.info = {}
+        for key in ("Function", "Mode", "Second display"):
+            lab = QLabel("—")
+            lab.setWordWrap(True)
+            self.info[key] = lab
+            form.addRow(key, lab)
+        hint = QLabel("Function and range are set on the meter.")
+        hint.setStyleSheet(f"color:{C_MUTED}; font-size:11px;")
+        form.addRow(hint)
+        self.poll_ms = QSpinBox()
+        self.poll_ms.setRange(0, 3_600_000)
+        self.poll_ms.setSingleStep(100)
+        self.poll_ms.setSuffix(" ms")
+        self.poll_ms.setSpecialValueText("none (every reading)")
+        self.poll_ms.valueChanged.connect(
+            lambda v: setattr(self.worker, "interval_s", v / 1000))
+        touch.attach_keypad(self.poll_ms, "Poll delay")
+        form.addRow("Poll delay", self.poll_ms)
+        form.addRow(self.build_pause_button())
+        return g
+
+    # ---- remembered settings: only the name (and poll delay) -----------------
+    def session_settings(self) -> dict:
+        return {"name": self.name_edit.text(), "poll_ms": self.poll_ms.value()}
+
+    def restore_settings(self, settings: dict):
+        self.name_edit.setText(str(settings.get("name", "")))
+        try:
+            self.poll_ms.setValue(int(settings["poll_ms"]))
+        except (KeyError, TypeError, ValueError):
+            pass
+
+    def _apply_pending(self):
+        pass
+
+    # ---- slots -------------------------------------------------------------
+    def on_state(self, cfg):
+        pass
+
+    def _update_axis(self):
+        r = self._last
+        fn = r.function if r else "—"
+        name = self.name_edit.text() or fn
+        if self.unit in ("V", "A", "Ω", "F", "Hz", "S", "s"):
+            self.plot.setLabel("left", name, units=self.unit, color=C_DMM)
+        else:                       # no "m°C" or "k%" on the axis
+            self.plot.setLabel("left", f"{name} ({self.unit})" if self.unit else name,
+                               units=None, color=C_DMM)
+        self.readout.caption.setText(" · ".join([fn, *(self._mode(r) if r else ())]).upper())
+
+    @staticmethod
+    def _mode(r: DmmReading) -> tuple:
+        """HOLD, MAX, REL ...: what makes the number something else than the input now."""
+        return tuple(f for f in r.flags if f not in ("AUTO", "Manual range"))
+
+    def _fmt(self, x: float, unit: str, sig: int) -> str:
+        r = self._last
+        return f"{x / r.mult:+.{r.decimals}f} {r.native}".rstrip()
+
+    def on_reading(self, r: DmmReading):
+        last = self._last
+        if last is None or (r.function, r.unit, self._mode(r)) != (
+                last.function, last.unit, self._mode(last)):
+            self.clear_trend()      # volts and ohms (or REL) in one trace mean nothing
+            self.unit = r.unit
+            self._last = r
+            self._update_axis()
+        elif not (r.overload or r.text):
+            self._last = r          # its range decides the statistics' decimals
+        self.readout.set(r.display())
+        self.ovld_label.setText("Overload: input exceeds the range" if r.overload else "")
+        self.info["Function"].setText(r.function)
+        self.info["Mode"].setText("  ".join(r.flags) or "—")
+        self.info["Second display"].setText(r.secondary or "—")
+        value = None if r.overload or r.text else r.value
+        self.buf.append([r.t, value])
+        if self.recording:
+            self.record([time.strftime("%Y-%m-%dT%H:%M:%S"), f"{r.t:.3f}",
+                         self.name_edit.text(), r.function, value, r.unit, int(r.overload)])
+
+
+class XdmPanel(HandheldDmmPanel):
+    """OWON XDM1041 / XDM1241 / XDM2041: settable, and it follows the meter's
+    own buttons (the settings come back with the readings)."""
+
+    def __init__(self, resource: str, model: str, baud: int):
+        self._functions = [f for f in xdm.FUNCTIONS if f != "4W Ω"]
+        super().__init__(resource, model, baud)
+        self.TITLE = "XDM"
+        self.cfg = xdm.XdmConfig()
+        self._applying = 0.0            # a change is on its way to the meter until then
+        self.raw_line.setPlaceholderText("XDM commands, e.g.  MEAS1?   CALC:FUNC NULL")
+        self.poll_ms.setValue(250)              # 4 readings/s at the slow rate
+
+    def _build_config_group(self):
+        g = QGroupBox("Configuration")
+        form = QFormLayout(g)
+        form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
+        self.func_combo = QComboBox()
+        self.func_combo.addItems(self._functions)
+        self.func_combo.activated.connect(self._func_changed)
+        form.addRow("Function", self.func_combo)
+        self.range_combo = QComboBox()
+        self.range_combo.addItems(xdm.ranges_for("DCV"))
+        self.range_combo.activated.connect(self._apply)
+        self.range_combo.setToolTip("AUTO stays within the V (or A) ranges; AUTO (mV) and "
+                                    "AUTO (mA) start in the low ones.")
+        self.range_label = QLabel("Range")
+        form.addRow(self.range_label, self.range_combo)
+        self.rate_combo = QComboBox()
+        self.rate_combo.addItems(list(xdm.RATES))
+        self.rate_combo.activated.connect(self._apply)
+        self.rate_combo.setToolTip("Slow: 4½ digits and the least noise. Set a shorter poll "
+                                   "delay to use the faster ones.")
+        form.addRow("Rate", self.rate_combo)
+        self.dual_chk = QCheckBox("Frequency on the second display")
+        self.dual_chk.clicked.connect(self._apply)
+        form.addRow("", self.dual_chk)
+        self.info = {}
+        for key in ("Function", "Mode"):        # shown by the combos here
+            self.info[key] = QLabel()
+        self.info["Second display"] = QLabel("—")
+        form.addRow("Second display", self.info["Second display"])
+        self.poll_ms = QSpinBox()
+        self.poll_ms.setRange(0, 3_600_000)
+        self.poll_ms.setSingleStep(50)
+        self.poll_ms.setSuffix(" ms")
+        self.poll_ms.setSpecialValueText("none (as fast as possible)")
+        self.poll_ms.valueChanged.connect(
+            lambda v: setattr(self.worker, "interval_s", v / 1000))
+        touch.attach_keypad(self.poll_ms, "Poll delay")
+        form.addRow("Poll delay", self.poll_ms)
+        form.addRow(self.build_pause_button())
+        return g
+
+    def _fill_ranges(self, function: str, current: str):
+        self.range_label.setText("Sensor" if function == "Temperature" else "Range")
+        self.range_combo.clear()
+        self.range_combo.addItems(xdm.ranges_for(function))
+        self.range_combo.setCurrentText(current)
+
+    def _func_changed(self):
+        fn = self.func_combo.currentText()
+        self._fill_ranges(fn, xdm.ranges_for(fn)[0])
+        self._apply()
+
+    def _apply(self):
+        fn = self.func_combo.currentText()
+        cfg = xdm.XdmConfig(function=fn, range=self.range_combo.currentText(),
+                            rate=self.rate_combo.currentText(),
+                            dual=self.dual_chk.isChecked() and fn in ("ACV", "ACI"))
+        self._applying = time.monotonic() + 3.0
+        self.cmd(lambda d, c: d.apply(c), cfg)
+
+    # The function and range are the meter's (it keeps them, and has its own
+    # buttons): a session remembers the name and poll delay only. config.toml
+    # can still ask for function / range / rate.
+    def restore_settings(self, settings: dict):
+        super().restore_settings(settings)
+        if any(k in settings for k in ("function", "range", "rate")):
+            self._pending = dict(settings)
+
+    def _apply_pending(self):
+        s, self._pending = self._pending, None
+        if not s:
+            return
+        fn = _match(s.get("function"), self._functions) or self.cfg.function
+        rng = _match(s.get("range"), xdm.ranges_for(fn)) or (
+            self.cfg.range if fn == self.cfg.function else xdm.ranges_for(fn)[0])
+        rate = _match(s.get("rate"), xdm.RATES) or self.cfg.rate
+        cfg = xdm.XdmConfig(function=fn, range=rng, rate=rate)
+        if (fn, rng, rate) != (self.cfg.function, self.cfg.range, self.cfg.rate):
+            self.cmd(lambda d, c: d.apply(c), cfg)
+
+    def on_connected(self, family, caps, cfg):
+        self.TITLE = caps.model
+        four = caps.model.upper().startswith("XDM2")
+        self._functions = [f for f in xdm.FUNCTIONS if four or f != "4W Ω"]
+        self.func_combo.clear()
+        self.func_combo.addItems(self._functions)
+        self.on_state(cfg)
+        super().on_connected(family, caps, cfg)
+
+    def on_state(self, cfg):
+        self.cfg = cfg
+        self._applying = 0.0
+        self.func_combo.setCurrentText(cfg.function)
+        self._fill_ranges(cfg.function, cfg.range)
+        self.rate_combo.setCurrentText(cfg.rate)
+        self.dual_chk.setChecked(cfg.dual)
+        self.dual_chk.setEnabled(self.connected and cfg.function in ("ACV", "ACI"))
+
+    def on_reading(self, r: DmmReading):
+        if r.cfg is not None and r.cfg != self.cfg and \
+                time.monotonic() > self._applying and not any(
+                c.view().isVisible() for c in (self.func_combo, self.range_combo,
+                                               self.rate_combo)):
+            self.on_state(r.cfg)                # changed on the meter itself
+        super().on_reading(r)

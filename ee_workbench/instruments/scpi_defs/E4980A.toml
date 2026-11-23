@@ -1,0 +1,101 @@
+# Keysight / Agilent E4980A and E4980AL (GPIB, LAN, USB). From the user's guide, chapters 8 and 10.
+id = "E4980A"
+name = "Keysight E4980A / E4980AL precision LCR meter"
+maker = "Keysight"
+type = "meter"
+idn = ["E4980A"]
+init = ["*CLS", "FORM ASC", "INIT:CONT ON", "TRIG:SOUR INT"]
+notes = "An overload shows OVLD. Frequencies above the E4980AL's option are rejected by the meter."
+poll_ms = 200
+off = ["BIAS:STAT OFF"]
+
+[[reading]]
+name = "primary"
+label = "Primary"
+query = "FETC?"
+unit_from = "function"
+field = 0
+sim = "1.0012e-9 + noise(2e-14)"
+
+[[reading]]
+name = "secondary"
+label = "Secondary"
+query = "FETC?"
+unit_from = "function"
+unit_index = 1
+field = 1
+sim = "0.00123 + noise(1e-6)"
+
+[[setting]]
+name = "function"
+label = "Function"
+kind = "choice"
+query = "FUNC:IMP?"
+options = [
+  {label = "Cp-D", set = "FUNC:IMP CPD", reply = "^CPD$", unit = "F"},
+  {label = "Cp-Q", set = "FUNC:IMP CPQ", reply = "^CPQ$", unit = "F"},
+  {label = "Cp-Rp", set = "FUNC:IMP CPRP", reply = "^CPRP$", unit = "F", unit2 = "Ω"},
+  {label = "Cs-D", set = "FUNC:IMP CSD", reply = "^CSD$", unit = "F"},
+  {label = "Cs-Q", set = "FUNC:IMP CSQ", reply = "^CSQ$", unit = "F"},
+  {label = "Cs-Rs", set = "FUNC:IMP CSRS", reply = "^CSRS$", unit = "F", unit2 = "Ω"},
+  {label = "Lp-D", set = "FUNC:IMP LPD", reply = "^LPD$", unit = "H"},
+  {label = "Lp-Q", set = "FUNC:IMP LPQ", reply = "^LPQ$", unit = "H"},
+  {label = "Ls-D", set = "FUNC:IMP LSD", reply = "^LSD$", unit = "H"},
+  {label = "Ls-Q", set = "FUNC:IMP LSQ", reply = "^LSQ$", unit = "H"},
+  {label = "Ls-Rs", set = "FUNC:IMP LSRS", reply = "^LSRS$", unit = "H", unit2 = "Ω"},
+  {label = "R-X", set = "FUNC:IMP RX", reply = "^RX$", unit = "Ω", unit2 = "Ω"},
+  {label = "Z-θ (deg)", set = "FUNC:IMP ZTD", reply = "^ZTD$", unit = "Ω", unit2 = "°"},
+  {label = "Y-θ (deg)", set = "FUNC:IMP YTD", reply = "^YTD$", unit = "S", unit2 = "°"},
+  {label = "G-B", set = "FUNC:IMP GB", reply = "^GB$", unit = "S", unit2 = "S"},
+]
+
+[[setting]]
+name = "frequency"
+label = "Frequency"
+kind = "number"
+unit = "Hz"
+min = 20
+max = 2000000
+set = "FREQ {value}"
+query = "FREQ?"
+sim = "1000"
+
+[[setting]]
+name = "level"
+label = "Test level"
+kind = "number"
+unit = "V"
+min = 0
+max = 20
+set = "VOLT {value}"
+query = "VOLT?"
+sim = "1"
+
+[[setting]]
+name = "bias"
+label = "DC bias"
+kind = "number"
+unit = "V"
+min = -40
+max = 40
+set = "BIAS:VOLT {value}"
+query = "BIAS:VOLT?"
+
+[[setting]]
+name = "bias_on"
+label = "Bias on"
+kind = "bool"
+set = "BIAS:STAT {on_off}"
+query = "BIAS:STAT?"
+output = true
+
+[[setting]]
+name = "speed"
+label = "Speed"
+kind = "choice"
+query = "APER?"
+options = [
+  {label = "Medium", set = "APER MED,1", reply = "^MED", sim = "MED,1"},
+  {label = "Short", set = "APER SHOR,1", reply = "^SHOR", sim = "SHOR,1"},
+  {label = "Long", set = "APER LONG,1", reply = "^LONG", sim = "LONG,1"},
+]

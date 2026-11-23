@@ -17,6 +17,13 @@ A definition says what to send and how to read the answer:
     unit = "V"
     unit_from = "function"             # optional: the unit of that setting's option
     query_from = "function"            # optional: that option's `read` query instead
+    field = 1                          # optional: which comma-separated field of the
+                                       # answer (0 = the first). Readings with the same
+                                       # query share one answer per poll.
+    unit_index = 1                     # optional: the option's `unit2` (an LCR meter's
+                                       # secondary parameter) instead of its `unit`
+    plot = "Temperature"               # optional: readings with the same `plot` share axes;
+                                       # "-": not on the trend (still shown and logged)
 
     [[setting]]
     name = "function"
@@ -30,6 +37,11 @@ A definition says what to send and how to read the answer:
     set = "VOLT:DC:NPLC {value}"       # {value}; bool: {on_off} -> ON/OFF, {1_0} -> 1/0
     query = "VOLT:DC:NPLC?"
     values = [0.02, 0.2, 1, 10, 100]   # optional: offered as a list
+
+Instruments that don't speak SCPI have two more keys, see adapters.py:
+
+    protocol = "riden"                 # riden, korad, px100, center, w1, max31855, …
+    baud = 115200                      # serial speed (default: the protocol's usual one)
 
 Built-in definitions are in instruments/scpi_defs/; your own go in
 ~/.config/ee-workbench/instruments/*.toml (same format; a file with the same
@@ -62,6 +74,7 @@ class Option:
     set: str = ""
     reply: str = ""              # regex searched in the setting's query answer
     unit: str = ""
+    unit2: str = ""              # unit of readings with unit_index = 1
     read: str = ""               # reading query for this option (query_from)
     sim: str = ""                # what the simulator answers to the query
 
@@ -99,6 +112,9 @@ class Reading:
     unit: str = ""
     unit_from: str = ""
     query_from: str = ""
+    field: int = -1              # comma-separated field of the answer (-1: not split)
+    unit_index: int = 0
+    plot: str = ""               # axes shared with the other readings naming it
     ch: int = 0
     sim: str = "0"               # simulator: expression in the settings, t, noise()
 
@@ -121,6 +137,9 @@ class Definition:
     settings: list = field(default_factory=list)      # [Setting], channels expanded
     path: str = ""               # file it came from
     builtin: bool = True
+    protocol: str = ""           # not SCPI: an adapter speaks for it (adapters.py)
+    baud: int = 0
+    probes: list = field(default_factory=list)        # sensors behind it (adapters.py)
 
     @property
     def model_key(self) -> str:
@@ -197,7 +216,7 @@ def parse_definition(data: dict, path: str = "", builtin: bool = True) -> Defini
 
     def make_option(o):
         need(isinstance(o, dict) and o.get("label"), "every option needs a `label`")
-        extra = set(o) - {"label", "set", "reply", "unit", "read", "sim"}
+        extra = set(o) - {"label", "set", "reply", "unit", "unit2", "read", "sim"}
         need(not extra, f"option {o.get('label')}: unknown key(s) {', '.join(sorted(extra))}")
         if o.get("reply"):
             try:
@@ -230,11 +249,16 @@ def parse_definition(data: dict, path: str = "", builtin: bool = True) -> Defini
     def make_reading(d):
         need(isinstance(d, dict) and _IDENT.match(str(d.get("name", ""))),
              "every [[reading]] needs a `name` (letters, digits, _)")
-        extra = set(d) - {"name", "label", "query", "unit", "unit_from", "query_from", "sim"}
+        extra = set(d) - {"name", "label", "query", "unit", "unit_from", "query_from", "sim",
+                          "field", "unit_index", "plot"}
         need(not extra, f"reading {d['name']}: unknown key(s) {', '.join(sorted(extra))}")
         need(d.get("query") or d.get("query_from"),
              f"reading {d['name']}: needs `query` (or `query_from`)")
-        return Reading(name=d["name"], label=str(d.get("label", "")),
+        fld, ui = d.get("field", -1), d.get("unit_index", 0)
+        need(type(fld) is int and -1 <= fld < 100 and ui in (0, 1),
+             f"reading {d['name']}: `field` counts from 0; `unit_index` is 0 or 1")
+        return Reading(name=d["name"], label=str(d.get("label", "")), field=fld,
+                       unit_index=int(ui), plot=str(d.get("plot", "")),
                        query=str(d.get("query", "")), unit=str(d.get("unit", "")),
                        unit_from=str(d.get("unit_from", "")),
                        query_from=str(d.get("query_from", "")), sim=str(d.get("sim", "0")))
@@ -259,7 +283,13 @@ def parse_definition(data: dict, path: str = "", builtin: bool = True) -> Defini
         poll_ms = int(data.get("poll_ms", 0))
     except (TypeError, ValueError):
         poll_ms = 0
-    return Definition(id=did, name=str(data.get("name", did)), type=typ,
+    protocol = str(data.get("protocol", ""))
+    if protocol:
+        from .adapters import ADAPTERS
+        need(protocol in ADAPTERS, f"`protocol` must be one of {', '.join(sorted(ADAPTERS))}")
+    baud = data.get("baud", 0)
+    need(type(baud) is int and baud >= 0, "`baud` must be a whole number")
+    return Definition(id=did, protocol=protocol, baud=baud, name=str(data.get("name", did)), type=typ,
                       maker=str(data.get("maker", "")), idn=str_list("idn"), channels=channels,
                       init=str_list("init"), error_query=str(data.get("error_query",
                                                                      "SYST:ERR?")),
@@ -305,12 +335,26 @@ def definitions(reload: bool = False) -> dict[str, Definition]:
     return out
 
 
-def definition_for(model: str) -> Definition | None:
-    """'SCPI:34461A' (or '34461A') -> its definition."""
+def definition_for(model: str, resource: str = "") -> Definition | None:
+    """'SCPI:34461A' (or '34461A') -> its definition; with a resource, also the
+    channels that depend on what is wired to it (temperature sensors)."""
     key = model[5:] if model.upper().startswith("SCPI:") else model
     defs = definitions()
-    return defs.get(key) or next((d for k, d in defs.items() if k.lower() == key.lower()),
-                                 None)
+    d = defs.get(key) or next((d for k, d in defs.items() if k.lower() == key.lower()), None)
+    if d is not None and d.protocol and resource:
+        from .adapters import for_resource
+        return for_resource(d, resource)
+    return d
+
+
+def resource_definition(resource: str) -> Definition | None:
+    """'RD60XX::/dev/ttyUSB0' -> the definition it names, for the instruments
+    that go through an adapter (others have VISA resources)."""
+    head = resource.partition("::")[0]
+    if not head or head.upper().startswith(("SIM", "GPIB", "TCPIP", "USB", "ASRL")):
+        return None
+    d = definition_for(head)
+    return d if d is not None and d.protocol else None
 
 
 def match_idn(idn: str) -> Definition | None:
@@ -510,12 +554,14 @@ class ScpiDriver:
     def unit(self, r: Reading) -> str:
         if r.unit_from:
             o = self._opt(r.unit_from, r.ch)
-            if o is not None and o.unit:
-                return o.unit
+            u = "" if o is None else o.unit2 if r.unit_index else o.unit
+            if u:
+                return u
         return r.unit
 
     def poll(self, t: float, _cfg=None) -> ScpiReading:
         out = ScpiReading(t)
+        answers: dict = {}            # one answer serves every reading that asks for it
         for r in self.d.readings:
             q = r.query
             if r.query_from:
@@ -523,7 +569,15 @@ class ScpiDriver:
                 q = (o.read if o is not None and o.read else q)
             if not q:
                 continue
-            out.values[r.name] = parse_number(self.query(fill(q, ch=r.ch)))
+            q = fill(q, ch=r.ch)
+            if r.field < 0:
+                out.values[r.name] = parse_number(self.query(q))
+            else:
+                if q not in answers:
+                    answers[q] = self.query(q).split(",")
+                if r.field >= len(answers[q]):
+                    raise ValueError(f"{q}: no field {r.field} in {','.join(answers[q])!r}")
+                out.values[r.name] = parse_number(answers[q][r.field])
             out.units[r.name] = self.unit(r)
         return out
 
@@ -554,7 +608,13 @@ def self_test(d: Definition) -> list[str]:
     commands are right for the real instrument."""
     from ..sim.sscpi import SimScpi
     probs: list[str] = []
-    drv = ScpiDriver(SimScpi(d), d)
+    if d.protocol:
+        from .adapters import for_resource, open_adapter
+        sim = f"SIM::{d.id}"
+        drv = ScpiDriver(open_adapter(d, sim), for_resource(d, sim))
+        d = drv.d
+    else:
+        drv = ScpiDriver(SimScpi(d), d)
 
     def step(what, fn):
         try:

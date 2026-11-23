@@ -16,6 +16,8 @@ from pathlib import Path
 
 import numpy as np
 
+from .about import APP_NAME
+
 PALETTE = ["#1f77b4", "#d6542b", "#2a9d5c", "#8e5bd6", "#c2185b", "#00838f", "#9e7b00"]
 MAX_PLOT_POINTS = 1500
 MAX_TABLE_ROWS = 2000
@@ -100,7 +102,7 @@ def downsample(x: np.ndarray, y: np.ndarray, n: int = MAX_PLOT_POINTS):
 
 def svg_plot(series: list[tuple[str, np.ndarray, np.ndarray]], xlabel: str = "",
              ylabel: str = "", width: int = 900, height: int = 260, markers: bool = False,
-             vlines: list[tuple[float, str]] | None = None) -> str:
+             vlines: list[tuple[float, str]] | None = None, log_x: bool = False) -> str:
     """series: (label, x, y). Returns an <svg> element."""
     ml, mr, mt, mb = 70, 16, 14, 40
     pw, ph = width - ml - mr, height - mt - mb
@@ -109,6 +111,9 @@ def svg_plot(series: list[tuple[str, np.ndarray, np.ndarray]], xlabel: str = "",
         x = np.asarray(x, float)
         y = np.asarray(y, float)
         ok = np.isfinite(x) & np.isfinite(y)
+        if log_x:
+            ok &= x > 0
+            x = np.log10(np.where(x > 0, x, 1.0))
         x, y = downsample(x[ok], y[ok])
         pts.append((lab, x, y))
     allx = np.concatenate([p[1] for p in pts]) if pts else np.array([])
@@ -141,11 +146,14 @@ def svg_plot(series: list[tuple[str, np.ndarray, np.ndarray]], xlabel: str = "",
         out.append(f'<line x1="{ml}" y1="{y:.1f}" x2="{ml + pw}" y2="{y:.1f}" stroke="#eceef2"/>')
         out.append(f'<text x="{ml - 6}" y="{y + 3:.1f}" text-anchor="end" fill="#555">'
                    f'{_tick_label(v)}</text>')
-    for v in _nice_ticks(x0, x1, 8):
+    ticks = ([e + math.log10(m) for e in range(math.floor(x0), math.ceil(x1) + 1)
+              for m in ((1,) if x1 - x0 > 3 else (1, 2, 5)) if x0 - 1e-9 <= e + math.log10(m)
+              <= x1 + 1e-9] if log_x else _nice_ticks(x0, x1, 8))
+    for v in ticks:
         x = sx(v)
         out.append(f'<line x1="{x:.1f}" y1="{mt}" x2="{x:.1f}" y2="{mt + ph}" stroke="#eceef2"/>')
         out.append(f'<text x="{x:.1f}" y="{mt + ph + 14}" text-anchor="middle" fill="#555">'
-                   f'{_tick_label(v)}</text>')
+                   f'{_tick_label(10 ** v if log_x else v)}</text>')
     for t, text in vlines or []:
         if x0 <= t <= x1:
             x = sx(t)
@@ -220,11 +228,10 @@ def sequence_report(title: str, rows: list[dict], columns: list[str], plan: dict
         badge = "<span class='badge other'>NO LIMITS</span> results only"
     body = [f"<h1>{esc(title)}</h1>",
             f"<div class='sub'>{time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(started))}"
-            f" · {esc(platform.node())} · EE Workbench</div>",
+            f" · {esc(platform.node())} · {APP_NAME}</div>",
             f"<p>{badge} &nbsp; <b>{esc(outcome)}</b> · {len(rows)} rows</p>",
             "<h2>Instruments</h2><table class='kv'>"]
-    body += [f"<tr><td>{esc(n)}</td><td>{esc(i)}</td></tr>" for n, i in instruments]
-    body.append("</table>")
+    body = body[:-1] + _instruments(instruments)
     numeric = [c for c in columns if c not in ("t", "pass", "x", "result", "failures")
                and any(isinstance(r.get(c), (int, float)) for r in rows)]
     xc = x_col or ("x" if "x" in columns else "pass")
@@ -261,6 +268,163 @@ def sequence_report(title: str, rows: list[dict], columns: list[str], plan: dict
     return _page(title, body)
 
 
+def _head(title: str, started: float | None = None) -> list[str]:
+    when = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(started or time.time()))
+    return [f"<h1>{esc(title)}</h1>",
+            f"<div class='sub'>{when} · {esc(platform.node())} · {APP_NAME}</div>"]
+
+
+def _instruments(instruments: list) -> list[str]:
+    """(name, identity) or (name, identity, calibration status) rows."""
+    out = ["<h2>Instruments</h2><table class='kv'>"]
+    for row in instruments:
+        n, i, cal = (list(row) + [""])[:3]
+        extra = f"<br><span class='small'>{esc(cal)}</span>" if cal else ""
+        out.append(f"<tr><td>{esc(n)}</td><td>{esc(i)}{extra}</td></tr>")
+    return out + ["</table>"]
+
+
+def _settings(pairs: dict) -> list[str]:
+    return ["<h2>Settings</h2><table class='kv'>"] + \
+        [f"<tr><td>{esc(k)}</td><td>{fmt(v)}</td></tr>" for k, v in pairs.items()] + ["</table>"]
+
+
+def bode_report(title: str, f, gain, phase, summary: str, settings: dict,
+                instruments: list[tuple[str, str]], referenced: bool = False) -> str:
+    body = _head(title)
+    body.append(f"<p><b>{esc(summary)}</b></p>")
+    if referenced:
+        body.append("<p class='small'>Corrected with a reference sweep.</p>")
+    body += _instruments(instruments)
+    body.append("<h2>Plots</h2>")
+    body.append(svg_plot([("gain", f, gain)], "Frequency (Hz)", "Gain (dB)", log_x=True))
+    body.append(svg_plot([("phase", f, phase)], "Frequency (Hz)", "Phase (°)", log_x=True))
+    body += _settings(settings)
+    body.append("<h2>Points</h2>")
+    body.append(_table(["frequency (Hz)", "gain (dB)", "phase (°)"],
+                       [{"frequency (Hz)": float(a), "gain (dB)": float(b), "phase (°)": float(c)}
+                        for a, b, c in zip(f, gain, phase)]))
+    return _page(title, body)
+
+
+def _badge(verdict: str, text: str = "") -> str:
+    cls = {"PASS": "pass", "FAIL": "failb"}.get(verdict, "other")
+    return f"<p><span class='badge {cls}'>{esc(verdict or 'NO LIMITS')}</span> &nbsp; " \
+           f"{esc(text)}</p>"
+
+
+def regulator_report(title: str, rows: list[dict], a: dict, settings: dict, instruments: list,
+                     outcome: str) -> str:
+    from .regulator import COLUMNS, UNITS
+    body = _head(title)
+    body.append(_badge(a.get("verdict", ""), f"{outcome} · {len(rows)} points"))
+    if a["checks"]:
+        body.append("<ul>" + "".join(f"<li>{'✔' if ok else '✘'} {esc(t)}</li>"
+                                     for t, ok in a["checks"]) + "</ul>")
+    body += _instruments(instruments)
+    body.append("<h2>Plots</h2>")
+
+    def by_vin(y):
+        out = []
+        for v in sorted({r["vin_set"] for r in rows}):
+            g = sorted((r for r in rows if r["vin_set"] == v), key=lambda r: r["iout"])
+            out.append((f"{v:g} V in", [r["iout"] for r in g], [r[y] for r in g]))
+        return out
+    for y, lab in (("efficiency", "Efficiency (%)"), ("vout", "Output voltage (V)"),
+                   ("loss", "Loss (W)")):
+        body.append(svg_plot(by_vin(y), "Output current (A)", lab, markers=True))
+    if a["load"]:
+        body.append("<h2>Load regulation</h2>")
+        body.append(_table(["input (V)", "from (A)", "to (A)", "ΔVout (mV)", "% of nominal",
+                            "output resistance (mΩ)"],
+                           [{"input (V)": x["vin"], "from (A)": x["from"], "to (A)": x["to"],
+                             "ΔVout (mV)": 1e3 * x["dv"], "% of nominal": x["percent"],
+                             "output resistance (mΩ)": 1e3 * x["ohms"]} for x in a["load"]]))
+    if a["line"]:
+        body.append("<h2>Line regulation</h2>")
+        body.append(_table(["load (A)", "from (V)", "to (V)", "ΔVout (mV)", "% of nominal",
+                            "mV/V"],
+                           [{"load (A)": x["iload"], "from (V)": x["from"], "to (V)": x["to"],
+                             "ΔVout (mV)": 1e3 * x["dv"], "% of nominal": x["percent"],
+                             "mV/V": x["mv_per_v"]} for x in a["line"]]))
+    body.append("<h2>Points</h2>")
+    head = [f"{c} ({UNITS[c]})" if c in UNITS else c for c in COLUMNS]
+    body.append(_table(head, [{h: r[c] for h, c in zip(head, COLUMNS)} for r in rows]))
+    body += _settings(settings)
+    return _page(title, body)
+
+
+def battery_report(title: str, samples: list[dict], cycles: list[dict], settings: dict,
+                   instruments: list, outcome: str, log: str = "") -> str:
+    body = _head(title)
+    body.append(f"<p><b>{esc(outcome)}</b> · {len(cycles)} cycles</p>")
+    body += _instruments(instruments)
+    if cycles:
+        body.append("<h2>Cycles</h2>")
+        names = [("cycle", "cycle", 1), ("charge (Ah)", "charge_ah", 1),
+                 ("discharge (Ah)", "discharge_ah", 1), ("discharge (Wh)", "discharge_wh", 1),
+                 ("coulombic (%)", "coulombic", 1), ("R start (mΩ)", "r_start", 1e3),
+                 ("R end (mΩ)", "r_end", 1e3), ("open circuit (V)", "ocv", 1),
+                 ("ended by", "ended", None)]
+        body.append(_table([n for n, _, _ in names],
+                           [{n: r[k] if m in (None, 1) else r[k] * m for n, k, m in names}
+                            for r in cycles]))
+    body.append("<h2>Plots</h2>")
+    dis = []
+    for c in sorted({s["cycle"] for s in samples if s["phase"] == "discharge"}):
+        g = [s for s in samples if s["cycle"] == c and s["phase"] == "discharge"]
+        dis.append((f"cycle {c}", [s["ah"] for s in g], [s["voltage"] for s in g]))
+    if dis:
+        body.append(svg_plot(dis[:6], "Discharged (Ah)", "Voltage (V)"))
+    if len(cycles) > 1:
+        x = [r["cycle"] for r in cycles]
+        body.append(svg_plot([("capacity", x, [r["discharge_ah"] for r in cycles])], "Cycle",
+                             "Capacity (Ah)", markers=True, height=200))
+        body.append(svg_plot([("R start", x, [1e3 * r["r_start"] for r in cycles])], "Cycle",
+                             "Internal resistance (mΩ)", markers=True, height=200))
+    if samples:
+        h = [s["t"] / 3600 for s in samples]
+        body.append(svg_plot([("V", h, [s["voltage"] for s in samples])], "Time (h)",
+                             "Voltage (V)", height=200))
+        body.append(svg_plot([("A", h, [s["current"] for s in samples])], "Time (h)",
+                             "Current (A)", height=200))
+        if any(math.isfinite(s["temp"]) for s in samples):
+            body.append(svg_plot([("T", h, [s["temp"] for s in samples])], "Time (h)",
+                                 "Temperature (°C)", height=200))
+    body += _settings(settings)
+    if log.strip():
+        body.append(f"<h2>Log</h2><pre>{esc(log[-30000:])}</pre>")
+    return _page(title, body)
+
+
+def check_report(title: str, rows: list[dict], verdict: str, settings: dict,
+                 instruments: list) -> str:
+    body = _head(title)
+    body.append(_badge(verdict, "compared against the reference; not a calibration"))
+    body += _instruments(instruments)
+    body.append("<h2>Points</h2>")
+    body.append(_table(["level", "reference", "reading", "error", "percent", "limit", "result"],
+                       rows))
+    body += _settings(settings)
+    return _page(title, body)
+
+
+def calibration_report(entries: list) -> str:
+    title = "Instrument calibration status"
+    body = _head(title)
+    rows = []
+    for e in sorted(entries, key=lambda e: (e.due().isoformat() if e.due() else "9999", e.name)):
+        rows.append({"instrument": e.name or e.key, "identity": e.idn, "status": e.status(),
+                     "calibrated": e.calibrated, "due": e.due().isoformat() if e.due() else "",
+                     "by": e.by, "certificate": e.certificate,
+                     "last check": f"{e.checks[-1].get('date', '')} {e.checks[-1].get('result', '')}"
+                     if e.checks else "",
+                     "result": "FAIL" if e.status() == "overdue" else ""})
+    body.append(_table(["instrument", "identity", "status", "calibrated", "due", "by",
+                        "certificate", "last check"], rows) if rows else "<p>No entries.</p>")
+    return _page(title, body)
+
+
 def session_report(path: str, title: str = "", t_range: tuple[float, float] | None = None,
                    columns: list[tuple[int, str]] | None = None) -> str:
     """A session: instruments, one plot per numeric column (or the chosen
@@ -274,9 +438,9 @@ def session_report(path: str, title: str = "", t_range: tuple[float, float] | No
                 f"<div class='sub'>{esc(s.wall(a))} to {esc(s.wall(b))} "
                 f"({b - a:.1f} s) · {esc(Path(path).name)}</div>",
                 "<h2>Instruments</h2><table class='kv'>"]
-        body += [f"<tr><td>{esc(st.name)}</td><td>{esc(st.model)} · {esc(st.resource)} · "
-                 f"{st.t.size} readings</td></tr>" for st in s.streams]
-        body.append("</table>")
+        body = body[:-1] + _instruments(
+            [(st.name, f"{st.model} · {st.resource} · {st.t.size} readings",
+              s.meta.get(f"cal:{st.id}", "")) for st in s.streams])
         notes = [(t - a, text) for t, text in s.notes if a <= t <= b]
         body.append("<h2>Plots</h2><p class='small'>Time is seconds from "
                     f"{esc(s.wall(a))}. Dashed lines are notes.</p>")

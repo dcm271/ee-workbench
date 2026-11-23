@@ -106,7 +106,7 @@ class WatchdogWindow(QMainWindow):
     # ---------------------------------------------------------------- rows
     def _names(self):
         return [p.display_name() for p in open_panels()
-                if p.KIND in ("supply", "ppk2", "dmm", "gpio", "scpi", "logic", "scope")]
+                if p.KIND in ("supply", "ppk2", "dmm", "gpio", "scpi", "logic", "scope", "uart")]
 
     def _add_row(self, rule: Rule):
         r = self.table.rowCount()

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# One-shot setup of EE Workbench on a fresh Ubuntu machine (22.04 or later,
+# One-shot setup of OtterBench on a fresh Ubuntu machine (22.04 or later,
 # desktop). Run from the repository as your normal user; it calls sudo where
 # needed. Safe to re-run (e.g. after pulling a new version).
 #
@@ -131,8 +131,10 @@ if (( GPIB )); then
 fi
 
 # ---------------------------------------------------------------- menu
-step "Adding EE Workbench to the application menu"
+step "Adding OtterBench to the application menu"
 DESK=~/.local/share/applications/ee-workbench.desktop
+run mkdir -p ~/.local/share/icons/hicolor/512x512/apps
+run cp "$HERE/ee_workbench/gui/branding/logo.png" ~/.local/share/icons/hicolor/512x512/apps/ee-workbench.png
 run mkdir -p ~/.local/share/applications
 # The ee-workbench.desktop in the repo, with this checkout's path; windowed.
 if (( DRY )); then
@@ -159,6 +161,6 @@ if (( SALEAE )); then
   * Saleae Logic 8 / Pro 8 / Pro 16: install Logic 2 from saleae.com/downloads
     (an AppImage; keep it outside this folder), then start it with its
     automation server on:   ./Logic-2.*.AppImage --automation
-    The analyzer then appears as SALEAE::… in EE Workbench.
+    The analyzer then appears as SALEAE::… in OtterBench.
 EOF
 fi

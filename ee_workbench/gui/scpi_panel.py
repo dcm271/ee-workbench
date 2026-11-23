@@ -38,7 +38,7 @@ class ScpiPanel(PanelBase):
 
     def __init__(self, resource: str, model: str, baud: int):
         super().__init__(resource, model, baud)
-        self.d: Definition | None = definition_for(model)
+        self.d: Definition | None = definition_for(model, resource)
         self.values: dict = {}
         self._pending: dict | None = None
         self._widgets: dict = {}           # setting name -> widget
@@ -120,7 +120,7 @@ class ScpiPanel(PanelBase):
         boxes = []
         outs = [s for s in self.d.settings if s.output]
         if outs:
-            g = QGroupBox("Outputs" if self.d.type == "supply" else "Input")
+            g = QGroupBox({"supply": "Outputs", "load": "Input"}.get(self.d.type, "Output"))
             h = QGridLayout(g)
             for k, s in enumerate(outs):
                 b = QPushButton(self._out_text(s, False))
@@ -204,15 +204,22 @@ class ScpiPanel(PanelBase):
         self.glw = pg.GraphicsLayoutWidget()
         self.plots: dict = {}               # base reading name -> PlotItem
         self.curves: dict = {}              # reading name -> curve
+        self._plot_of: dict = {}            # reading name -> its key in self.plots
         bases = []
         if self.d is not None:
             for r in self.d.readings:
-                b = r.name[:-len(str(r.ch))] if (self.d.channels > 1 and r.ch) else r.name
+                b = r.plot or (r.name[:-len(str(r.ch))] if (self.d.channels > 1 and r.ch)
+                               else r.name)
+                if b == "-":
+                    continue                # a status or a total: shown and logged only
+                self._plot_of[r.name] = b
                 if b not in bases:
                     bases.append(b)
+        shared = {b for b in bases if list(self._plot_of.values()).count(b) > 1}
         first = None
         for row, b in enumerate(bases):
             p = self.glw.addPlot(row=row, col=0)
+            p.getAxis("left").setWidth(70)
             p.showGrid(x=True, y=True, alpha=0.15)
             p.setClipToView(True)
             p.setDownsampling(auto=True, mode="peak")
@@ -222,15 +229,18 @@ class ScpiPanel(PanelBase):
                 p.setXLink(first)
             if row == len(bases) - 1:
                 p.setLabel("bottom", "Time", units="s")
-            if self.d.channels > 1:
+            if b in shared:
                 p.addLegend(offset=(-10, 10))
             self.plots[b] = p
         for k, r in enumerate(self.d.readings if self.d else []):
-            b = r.name[:-len(str(r.ch))] if (self.d.channels > 1 and r.ch) else r.name
+            b = self._plot_of.get(r.name)
+            if b is None:
+                continue
             color = COLORS[(r.ch - 1) % len(COLORS)] if self.d.channels > 1 else \
                 COLORS[k % len(COLORS)]
-            self.curves[r.name] = self.plots[b].plot(
-                pen=pg.mkPen(color, width=1.5), name=f"CH{r.ch}" if self.d.channels > 1 else None)
+            name = None if b not in shared else \
+                f"CH{r.ch}" if self.d.channels > 1 else r.label
+            self.curves[r.name] = self.plots[b].plot(pen=pg.mkPen(color, width=1.5), name=name)
         if first is not None:
             touch.plots(*self.plots.values())
             self.scrolling_trend(first, *self.plots.values())
@@ -366,7 +376,7 @@ class ScpiPanel(PanelBase):
     def _label_axes(self):
         for b, p in self.plots.items():
             unit = next((self._units.get(n, "") for n in self.names
-                         if n == b or (n.startswith(b) and n[len(b):].isdigit())), "")
+                         if self._plot_of.get(n) == b), "")
             p.setLabel("left", b, units=unit or None)
 
     def csv_header(self):
@@ -388,6 +398,8 @@ class ScpiPanel(PanelBase):
         span = self.span()
         start = int(np.searchsorted(t, t[-1] - span)) if span else 0
         for k, n in enumerate(self.names, start=1):
+            if n not in self.curves:
+                continue
             self.curves[n].setData(t[max(0, start - 1):], d[max(0, start - 1):, k],
                                    connect="finite")
         y = d[start:, 1:]
@@ -395,6 +407,8 @@ class ScpiPanel(PanelBase):
             # mean over the span; σ only for a single reading (a meter)
             parts = []
             for k, n in enumerate(self.names):
+                if n not in self.curves:
+                    continue
                 col = y[:, k]
                 col = col[np.isfinite(col)]
                 if col.size > 1:

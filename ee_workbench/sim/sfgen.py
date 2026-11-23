@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 
+from . import shared
 from .base import SimBase
 
 SCPI = {"SIN": "SIN", "SQU": "SQU", "RAMP": "RAMP", "PULS": "PULS", "NOIS": "NOIS", "DC": "DC"}
@@ -22,9 +23,13 @@ class SimFgen(SimBase):
         self.ch = {1: _Ch(), 2: _Ch()}
         self.err: list[str] = []
         self.log: list[str] = []
+        shared.set_drive(self)
 
     def clear(self):
         self._out.clear()
+
+    def close(self):
+        self.ch[1].out = False            # its tab is gone: the scope sees nothing of it
 
     def write(self, cmd: str):
         for part in re.split(r"[;\n]+", cmd):

@@ -30,7 +30,7 @@ def open_panels() -> list:
 
 
 class PanelBase(QWidget):
-    KIND = ""                          # supply | ppk2 | dmm | logic | gpio | fgen | scpi | scope
+    KIND = ""                          # supply | ppk2 | dmm | logic | gpio | fgen | scpi | scope | uart
     title_changed = pyqtSignal(str)
     settings_changed = pyqtSignal()    # something worth remembering for next start
     message = pyqtSignal(str)
@@ -121,6 +121,18 @@ class PanelBase(QWidget):
     def profile_names(self) -> list[str]:
         from ..sequencer import PROFILE_WHAT
         return list(PROFILE_WHAT.get(self.KIND, []))
+
+    def identity(self) -> str:
+        """What the instrument said it is (reports, the calibration log)."""
+        return getattr(self.caps, "idn", "") or self.resource
+
+    def calibration(self) -> str:
+        """Its calibration status on this day ("" when no log is kept)."""
+        from ..calibration import note_for
+        try:
+            return note_for(self.identity(), self.resource)
+        except Exception as e:      # noqa: BLE001 - a report must not fail over this
+            return f"calibration log unreadable: {e}"
 
     # ---- several of one model -----------------------------------------------------
     def _free_instance(self, want: int | None = None) -> int:
@@ -398,7 +410,7 @@ class PanelBase(QWidget):
             hdr = self.csv_header()
             skip = ("timestamp", "t_s")
             session.stream(self, self.display_name(), self.model, self.resource,
-                           [c for c in hdr if c not in skip])
+                           [c for c in hdr if c not in skip], self.calibration)
             session.add(self, float(row[hdr.index("t_s")]),
                         [v for c, v in zip(hdr, row) if c not in skip])
 

@@ -22,7 +22,8 @@ class TransportError(Exception):
 
 
 SIM_RESOURCES = ["SIM::66321D", "SIM::6632A", "SIM::3456A", "SIM::PPK2", "SIM::SALEAE",
-                 "SIM::SIGROK", "SIM::FGEN", "SIM::GPIO", "SIM::DPS150"]
+                 "SIM::SIGROK", "SIM::FGEN", "SIM::GPIO", "SIM::DPS150",
+                 "SIM::BK393", "SIM::BK393B", "SIM::XDM1041", "SIM::UART"]
 
 
 def _visa_library() -> str:
@@ -215,6 +216,11 @@ def describe(resource: str) -> str:
     if resource.upper().startswith("DPS150::"):
         path = os.path.realpath(resource[8:])
         return f"DPS-150 {path.removeprefix('/dev/')}"
+    m = re.match(r"BK(393B?)::(.+)", resource, re.I)
+    if m:
+        return f"B&K {m.group(1).upper()} {os.path.realpath(m.group(2)).removeprefix('/dev/')}"
+    if resource.upper().startswith("XDM::"):
+        return f"XDM {os.path.realpath(resource[5:]).removeprefix('/dev/')}"
     if resource.upper().startswith("SALEAE::"):
         return f"Saleae {resource[8:]}".strip()
     if resource.upper().startswith("SIGROK::"):
@@ -224,18 +230,24 @@ def describe(resource: str) -> str:
     m = re.match(r"TCPIP\d*::([^:]+)", resource, re.I)
     if m:
         return m.group(1)
+    m = re.match(r"([A-Za-z0-9.+-]+)::(/dev/\S+?)(@\d+)?$", resource)
+    if m:
+        return f"{m.group(1)} {os.path.realpath(m.group(2)).removeprefix('/dev/')}"
     return resource.replace("::INSTR", "")
 
 
 def serial_path(resource: str) -> str:
-    """'PPK2::/dev/ttyACM0', 'DPS150::/dev/ttyACM0' or 'ASRL/dev/ttyACM0::INSTR'
+    """'PPK2::/dev/ttyACM0', 'DPS150::/dev/ttyACM0', 'BK393B::/dev/ttyUSB0' or 'ASRL/dev/ttyACM0::INSTR'
     -> '/dev/ttyACM0'."""
     r = resource.strip()
     if r.upper().startswith("PPK2::"):
         return r[6:]
     if r.upper().startswith("DPS150::"):
         return r[8:]
-    m = re.match(r"ASRL(.+?)(::INSTR)?$", r, re.I)
+    m = re.match(r"(?:BK393B?|XDM)::(.+)", r, re.I)
+    if m:
+        return m.group(1)
+    m = re.match(r"ASRL(.+?)(?:@\d+)?(::INSTR)?$", r, re.I)
     return m.group(1) if m else r
 
 
@@ -244,12 +256,34 @@ def open_transport(resource: str, baud: int = 9600, model: str = "auto"):
         from . import sim
 
         return sim.open_sim(resource)
+    d = None
+    if model.startswith("SCPI:"):
+        from .instruments.scpi_generic import definition_for
+
+        d = definition_for(model)
+    if d is not None and d.protocol:
+        from .instruments.adapters import open_adapter
+
+        return open_adapter(d, resource, baud)
     if resource.upper().startswith("PPK2::") or model == "PPK2":
         return SerialStream(serial_path(resource))
     if resource.upper().startswith("DPS150::") or model == "DPS150":
         from .instruments.dps150 import BAUD
 
         return SerialStream(serial_path(resource), baud=BAUD)
+    if re.match(r"BK393B?::", resource, re.I) or model in ("BK393", "BK393B"):
+        from .instruments.bk393 import BAUD
+
+        return SerialStream(serial_path(resource), baud=BAUD)
+    if resource.upper().startswith("XDM::") or model == "XDM":
+        from .instruments.xdm import BAUD
+
+        return SerialStream(serial_path(resource), baud=BAUD, wait_s=0.005)
+    if resource.upper().startswith("UART::") or model == "UART":
+        from .instruments.uart import parse_resource
+
+        path, speed = parse_resource(resource)
+        return SerialStream(serial_path(path), baud=speed, wait_s=0.005)
     if resource.upper().startswith("GPIO::") or model == "GPIO":
         from .instruments.gpio import GpioLink, resource_chip
 
@@ -263,6 +297,9 @@ def open_transport(resource: str, baud: int = 9600, model: str = "auto"):
 
         _, host, port = parse_resource(resource)
         return Logic2Link(host, port)
+    m = re.match(r"(ASRL[^@]+)@(\d+)(::INSTR)?$", resource, re.I)
+    if m:                                   # ASRL/dev/ttyUSB0@115200::INSTR
+        resource, baud = f"{m.group(1)}::INSTR", int(m.group(2))
     return VisaTransport(resource, baud=baud)
 
 
@@ -276,7 +313,8 @@ class SerialStream:
 
     MAX_BUFFER = 16 * 1024 * 1024        # ~40 s of PPK2 data if nobody reads
 
-    def __init__(self, path: str, baud: int = 9600):
+    def __init__(self, path: str, baud: int = 9600, wait_s: float = 0.05):
+        # wait_s: how long a read collects bytes, so also the delay of a short reply
         try:
             import serial
         except ImportError as e:
@@ -284,7 +322,7 @@ class SerialStream:
         self.resource = path
         try:
             # exclusive: a second program reading the same stream would steal samples
-            self.port = serial.Serial(path, baudrate=baud, timeout=0.05, write_timeout=2, exclusive=True)
+            self.port = serial.Serial(path, baudrate=baud, timeout=wait_s, write_timeout=2, exclusive=True)
         except serial.SerialException as e:
             hint = ""
             if "ermission" in str(e):
@@ -331,6 +369,12 @@ class SerialStream:
             data = data.encode("latin1")
         self.port.write(data)
         self.port.flush()
+
+    def set_baud(self, baud: int) -> None:
+        self.port.baudrate = baud
+
+    def set_line(self, name: str, on: bool) -> None:
+        setattr(self.port, name, bool(on))          # dtr / rts
 
     def read_available(self) -> bytes:
         with self._lock:

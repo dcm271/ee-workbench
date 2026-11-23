@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# One-shot setup of EE Workbench on a Raspberry Pi (Raspberry Pi OS Bookworm or
+# One-shot setup of OtterBench on a Raspberry Pi (Raspberry Pi OS Bookworm or
 # later, 64-bit, desktop edition). Run from the repository as your normal user;
 # it calls sudo where needed. Safe to re-run.
 #
@@ -95,9 +95,11 @@ if (( GPIB )); then
   "$HERE/scripts/install-gpib-driver.sh"
 fi
 
-step "Adding EE Workbench to the application menu"
+step "Adding OtterBench to the application menu"
 mkdir -p ~/.local/share/applications
 DESK=~/.local/share/applications/ee-workbench.desktop
+mkdir -p ~/.local/share/icons/hicolor/512x512/apps
+cp "$HERE/ee_workbench/gui/branding/logo.png" ~/.local/share/icons/hicolor/512x512/apps/ee-workbench.png
 # Same as the ee-workbench.desktop in the repo, with this checkout's real path.
 sed "s|^Exec=.*|Exec=\"$HERE/run.sh\" --fullscreen|" "$HERE/ee-workbench.desktop" > "$DESK"
 chmod +x "$HERE/run.sh"
@@ -117,7 +119,7 @@ cat <<EOF
 
 Next:
   * Reboot (or log out and in) so the 'gpib' group membership applies.
-  * EE Workbench then starts full screen. F11 leaves full screen; the ✕ button
+  * OtterBench then starts full screen. F11 leaves full screen; the ✕ button
     at the top right quits. Esc turns every supply output off.
   * To run it by hand:   $HERE/run.sh            (windowed)
                          $HERE/run.sh --fullscreen

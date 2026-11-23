@@ -1,4 +1,4 @@
-"""Client for EE Workbench's remote API (standard library only, so it works
+"""Client for OtterBench's remote API (standard library only, so it works
 from any Python 3.9+, inside or outside the app's .venv).
 
     import sys; sys.path.insert(0, "/path/to/ee-workbench")   # if not installed
@@ -57,7 +57,7 @@ class RemoteBench:
                 msg = str(e)
             raise BenchError(msg) from None
         except urllib.error.URLError as e:
-            raise BenchError(f"Can't reach EE Workbench at {self.url}: {e.reason}. Is it "
+            raise BenchError(f"Can't reach OtterBench at {self.url}: {e.reason}. Is it "
                              "running with Tools ▾ → Remote API on?") from None
 
     def __getattr__(self, name):
@@ -77,7 +77,7 @@ def connect(url: str | None = None, token: str | None = None, timeout: float = 6
         try:
             d = json.loads(_api_file().read_text())
         except (OSError, ValueError):
-            raise BenchError("EE Workbench's remote API isn't on (no "
+            raise BenchError("OtterBench's remote API isn't on (no "
                              f"{_api_file()}). Switch it on: Tools ▾ → Remote API.") from None
         url = url or d["url"]
         token = token or d["token"]

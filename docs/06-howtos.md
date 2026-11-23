@@ -87,7 +87,7 @@ To keep a record, press **⏺ Record** before step 4. The session holds the tren
 
 ## Power-cycle a DUT with a relay and check it boots
 
-**You need:** a Raspberry Pi running EE Workbench, a 1-channel 5 V relay module, and a DUT with a pin that goes high when it has booted (or a UART message; see the variant at the end).
+**You need:** a Raspberry Pi running OtterBench, a 1-channel 5 V relay module, and a DUT with a pin that goes high when it has booted (or a UART message; see the variant at the end).
 
 **Wiring** (see [Hardware → GPIO](01-hardware-and-resources.md#raspberry-pi-gpio-header)):
 
@@ -159,6 +159,8 @@ For a log sweep (e.g. load current from 1 µA to 100 mA), sweep `x` from `-6` to
 
 ## Measure a frequency response
 
+With a generator and a scope, **Tools ▾ → Bode plot…** does this with phase as well ([guide](03-users-guide.md#bode-plot)). With a meter:
+
 **You need:** a function generator and the 3456A (or any DMM) in ACV.
 
 1. Generator CH1 → the circuit's input. Set **Sine**, the amplitude you want (mind the 50 Ω / High-Z setting, see [Hardware](01-hardware-and-resources.md#function-generators)), offset 0, and **CH1 output** on.
@@ -181,6 +183,8 @@ Alternatively, without the sequencer: generator **Profile** tab, **Vary** = freq
 ---
 
 ## Measure a regulator's efficiency
+
+With a supply and a load, **Tools ▾ → Regulator test…** does the whole sweep ([guide](03-users-guide.md#regulator-test)). By hand:
 
 1. 6632A → regulator input (tab named "in"). The 66321D, or a resistor with the 66321D measuring it, on the output (tab named "out").
 2. **Tools ▾ → Math channels → ＋ Channel**: name `eff`, expression `_66321d_out.power / _6632a_in.power * 100`, unit `%`. (The **Signals** list shows the exact names; double-click one to insert it.)
@@ -324,7 +328,7 @@ If VXI-11 doesn't answer, use the raw socket form: `TCPIP::192.168.1.50::5025::S
 
 With **Reconnect automatically** ticked in **Tools ▾ → Safety…**, step 2 happens by itself, as soon as the instrument answers again (a USB device: as soon as it is plugged back in).
 
-**A window "EE Workbench: internal error" appeared:** the app caught a problem and carried on. Close the window and keep working. To report it, send `~/.config/ee-workbench/crash.log`.
+**A window "OtterBench: internal error" appeared:** the app caught a problem and carried on. Close the window and keep working. To report it, send `~/.config/ee-workbench/crash.log`.
 
 **The app closed by itself:**
 
@@ -433,6 +437,8 @@ A **multi-output** instrument uses `channels = 2` and `{ch}` in its commands (`s
 
 ## Drain a battery with an electronic load
 
+For capacity and resistance over whole cycles, use **Tools ▾ → Battery tester…** ([guide](03-users-guide.md#battery-tester)). With the sequencer:
+
 Measure a battery's capacity at constant current, stopping at its cut-off voltage.
 
 1. Connect the battery to the load's input (short, thick leads; the load's sense leads to the battery terminals if it has them). Open the load: `SIM::DL3021` to practise.
@@ -496,7 +502,7 @@ An unattended sweep or soak test should survive a crash, a power blip, or a knoc
 
 1. **Limits in the supplies.** **Tools ▾ → Watchdog**: rules *supply · voltage > max* and *supply · current > max* with **In HW** ticked (State shows *+ HW*). The supplies now enforce them by themselves.
 2. **Tools ▾ → Safety…**: tick
-   - *Switch all outputs off when EE Workbench quits*,
+   - *Switch all outputs off when OtterBench quits*,
    - *After a crash, switch off the outputs of every instrument that was open*,
    - *Reconnect automatically*,
    - *After a crash, resume a running sequence* (if the sequence should carry on rather than stop safely),

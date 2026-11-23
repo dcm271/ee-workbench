@@ -6,16 +6,20 @@ from PyQt6.QtWidgets import (QButtonGroup, QDialog, QGridLayout, QHBoxLayout, QI
                              QLabel, QListWidget, QListWidgetItem, QPushButton, QSpinBox,
                              QVBoxLayout)
 
-from ..instruments import MODELS, all_models, model_for
+from ..identify import probeable
+from ..instruments import MODELS, all_models, definition_for, model_for
 from ..transport import list_resources
 from . import touch
 from .theme import set_role
 from .widgets import C_MUTED
 
 SHORT_MODELS = {"auto": "Auto-\ndetect", "663xx": "66321D\n66311B/21B",
-                "6632A": "6632A\n33A/34A", "DPS150": "DPS-150\nFNIRSI", "3456A": "3456A\nDMM", "PPK2": "PPK2\nNordic",
+                "6632A": "6632A\n33A/34A", "DPS150": "DPS-150\nFNIRSI", "3456A": "3456A\nDMM",
+                "BK393": "B&&K 393\nhandheld", "BK393B": "B&&K 393B\nhandheld",
+                "XDM": "OWON\nXDM1041", "PPK2": "PPK2\nNordic",
                 "SALEAE": "Saleae\nLogic", "SIGROK": "sigrok\nlogic",
-                "FGEN": "Function\ngenerator", "GPIO": "Pi GPIO\nheader"}
+                "FGEN": "Function\ngenerator", "GPIO": "Pi GPIO\nheader",
+                "UART": "Serial\nconsole"}
 
 
 class ConnectDialog(QDialog):
@@ -59,6 +63,11 @@ class ConnectDialog(QDialog):
                          "TCPIP::192.168.1.50::INSTR")
         typed.clicked.connect(self._type_resource)
         other.addWidget(typed)
+        self.ident_btn = QPushButton("Identify port…")
+        self.ident_btn.setToolTip("Find out what is on the chosen USB serial port")
+        self.ident_btn.setEnabled(False)
+        self.ident_btn.clicked.connect(self._identify)
+        other.addWidget(self.ident_btn)
         left.addLayout(other)
         body.addLayout(left, 3)
 
@@ -131,6 +140,21 @@ class ConnectDialog(QDialog):
         if ok and text.strip():
             self._select(text.strip())
 
+    def _identify(self):
+        from .identify_dialog import ask
+        hit = ask(self, self.resource, self.open_resources)
+        if hit is not None:
+            self._select(hit.resource)
+            self._set_model(hit.model)
+
+    def _set_model(self, key: str):
+        self.model = key
+        if key in self.model_btns:
+            self.model_btns[key].setChecked(True)
+        else:
+            self.more_btn.setChecked(True)
+            self.more_btn.setText(self._short(key))
+
     def _pick_more(self):
         extra = {k: v for k, v in all_models().items() if k not in MODELS}
         labels = list(extra.values())
@@ -145,19 +169,16 @@ class ConnectDialog(QDialog):
 
     @staticmethod
     def _short(key: str) -> str:
-        kind = "scope" if key.startswith("SCOPE:") else "SCPI"
+        d = definition_for(key) if key.startswith("SCPI:") else None
+        kind = "scope" if key.startswith("SCOPE:") else d.type if d and d.protocol else "SCPI"
         return f"{key.split(':', 1)[-1].title() if kind == 'scope' else key[5:]}\n{kind}"
 
     def _select(self, resource: str):
         self.resource = resource
         implied = model_for(resource)
         if implied != "auto":
-            self.model = implied
-            if implied in self.model_btns:
-                self.model_btns[implied].setChecked(True)
-            else:
-                self.more_btn.setChecked(True)
-                self.more_btn.setText(self._short(implied))
+            self._set_model(implied)
+        self.ident_btn.setEnabled(bool(probeable(resource)))
         self.chosen.setText(resource)
         self.chosen.setStyleSheet("font-weight:bold;")
         self.ok.setEnabled(True)

@@ -1,0 +1,25 @@
+# MAX31855 thermocouple boards on the Raspberry Pi (SPI).
+id = "MAX31855"
+name = "MAX31855 thermocouple board (Raspberry Pi SPI)"
+maker = "Maxim"
+type = "meter"
+protocol = "max31855"
+idn = ["Maxim,MAX31855"]
+error_query = ""
+off = []
+poll_ms = 500
+notes = "One channel per chip-select: MAX31855::/dev/spidev0.0,/dev/spidev0.1. An open or shorted thermocouple shows OVLD."
+
+[[reading]]
+name = "t_n"
+label = "Thermocouple"
+query = "T{n}?"
+unit = "°C"
+plot = "Temperature"
+
+[[reading]]
+name = "cold_n"
+label = "Cold junction"
+query = "COLD{n}?"
+unit = "°C"
+plot = "Cold junction"

@@ -1,0 +1,56 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <!-- OtterBench: an otter whose whiskers are oscilloscope traces -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1d2836"/><stop offset="1" stop-color="#0d1117"/>
+    </linearGradient>
+    <linearGradient id="fur" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#8d6246"/><stop offset="1" stop-color="#6b4630"/>
+    </linearGradient>
+  </defs>
+  <rect x="8" y="8" width="496" height="496" rx="108" fill="url(#bg)"/>
+  <g stroke="#2f4154" stroke-width="3">
+    <line x1="104" y1="30" x2="104" y2="482"/><line x1="180" y1="30" x2="180" y2="482"/>
+    <line x1="256" y1="30" x2="256" y2="482"/><line x1="332" y1="30" x2="332" y2="482"/>
+    <line x1="408" y1="30" x2="408" y2="482"/>
+    <line x1="30" y1="104" x2="482" y2="104"/><line x1="30" y1="180" x2="482" y2="180"/>
+    <line x1="30" y1="256" x2="482" y2="256"/><line x1="30" y1="332" x2="482" y2="332"/>
+    <line x1="30" y1="408" x2="482" y2="408"/>
+  </g>
+  <!-- ears -->
+  <circle cx="136" cy="176" r="40" fill="#6b4630"/><circle cx="376" cy="176" r="40" fill="#6b4630"/>
+  <circle cx="137" cy="178" r="20" fill="#4a2f20"/><circle cx="375" cy="178" r="20" fill="#4a2f20"/>
+  <!-- head: broad and low, as an otter's is -->
+  <path d="M256 104 C356 104 414 172 414 262 C414 358 344 422 256 422 C168 422 98 358 98 262
+           C98 172 156 104 256 104 Z" fill="url(#fur)"/>
+  <!-- pale cheeks and throat -->
+  <path d="M256 258 C300 222 376 250 376 316 C376 378 318 410 256 410 C194 410 136 378 136 316
+           C136 250 212 222 256 258 Z" fill="#ecd9bd"/>
+  <!-- eyes -->
+  <ellipse cx="180" cy="222" rx="22" ry="25" fill="#17120f"/>
+  <ellipse cx="332" cy="222" rx="22" ry="25" fill="#17120f"/>
+  <circle cx="187" cy="213" r="8" fill="#ffffff"/><circle cx="339" cy="213" r="8" fill="#ffffff"/>
+  <!-- nose and mouth -->
+  <path d="M256 316 C232 316 208 290 208 270 C208 252 230 246 256 246 C282 246 304 252 304 270
+           C304 290 280 316 256 316 Z" fill="#241a15"/>
+  <ellipse cx="242" cy="262" rx="16" ry="6" fill="#6a584d"/>
+  <path d="M256 314 L256 336 M256 336 C244 364 206 366 194 344 M256 336 C268 364 306 366 318 344"
+        fill="none" stroke="#3a2619" stroke-width="10" stroke-linecap="round"/>
+  <!-- whiskers: a square wave on the left, a sine on the right -->
+  <g fill="none" stroke="#1a2029" stroke-width="21" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M176 318 H150 V288 H118 V318 H86 V288 H54"/>
+    <path d="M178 352 H146 V376 H110 V352 H74"/>
+    <path d="M336 303 C346 278 364 278 374 303 S402 328 412 303 S440 278 458 303"
+         />
+    <path d="M334 362 C344 342 358 342 368 362 S392 382 402 362 S426 342 438 362"
+         />
+  </g>
+  <g fill="none" stroke-width="11" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M176 318 H150 V288 H118 V318 H86 V288 H54" stroke="#ffb347"/>
+    <path d="M178 352 H146 V376 H110 V352 H74" stroke="#ffb347"/>
+    <path d="M336 303 C346 278 364 278 374 303 S402 328 412 303 S440 278 458 303"
+          stroke="#4fc3f7"/>
+    <path d="M334 362 C344 342 358 342 368 362 S392 382 402 362 S426 342 438 362"
+          stroke="#4fc3f7"/>
+  </g>
+</svg>

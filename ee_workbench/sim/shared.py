@@ -6,7 +6,34 @@ simulated signals, which are periodic and so can't be told apart by period).
 """
 from __future__ import annotations
 
+import weakref
+
 import numpy as np
+
+# The simulated function generator driven last, as if its CH1 went to a filter:
+# while its output is on with a sine, the simulated scopes show it on CH1 and
+# the filter's output on CH2 (see sscope.signal).
+FGEN = None                     # weakref to a SimFgen
+FILTER_HZ, FILTER_Q = 10e3, 0.9                # second-order low-pass
+
+
+def drive():
+    """(frequency, Vpp, offset) of the simulated generator, or None."""
+    g = FGEN() if FGEN is not None else None
+    c = g.ch[1] if g is not None else None
+    if c is None or not c.out or c.func != "SIN":
+        return None
+    return c.freq, c.volt, c.offs
+
+
+def set_drive(gen):
+    global FGEN
+    FGEN = weakref.ref(gen)
+
+
+def filter_response(f: float) -> complex:
+    s = 1j * f / FILTER_HZ
+    return 1 / (1 + s / FILTER_Q + s * s)
 
 SHARED_CH = 7
 STEP = 1e-3

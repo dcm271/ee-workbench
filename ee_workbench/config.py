@@ -17,13 +17,18 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 OPEN_MODES = ("last", "list", "scan", "none")
-MODEL_KEYS = ("auto", "663xx", "6632A", "DPS150", "3456A", "PPK2", "SALEAE", "SIGROK", "FGEN", "GPIO")
+MODEL_KEYS = ("auto", "663xx", "6632A", "DPS150", "3456A", "BK393", "BK393B", "XDM", "PPK2",
+              "SALEAE", "SIGROK", "FGEN", "GPIO", "UART")
 MODEL_ALIASES = {"66321D": "663xx", "66321B": "663xx", "66311B": "663xx",
                  "6633A": "6632A", "6634A": "6632A", "ppk2": "PPK2",
                  "saleae": "SALEAE", "Saleae": "SALEAE",
                  "sigrok": "SIGROK", "fgen": "FGEN", "gpio": "GPIO", "SDG": "FGEN",
+                 "uart": "UART",
                  "33500": "FGEN", "DG1000Z": "FGEN",
-                 "DPS-150": "DPS150", "dps150": "DPS150", "dps-150": "DPS150"}
+                 "DPS-150": "DPS150", "dps150": "DPS150", "dps-150": "DPS150",
+                 "393": "BK393", "393A": "BK393", "BK393A": "BK393", "393B": "BK393B",
+                 "XDM1041": "XDM", "XDM1141": "XDM", "XDM1241": "XDM", "XDM1000": "XDM",
+                 "XDM2041": "XDM", "xdm": "XDM"}
 
 
 def config_dir() -> Path:
@@ -32,11 +37,11 @@ def config_dir() -> Path:
 
 
 TEMPLATE = '''\
-# EE Workbench start-up configuration.
+# OtterBench start-up configuration.
 # Resources given on the command line (./run.sh GPIB0::5::INSTR ...) override this.
 
 [startup]
-# What to open when EE Workbench starts:
+# What to open when OtterBench starts:
 #   "last"  reopen the instruments that were open when it last closed (default)
 #   "list"  always open the [[instrument]] entries below
 #   "scan"  scan the GPIB bus and open everything that answers; addresses use
@@ -55,14 +60,22 @@ api_port = 8765
 
 # Instruments for open = "list" (also tells "scan" which model is where).
 # model: "auto" (supplies and function generators identify themselves), "663xx",
-# "6632A", "DPS150", "3456A", "PPK2", "SALEAE", "SIGROK", "FGEN" or "GPIO".
+# "6632A", "DPS150", "3456A", "BK393", "BK393B", "XDM", "PPK2", "SALEAE", "SIGROK",
+# "FGEN", "GPIO" or "UART" (or any definition's id: "34461A", "DP832", "ET44", …).
 # The 3456A cannot identify itself, so always give its model.
 # A Nordic PPK2 is a serial port: resource = "PPK2::/dev/ttyACM0".
-# So is a FNIRSI DPS-150 supply: resource = "DPS150::/dev/ttyACM0".
+# So is a FNIRSI DPS-150 supply: resource = "DPS150::/dev/ttyACM0", and a B&K 393 /
+# 393B handheld meter: "BK393::/dev/ttyUSB0" / "BK393B::/dev/ttyUSB0", and an OWON
+# XDM1041 / XDM1241 / XDM2041 bench meter: "XDM::/dev/ttyUSB0" (a
+# /dev/serial/by-id/... path keeps working when the port number changes).
 # A Saleae logic analyzer goes through a running Logic 2 (automation server on):
 # resource = "SALEAE::<device id>" (or "SALEAE::" for the first one it sees).
 # Anything sigrok supports: resource = "SIGROK::fx2lafw" (driver[:conn=bus.addr]).
 # A LAN function generator: resource = "TCPIP::192.168.1.50::INSTR", model = "FGEN".
+# A DUT's serial console: resource = "UART::/dev/ttyUSB0@115200".
+# Riden, Korad / Tenma and Atorch units, thermometers and Pi sensor boards:
+# "RD60XX::/dev/ttyUSB0", "KA3005P::/dev/ttyACM0", "PX100::/dev/ttyUSB0",
+# "CENTER309::/dev/ttyUSB0", "W1::" (DS18B20), "MAX31855::/dev/spidev0.0".
 # The Raspberry Pi's GPIO header: resource = "GPIO::" (or "GPIO::/dev/gpiochip0").
 # Optional for a 3456A: name, function, range, nplc, autozero, filter.
 #

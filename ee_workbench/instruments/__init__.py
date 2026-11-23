@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from ..transport import TransportTimeout
 from .agilent663xx import Agilent663xx
+from .bk393 import BK393, BK393B
 from .dps150 import DPS150
 from .fgen import FunctionGenerator, looks_like_fgen
 from .gpio import GpioDriver
@@ -11,8 +12,11 @@ from .hp6632a import HP6632A
 from .ppk2 import PPK2
 from . import scopes
 from .saleae import SaleaeLogic
-from .scpi_generic import ScpiDriver, definition_for, definitions, match_idn
+from .scpi_generic import (ScpiDriver, definition_for, definitions, match_idn,
+                           resource_definition)
 from .sigrok import SigrokLogic
+from .uart import UartDriver, parse_resource as _uart_resource
+from .xdm import OwonXDM
 
 MODELS = {
     "auto": "Auto-detect (asks *IDN?)",
@@ -20,11 +24,15 @@ MODELS = {
     "6632A": "HP 6632A / 6633A / 6634A",
     "DPS150": "FNIRSI DPS-150 (USB)",
     "3456A": "HP 3456A DMM",
+    "BK393": "B&K Precision 393 handheld DMM (USB)",
+    "BK393B": "B&K Precision 393B handheld DMM (USB)",
+    "XDM": "OWON XDM1041 / XDM1241 / XDM2041 bench DMM (USB)",
     "PPK2": "Nordic Power Profiler Kit II",
     "SALEAE": "Saleae Logic 8 / Pro 8 / Pro 16 (via Logic 2)",
     "SIGROK": "Logic analyzer via sigrok (fx2lafw, DSLogic, …)",
     "FGEN": "Function generator (Siglent SDG, Rigol DG, Keysight 33xxx)",
     "GPIO": "Raspberry Pi GPIO header (or a Linux GPIO chip)",
+    "UART": "DUT serial console (UART text: log, values, commands)",
 }
 BUILTIN_MODELS = dict(MODELS)
 
@@ -36,7 +44,7 @@ def all_models() -> dict[str, str]:
     for key, (label, _) in scopes.MODELS.items():
         out[key] = label
     for d in sorted(definitions().values(), key=lambda d: (d.type, d.name)):
-        out[d.model_key] = f"{d.name}  [SCPI {d.type}]"
+        out[d.model_key] = f"{d.name}  [{'' if d.protocol else 'SCPI '}{d.type}]"
     return out
 
 
@@ -46,6 +54,10 @@ def resolve_model(name: str) -> str:
     s = str(name).strip()
     if not s:
         return "auto"
+    if s.upper() in SERIAL_ALIASES:
+        return SERIAL_ALIASES[s.upper()]
+    if s.upper() in SERIAL_DMMS:
+        return s.upper()
     if s.upper().startswith("SCPI:"):
         d = definition_for(s)
         return d.model_key if d else s
@@ -57,14 +69,25 @@ def resolve_model(name: str) -> str:
         return d.model_key
     return s
 
-_CLASSES = {"663xx": Agilent663xx, "6632A": HP6632A, "DPS150": DPS150, "3456A": HP3456A, "PPK2": PPK2,
+_CLASSES = {"663xx": Agilent663xx, "6632A": HP6632A, "DPS150": DPS150, "3456A": HP3456A, "BK393": BK393,
+            "BK393B": BK393B, "XDM": OwonXDM, "PPK2": PPK2,
             "SALEAE": SaleaeLogic, "SIGROK": SigrokLogic, "FGEN": FunctionGenerator,
             "GPIO": GpioDriver}
 
 SIM_MODELS = {"SIM::66321D": "663xx", "SIM::6632A": "6632A", "SIM::3456A": "3456A",
               "SIM::PPK2": "PPK2", "SIM::SALEAE": "SALEAE",
               "SIM::SIGROK": "SIGROK", "SIM::FGEN": "FGEN", "SIM::SDG": "FGEN",
-              "SIM::GPIO": "GPIO", "SIM::DPS150": "DPS150"}
+              "SIM::GPIO": "GPIO", "SIM::DPS150": "DPS150",
+              "SIM::BK393": "BK393", "SIM::BK393B": "BK393B",
+              "SIM::XDM": "XDM", "SIM::XDM1041": "XDM", "SIM::XDM1241": "XDM",
+              "SIM::XDM2041": "XDM", "SIM::UART": "UART"}
+
+# Names people type for the built-in drivers that aren't their model key. B&K
+# never sold a "393A": it is taken to mean the original 393.
+SERIAL_ALIASES = {"393": "BK393", "393A": "BK393", "BK393A": "BK393", "393B": "BK393B",
+                  "XDM1041": "XDM", "XDM1141": "XDM", "XDM1241": "XDM", "XDM1000": "XDM",
+                  "XDM2041": "XDM"}
+SERIAL_DMMS = ("BK393", "BK393B", "XDM")       # "<key>::/dev/ttyUSB0" resources
 
 
 def detect(transport) -> str:
@@ -109,10 +132,18 @@ def model_for(resource: str, model: str = "auto") -> str:
         return "SALEAE"
     if resource.upper().startswith("DPS150::"):
         return "DPS150"
+    for key in SERIAL_DMMS:
+        if resource.upper().startswith(key + "::"):
+            return key
     if resource.upper().startswith("SIGROK::"):
         return "SIGROK"
     if resource.upper().startswith("GPIO::"):
         return "GPIO"
+    if resource.upper().startswith("UART::"):
+        return "UART"
+    d = resource_definition(resource)
+    if d is not None:
+        return d.model_key
     base = sim_base(resource).upper()
     if base in SIM_MODELS:
         return SIM_MODELS[base]
@@ -138,7 +169,7 @@ def make_driver(model: str, transport, resource: str = ""):
         model = detect(transport)
     model = resolve_model(model)
     if model.startswith("SCPI:"):
-        d = definition_for(model)
+        d = definition_for(model, resource)
         if d is None:
             raise RuntimeError(f"No generic SCPI definition '{model[5:]}' (built in, or in "
                                "~/.config/ee-workbench/instruments)")
@@ -151,4 +182,6 @@ def make_driver(model: str, transport, resource: str = ""):
         if model == "SALEAE":
             return SaleaeLogic(transport, "" if sim else resource)
         return SigrokLogic(transport, "fx2lafw" if sim else resource)
+    if model == "UART":
+        return UartDriver(transport, _uart_resource(resource)[1])
     return _CLASSES[model](transport)

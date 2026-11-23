@@ -19,7 +19,7 @@ OUT = DOCS / "pdf"
 CSS_TEXT = """
 @page {
   size: Letter; margin: 22mm 18mm 20mm 18mm;
-  @bottom-left { content: "EE Workbench · " string(doctitle); font: 8pt 'DejaVu Sans'; color: #888; }
+  @bottom-left { content: "OtterBench · " string(doctitle); font: 8pt 'DejaVu Sans'; color: #888; }
   @bottom-right { content: counter(page) " / " counter(pages); font: 8pt 'DejaVu Sans'; color: #888; }
 }
 @page :first { @bottom-left { content: none; } }
@@ -71,7 +71,7 @@ def render(md_path: Path) -> tuple[str, str]:
     meta, body = parse_front_matter(md_path.read_text())
     html = markdown.markdown(body, extensions=["tables", "fenced_code", "sane_lists", "attr_list"])
     title = meta.get("title", md_path.stem)
-    cover = (f'<div class="cover"><div class="kicker">EE Workbench</div>'
+    cover = (f'<div class="cover"><div class="kicker">OtterBench</div>'
              f'<div class="title">{title}</div>'
              f'<div class="subtitle">{meta.get("subtitle", "")}</div>'
              f'<div class="date">Generated {datetime.date.today():%B %d, %Y}</div></div>')

@@ -1,0 +1,77 @@
+# Atorch PX-100 and the DL24 units that answer its protocol (instruments/adapters.py).
+id = "PX100"
+name = "Atorch PX-100 / DL24 electronic load (USB)"
+maker = "Atorch"
+type = "load"
+protocol = "px100"
+idn = ["PX-100"]
+error_query = ""
+off = ["INP OFF"]
+poll_ms = 500
+notes = "Constant current only over USB. DL24 firmware varies: some units do not answer these commands. Power the load before plugging in USB (its USB port is not isolated). In the console, RESET clears the Ah / Wh counters and TIMER 600 sets its timer (s)."
+
+[[reading]]
+name = "voltage"
+label = "Voltage"
+query = "VOLT?"
+unit = "V"
+
+[[reading]]
+name = "current"
+label = "Current"
+query = "CURR?"
+unit = "A"
+
+[[reading]]
+name = "power"
+label = "Power"
+query = "POW?"
+unit = "W"
+
+[[reading]]
+name = "ah"
+label = "Charge"
+query = "AH?"
+unit = "Ah"
+plot = "-"
+
+[[reading]]
+name = "wh"
+label = "Energy"
+query = "WH?"
+unit = "Wh"
+plot = "-"
+
+[[reading]]
+name = "temp"
+label = "Heat sink"
+query = "TEMP?"
+unit = "°C"
+
+[[setting]]
+name = "cc"
+label = "Current"
+kind = "number"
+unit = "A"
+min = 0
+max = 40
+set = "CURR {value}"
+query = "SET?"
+
+[[setting]]
+name = "cutoff"
+label = "Cut-off voltage"
+kind = "number"
+unit = "V"
+min = 0
+max = 200
+set = "CUTOFF {value}"
+query = "CUTOFF?"
+
+[[setting]]
+name = "input"
+label = "Load"
+kind = "bool"
+set = "INP {on_off}"
+query = "INP?"
+output = true

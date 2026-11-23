@@ -61,7 +61,11 @@ class SimScpi(SimBase):
                 self.queries[self._norm(fill(s.query, ch=s.ch))] = ("setting", s)
         for r in d.readings:
             if r.query:
-                self.queries[self._norm(fill(r.query, ch=r.ch))] = ("reading", r)
+                key = self._norm(fill(r.query, ch=r.ch))
+                if r.field >= 0:        # several readings in one comma-separated answer
+                    self.queries.setdefault(key, ("fields", {}))[1][r.field] = r
+                else:
+                    self.queries[key] = ("reading", r)
             if r.query_from:
                 base = d.setting(r.query_from) or d.setting(f"{r.query_from}{r.ch}")
                 for o in base.options:
@@ -121,6 +125,10 @@ class SimScpi(SimBase):
                 self.errors.append('-113,"Undefined header"')
                 return
             kind, obj = hit
+            if kind == "fields":
+                self._out.append(",".join(self._reading(obj[k]) if k in obj else "0"
+                                          for k in range(max(obj) + 1)))
+                return
             self._out.append(self._reading(obj) if kind == "reading" else
                              self._setting_reply(obj))
             return

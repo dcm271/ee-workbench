@@ -5,6 +5,7 @@ from __future__ import annotations
 from PyQt6.QtWidgets import (QCheckBox, QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox,
                              QFormLayout, QGroupBox, QLabel, QLayout, QVBoxLayout)
 
+from ..about import APP_NAME
 from ..safety import Safety
 from . import touch
 from .panel_base import open_panels
@@ -23,7 +24,7 @@ class SafetyDialog(QDialog):
 
         g = QGroupBox("Outputs")
         gl = QVBoxLayout(g)
-        self.off_quit = QCheckBox("Switch all outputs off when EE Workbench quits")
+        self.off_quit = QCheckBox(f"Switch all outputs off when {APP_NAME} quits")
         self.off_quit.setChecked(s.off_on_quit)
         gl.addWidget(self.off_quit)
         self.off_crash = QCheckBox("After a crash, switch off the outputs of every instrument "

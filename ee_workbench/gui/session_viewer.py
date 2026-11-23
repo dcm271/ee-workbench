@@ -28,6 +28,7 @@ from PyQt6.QtWidgets import (QAbstractItemView, QCheckBox, QDialog, QDialogButto
 
 import numpy as np
 
+from ..about import APP_NAME
 from ..instruments.logic import digital_envelope
 from ..mathchannels import MathError, evaluate, integrate
 from ..session import SUFFIX, SessionReader, Stream
@@ -102,6 +103,10 @@ class SessionViewer(QMainWindow):
         self.caps = QListWidget()
         self.caps.itemClicked.connect(lambda it: self.go(*it.data(Qt.ItemDataRole.UserRole)))
         self.side_tabs.addTab(self.caps, "Captures")
+        self.serial = QListWidget()
+        self.serial.itemClicked.connect(lambda it: self.go(it.data(Qt.ItemDataRole.UserRole)))
+        self.side_tabs.addTab(self.serial, "Serial")
+        self.side_tabs.setTabVisible(3, False)
         sv.addWidget(self.side_tabs, 1)
         split.addWidget(side)
 
@@ -158,7 +163,7 @@ class SessionViewer(QMainWindow):
     # ---------------------------------------------------------------- loading
     def choose(self):
         path, _ = QFileDialog.getOpenFileName(self, "Open session", "",
-                                              f"EE Workbench session (*{SUFFIX})")
+                                              f"{APP_NAME} session (*{SUFFIX})")
         if path:
             self.load(path)
 
@@ -206,6 +211,13 @@ class SessionViewer(QMainWindow):
             it = QListWidgetItem(f"{self._clock(t)}  {text}")
             it.setData(Qt.ItemDataRole.UserRole, t)
             self.notes.addItem(it)
+        self.serial.clear()
+        texts = sorted((t, d, x) for st in s.streams for t, d, x in st.lines)
+        self.side_tabs.setTabVisible(3, bool(texts))
+        for t, d, x in texts[:MAX_ROWS]:
+            it = QListWidgetItem(f"{self._clock(t)}  {'» ' if d == 'tx' else ''}{x}")
+            it.setData(Qt.ItemDataRole.UserRole, t)
+            self.serial.addItem(it)
         self.caps.clear()
         for c in s.captures:
             a0, b0 = c.span
@@ -596,7 +608,7 @@ class SessionViewer(QMainWindow):
 def open_viewer(parent=None, path: str | None = None) -> SessionViewer | None:
     if path is None:
         path, _ = QFileDialog.getOpenFileName(parent, "Open session", "",
-                                              f"EE Workbench session (*{SUFFIX})")
+                                              f"{APP_NAME} session (*{SUFFIX})")
         if not path:
             return None
     w = SessionViewer(path, parent)

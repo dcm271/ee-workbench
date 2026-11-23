@@ -170,3 +170,20 @@ class DmmReading:
     unit: str
     overload: bool = False
     errors: list[str] = field(default_factory=list)
+    # Meters that only report what their own knob is set to (B&K 393 / 393B):
+    function: str = ""
+    native: str = ""              # unit as displayed, e.g. "kΩ"; value is in `unit`
+    mult: float = 1.0             # value = displayed number * mult
+    decimals: int = 0
+    text: str = ""                # a word on the display instead of a number
+    flags: list[str] = field(default_factory=list)   # AUTO, HOLD, MAX ...
+    secondary: str = ""           # the second display line, as text
+    cfg: object = None            # OWON XDM: the settings the meter reported
+
+    def display(self) -> str:
+        """The reading as the meter shows it."""
+        if self.overload:
+            return "-OL" if self.value < 0 else "OL"
+        if self.text:
+            return self.text
+        return f"{self.value / self.mult:+.{self.decimals}f} {self.native}".rstrip()

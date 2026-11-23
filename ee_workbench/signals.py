@@ -8,6 +8,7 @@ signals_of(kind, reading) -> {quantity: (t array, value array)}
   dmm      value
   gpio     gpio17 … (each configured pin: 0 / 1)
   scpi     each reading its definition names (value; voltage1, current1, …)
+  uart     each value its patterns find in the text
 
 Identifiers for expressions: `slug("66321D · DUT rail")` = "_66321d_dut_rail",
 so a math channel can say  _66321d_dut_rail.power / ppk2.current .
@@ -88,6 +89,14 @@ def signals_of(kind: str, r) -> dict:
         return {"value": (t, np.array([float(r.value)]))}
     if kind == "gpio":
         return {f"gpio{g}": (t, np.array([float(v)])) for g, v in r.levels.items()}
+    if kind == "uart":
+        out: dict = {}
+        for ln in r.lines:
+            for k, v in ln.values.items():
+                out.setdefault(k, ([], []))
+                out[k][0].append(ln.t)
+                out[k][1].append(v)
+        return {k: (np.array(a, float), np.array(b, float)) for k, (a, b) in out.items()}
     if kind == "scpi":
         return {k: (t, np.array([np.nan if v is None else float(v)]))
                 for k, v in r.values.items()}

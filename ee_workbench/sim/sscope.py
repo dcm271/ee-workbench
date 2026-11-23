@@ -5,7 +5,9 @@ Tektronix or Siglent command dialect (instruments/scopes.py).
   CH2  1 kHz 1 V-peak sine
   CH3  500 Hz 0-2 V triangle
   CH4  1.2 V DC with noise
-CH1 and CH2 are shown at start. Waveforms are encoded with each maker's
+CH1 and CH2 are shown at start. While a simulated function generator drives a
+sine, CH1 is that sine and CH2 the same through a 10 kHz low-pass (for the
+Bode window). Waveforms are encoded with each maker's
 byte format and preamble, so the driver's decoding is exercised for real.
 """
 from __future__ import annotations
@@ -15,6 +17,7 @@ import time
 
 import numpy as np
 
+from . import shared
 from .base import SimBase
 
 _N = r"([-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?)"
@@ -28,6 +31,13 @@ IDN = {"rigol": "RIGOL TECHNOLOGIES,DS1104Z,SIM0001,00.04.05",
 
 def signal(ch: int, t: np.ndarray) -> np.ndarray:
     rng = np.random.default_rng()
+    d = shared.drive()
+    if d is not None and ch in (1, 2):
+        f, vpp, offs = d
+        h = 1.0 if ch == 1 else shared.filter_response(f)
+        dc = offs                              # a low-pass: DC goes through
+        v = dc + abs(h) * vpp / 2 * np.sin(2 * np.pi * f * t + np.angle(h))
+        return v + rng.normal(0, 2e-4 + 0.002 * abs(h) * vpp / 2, t.size)
     if ch == 1:
         ph = np.mod(t, 1e-3) / 1e-3
         edge = 0.5 * (np.tanh((ph - 0.0) / 0.004) - np.tanh((ph - 0.5) / 0.004)) + \
@@ -179,7 +189,7 @@ class SimScope(SimBase):
             if rigol:
                 yor, yref = self.offset[self.src - 1] / yinc, 127
             else:
-                yor, yref = -self.offset[self.src - 1], 128
+                yor, yref = self.offset[self.src - 1], 128    # the volts at mid-screen
             return self._out.append(",".join(f"{x:.6E}" for x in
                                              (0, 0, n, 1, dt, t0, 0, yinc, yor, yref)))
         if u in ("WAV:DATA?", "WAVEFORM:DATA?"):
@@ -188,7 +198,7 @@ class SimScope(SimBase):
             if rigol:
                 b = (v + self.offset[self.src - 1]) / yinc + 127
             else:
-                b = (v + self.offset[self.src - 1]) / yinc + 128
+                b = (v - self.offset[self.src - 1]) / yinc + 128
             self._bin = np.clip(np.round(b), 0, 255).astype(np.uint8).tobytes()
             return None
         return False
@@ -271,7 +281,7 @@ class SimScope(SimBase):
         if re.match(r"^DATA:(ENC|WID|STAR|STOP)\w*\s+\S+$", u):
             return None
         ymult = self.scale[self.src - 1] / 25.0
-        yoff = -self.offset[self.src - 1] / ymult
+        yoff = -self.offset[self.src - 1] / ymult      # offset: the volts at mid-screen
         t0, dt, v = self._trace(self.src)
         q = {"WFMO:XIN?": dt, "WFMO:XZE?": t0, "WFMO:YMU?": ymult, "WFMO:YOF?": yoff,
              "WFMO:YZE?": 0.0}

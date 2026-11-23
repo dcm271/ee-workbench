@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Launch EE Workbench.  Examples:
+# Launch OtterBench.  Examples:
 #   ./run.sh                       # pick a resource in the GUI
 #   ./run.sh GPIB0::5::INSTR       # connect straight to GPIB address 5
 #   ./run.sh SIM::66321D SIM::PPK2 # built-in simulators, no hardware needed
@@ -34,7 +34,7 @@ while true; do
   crashes=("${recent[@]}")
   log="${XDG_CONFIG_HOME:-$HOME/.config}/ee-workbench/crash.log"
   mkdir -p "$(dirname "$log")"
-  echo "---- $(date '+%Y-%m-%d %H:%M:%S')  run.sh: EE Workbench exited with status $rc" >> "$log"
+  echo "---- $(date '+%Y-%m-%d %H:%M:%S')  run.sh: OtterBench exited with status $rc" >> "$log"
   if (( ${#crashes[@]} >= 5 )); then
     echo "---- run.sh: 5 crashes in 2 minutes; not restarting again" >> "$log"
     exit "$rc"

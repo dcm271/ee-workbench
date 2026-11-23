@@ -7,6 +7,7 @@ from pathlib import Path
 
 from PyQt6.QtWidgets import QFileDialog, QInputDialog, QMessageBox
 
+from ..about import APP_NAME
 from .. import report
 from ..session import SUFFIX
 
@@ -39,7 +40,7 @@ def write(parent, html: str, path: str):
 def report_for_session(parent, path: str | None = None, t_range=None, columns=None):
     if path is None:
         path, _ = QFileDialog.getOpenFileName(parent, "Report on a session", "",
-                                              f"EE Workbench session (*{SUFFIX})")
+                                              f"{APP_NAME} session (*{SUFFIX})")
         if not path:
             return
     title, ok = QInputDialog.getText(parent, "Report", "Title:", text=f"Session {Path(path).stem}")

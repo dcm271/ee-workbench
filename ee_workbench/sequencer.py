@@ -50,7 +50,7 @@ PROFILE_WHAT = {"supply": ["voltage", "current"], "ppk2": ["voltage"],
                 "fgen": ["frequency", "amplitude", "offset", "duty"]}
 UNITS = {"voltage": "V", "current": "A", "power": "W", "dvm": "V", "peak": "A", "charge": "C",
          "ovp": "V", "frequency": "Hz", "amplitude": "Vpp", "offset": "V", "duty": "%"}
-ACTIONS = ["Set", "Wait", "Measure", "Capture", "Profile", "Wait for", "Note"]
+ACTIONS = ["Set", "Wait", "Measure", "Capture", "Profile", "Wait for", "Send", "Note"]
 FGEN_FUNCS = ("sine", "square", "ramp", "pulse", "noise", "dc")
 SAFE = {k: getattr(math, k) for k in dir(math) if not k.startswith("_")}
 SAFE.update(abs=abs, min=min, max=max, round=round)
@@ -250,7 +250,7 @@ class Bench:
         inst = self.inst(name)
         if inst.kind == "gpio":
             return self.gpio(name, what, value)
-        if inst.kind in ("scpi", "scope"):
+        if inst.kind in ("scpi", "scope", "uart"):
             names = inst.set_names or []
             hit = next((n for n in names if n.lower() == str(what).strip().lower()), None)
             if hit is None:
@@ -303,7 +303,19 @@ class Bench:
                                 + (", ".join(can) or "nothing") + ")")
         seconds = float(seconds or 0.0)
         t0 = self._clock()
-        if inst.kind == "scope":
+        if inst.kind == "uart":
+            # every value printed since now; a line may be a while coming
+            end = time.monotonic() + max(60.0, seconds + 10.0)
+            while True:
+                vals = [x for _, x in inst.run(lambda d: d.values_since(name_of(d, what), t0))]
+                if vals and self._clock() >= t0 + seconds:
+                    break
+                if time.monotonic() > end:
+                    raise SequenceError(f"{inst.name} printed no '{what}' in "
+                                        f"{max(60.0, seconds + 10.0):g} s")
+                self.wait(0.05)
+            v = sum(vals) / len(vals)
+        elif inst.kind == "scope":
             # from the waveform on screen now (repeated for `seconds`, averaged)
             vals = []
             end = time.monotonic() + seconds
@@ -376,6 +388,64 @@ class Bench:
                 raise SequenceError(f"{pin} didn't go {'high' if want else 'low'} within "
                                     f"{timeout:g} s")
             self.wait(poll)
+
+    # ---- text: serial consoles, raw SCPI --------------------------------------------
+    def send(self, name: str, text: str):
+        """A line to a serial console (its line end is added), or a command to
+        a generic SCPI tab. wait_text() then looks at what comes back."""
+        self.check()
+        inst = self.inst(name)
+        if inst.kind not in ("uart", "scpi"):
+            raise SequenceError(f"{inst.name} isn't a serial console (or a SCPI instrument)")
+        self._log(f"send {inst.name}: {text}")
+        if inst.kind == "uart":
+            inst.run(lambda d: d.send(str(text)))
+        else:
+            inst.run(lambda d: d.write(str(text)))
+
+    def _match(self, name: str, regex: str, timeout: float) -> dict | None:
+        import re
+        self.check()
+        inst = self.inst(name)
+        if inst.kind != "uart":
+            raise SequenceError(f"{inst.name} isn't a serial console")
+        try:
+            re.compile(regex)
+        except re.error as e:
+            raise SequenceError(f"'{regex}': {e}") from None
+        end = time.monotonic() + float(timeout)
+        while True:
+            hit = inst.run(lambda d: d.match(regex))
+            if hit is not None:
+                self._log(f"{inst.name}: {hit['text']}")
+                return hit
+            if time.monotonic() >= end:
+                self._log(f"{inst.name}: nothing matched '{regex}' in {float(timeout):g} s")
+                return None
+            self.wait(0.02)
+
+    def wait_text(self, name: str, regex: str, timeout: float = 10.0):
+        """Wait for a line matching `regex` on a serial console, looking from
+        the last send() (or the last match) on. Returns the number in its first
+        group, else that group's text, else the line; None if none came."""
+        hit = self._match(name, regex, timeout)
+        if hit is None:
+            return None
+        if hit["value"] is not None:
+            return hit["value"]
+        return next((g for g in hit["groups"] if g is not None), hit["text"])
+
+    def fail(self, name: str, why: str):
+        """Make the current row FAIL for a reason that isn't a number."""
+        self._checked = True
+        self._fails.append(f"{name} ({why})")
+        self._log(f"FAIL {name}: {why}")
+        if self.on_fail:
+            self.on_fail(name, None, None, None)
+
+    def passed_check(self):
+        """Something was judged and was fine (the row gets a PASS / FAIL)."""
+        self._checked = True
 
     # ---- profiles --------------------------------------------------------------------
     def profile(self, name: str, what: str, text: str) -> int:
@@ -482,6 +552,30 @@ class Bench:
                 self._log(f"{i.name}: output off failed: {e}")
 
 
+class Unstopped:
+    """`with Unstopped(bench):` lets commands through after a Stop: the
+    switch-everything-off part of a test must never be skipped."""
+
+    def __init__(self, bench: "Bench"):
+        self.bench = bench
+
+    def __enter__(self):
+        self.old = [self.bench.stop_event] + [getattr(i, "stop", None) for i in self.bench._insts]
+        fresh = threading.Event()
+        self.bench.stop_event = fresh
+        for i in self.bench._insts:
+            if hasattr(i, "stop"):
+                i.stop = fresh
+        return self
+
+    def __exit__(self, *_a):
+        self.bench.stop_event = self.old[0]
+        for i, s in zip(self.bench._insts, self.old[1:]):
+            if hasattr(i, "stop"):
+                i.stop = s
+        return False
+
+
 def run_plan(plan: Plan, bench: Bench, start: int = 0, extra: dict | None = None,
              on_pass=None):
     """Run the steps; one results row per pass.
@@ -544,6 +638,23 @@ def run_plan(plan: Plan, bench: Bench, start: int = 0, extra: dict | None = None
                 elif act == "Profile":
                     bench.profile(st.target, st.what, str(st.value)
                                   .replace("{x}", "" if x is None else f"{x:g}"))
+                elif act == "Send":
+                    bench.send(st.target, _fill_text(st.value, x, idx, extra))
+                elif act == "Wait for" and bench.inst(st.target).kind == "uart":
+                    regex, timeout = _text_args(_fill_text(st.value, x, idx, extra, braces=False))
+                    hit = bench._match(st.target, regex, timeout)
+                    col = st.label or f"{st.target} reply"
+                    if hit is None:
+                        # nan keeps a numeric column numeric
+                        row[col] = float("nan") if "(" in regex else "no reply"
+                        bench.fail(col, f"no '{regex}' within {timeout:g} s")
+                    else:
+                        bench.passed_check()
+                        v = hit["value"]
+                        row[col] = v if v is not None else next(
+                            (g for g in hit["groups"] if g is not None), hit["text"])
+                        if v is not None:
+                            _limits(bench, st, col, v, env)
                 elif act == "Wait for":
                     level, timeout = _wait_for_args(st.value, env)
                     took = bench.wait_for(st.target, st.what, level, timeout)
@@ -551,11 +662,7 @@ def run_plan(plan: Plan, bench: Bench, start: int = 0, extra: dict | None = None
                         row[st.label] = round(took, 6)
                         _limits(bench, st, st.label, took, env)
                 elif act == "Note":
-                    text = str(st.value).replace("{x}", "" if x is None else f"{x:g}") \
-                        .replace("{i}", str(idx + 1))
-                    for k, v in extra.items():
-                        text = text.replace("{" + k + "}", str(v))
-                    bench.note(text)
+                    bench.note(_fill_text(st.value, x, idx, extra))
                 else:
                     raise SequenceError(f"Unknown action '{act}'")
             except (Stopped, SequenceError):
@@ -583,6 +690,31 @@ def _limits(bench: Bench, st: Step, col: str, v, env: dict):
     hi = value_of(st.hi, env) if str(st.hi).strip() else None
     if lo is not None or hi is not None:
         bench.expect(col, v, lo, hi)
+
+
+def _fill_text(text, x, idx: int, extra: dict, braces: bool = True) -> str:
+    """{x}, {i} and the extra names ({serial}) in a Note, Send or pattern.
+    braces=False (a regex, where {2} means twice): only the extra names."""
+    out = str(text)
+    if braces:
+        out = out.replace("{x}", "" if x is None else f"{x:g}").replace("{i}", str(idx + 1))
+    for k, v in extra.items():
+        out = out.replace("{" + k + "}", str(v))
+    return out
+
+
+def _text_args(text: str) -> tuple[str, float]:
+    """'adc=(\\d+) timeout=2' -> (regex, seconds)."""
+    import re
+    m = re.match(r"^(.*?)\s+timeout=([\d.]+)\s*$", str(text))
+    if m:
+        return m.group(1), float(m.group(2))
+    return str(text).strip(), 10.0
+
+
+def name_of(drv, what: str) -> str:
+    """A pattern's own spelling (names are matched without case)."""
+    return next((p.name for p in drv.state.patterns if p.name.lower() == what), what)
 
 
 def _wait_for_args(text, env) -> tuple[float, float]:

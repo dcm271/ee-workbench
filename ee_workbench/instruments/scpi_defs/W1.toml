@@ -1,0 +1,18 @@
+# DS18B20 and other 1-Wire sensors on the Raspberry Pi (kernel w1_therm driver).
+id = "W1"
+name = "DS18B20 1-Wire temperature sensors (Raspberry Pi)"
+maker = "Maxim"
+type = "meter"
+protocol = "w1"
+idn = ["1-Wire,DS18B20"]
+error_query = ""
+off = []
+poll_ms = 1000
+notes = "Each sensor takes about 0.75 s per reading. Channels are in the order of the sensor ids, or as listed in the resource: W1::28-aaaa,28-bbbb."
+
+[[reading]]
+name = "t_n"
+label = "Sensor"
+query = "T{n}?"
+unit = "°C"
+plot = "Temperature"

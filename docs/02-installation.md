@@ -7,7 +7,7 @@ subtitle: From a fresh Linux machine to a working GPIB bus
 
 Other chapters: [Hardware](01-hardware-and-resources.md) · [User's Guide](03-users-guide.md) · [Technical Reference](04-technical-reference.md) · [Raspberry Pi](05-raspberry-pi.md) · [How-to guides](06-howtos.md) · [README](../README.md)
 
-These steps take a fresh Ubuntu machine to EE Workbench talking to your instruments. It takes about 15 minutes, mostly compile time.
+These steps take a fresh Ubuntu machine to OtterBench talking to your instruments. It takes about 15 minutes, mostly compile time.
 
 > **One step:** `scripts/setup-ubuntu.sh` does everything on this page: apt packages, the Python environment, sigrok, USB permissions, the GPIB driver and a menu entry. It is safe to re-run. Options:
 >
@@ -147,7 +147,7 @@ Plug it in and it appears in the resource list as `PPK2::/dev/serial/by-id/…`.
 
 3. Turn on Logic 2's automation server: **Preferences ▸ Automation ▸ Enable automation server** (port 10430), or start it with `./Logic-2.x.AppImage --automation`.
 
-While Logic 2 runs with the server on, each analyzer it sees appears in the resource list as `SALEAE::<device id>`. `SALEAE::` (no ID) means the first one. Logic 2 must run on the same computer, because it writes the captured data to files that EE Workbench then reads.
+While Logic 2 runs with the server on, each analyzer it sees appears in the resource list as `SALEAE::<device id>`. `SALEAE::` (no ID) means the first one. Logic 2 must run on the same computer, because it writes the captured data to files that OtterBench then reads.
 
 ## sigrok logic analyzers (optional)
 
@@ -250,7 +250,7 @@ api_port = 8765
 ./run.sh --api SIM::66321D SIM::PPK2       # simulators, with the Remote API on
 ```
 
-`MODEL@RESOURCE` forces a driver. Models are `663xx` (or `66321D`), `6632A`, `3456A`, `PPK2`, `SALEAE`, `SIGROK`, `FGEN`, `GPIO`, `SCPI:<id>` for an [instrument definition](04-technical-reference.md#instrument-definition-files-toml) (`SCPI:34461A`, `SCPI:DP832`, …; plain `34461A` works too) and `SCOPE:RIGOL`, `SCOPE:KEYSIGHT`, `SCOPE:TEK`, `SCOPE:SIGLENT` (a model name such as `DS1054Z` or `TBS2000` works too). **The 3456A always has to be named**, because it has no ID query. The same resource can't be opened twice, but any number of different instruments of one model can.
+`MODEL@RESOURCE` forces a driver. Models are `663xx` (or `66321D`), `6632A`, `3456A`, `BK393`, `BK393B`, `XDM`, `PPK2`, `SALEAE`, `SIGROK`, `FGEN`, `GPIO`, `SCPI:<id>` for an [instrument definition](04-technical-reference.md#instrument-definition-files-toml) (`SCPI:34461A`, `SCPI:DP832`, …; plain `34461A` works too) and `SCOPE:RIGOL`, `SCOPE:KEYSIGHT`, `SCOPE:TEK`, `SCOPE:SIGLENT` (a model name such as `DS1054Z` or `TBS2000` works too). **The 3456A always has to be named**, because it has no ID query. The same resource can't be opened twice, but any number of different instruments of one model can.
 
 ### Desktop launcher (optional)
 
@@ -272,6 +272,8 @@ Then copy it to `~/.local/share/applications/` (menu), `~/Desktop/`, or `~/.conf
 | `--open last\|list\|scan\|none` | What to open at start-up, overriding `config.toml` (see the User's Guide) |
 | `--config FILE` | Use a different config file |
 | `--api` | Start the [Remote API](#remote-api-optional) |
+| `--no-splash` | Start without the splash screen |
+| `--version` | Print the version and quit |
 | `--restart-on-crash` | **`run.sh` only.** If the app ends with an error or crashes, start it again after 3 s. A normal quit ends it; five crashes within two minutes give up. Each restart is noted in `~/.config/ee-workbench/crash.log`. Meant for unattended screens: the Pi's autostart uses it. |
 
 ## Alternatives
@@ -311,7 +313,7 @@ Then copy it to `~/.local/share/applications/` (menu), `~/Desktop/`, or `~/.conf
 | Scope: waveform is flat or clipped | The channel's V/div or offset puts the signal off screen: the screen record is all that is fetched. |
 | Production test: the banner says **SERIAL?** | The serial-format pattern is a regular expression matched against the whole serial: `SB\d{6}` means SB and six digits. Clear the box to accept anything. |
 | Readings stop and "Polling paused" appears; the tab shows ⚠ and **⟳ Reconnect** | A bus error occurred, or the instrument was switched off or unplugged. Fix the cause, then press **Resume polling**, or **⟳ Reconnect** to reopen the tab with its settings. |
-| A window "EE Workbench: internal error" | A bug was caught; the app keeps running and the instruments are untouched. Details are in `~/.config/ee-workbench/crash.log`; include it when reporting the problem. |
+| A window "OtterBench: internal error" | A bug was caught; the app keeps running and the instruments are untouched. Details are in `~/.config/ee-workbench/crash.log`; include it when reporting the problem. |
 | The app vanished (no window, no message) | A crash inside Qt or a driver library. The stack is in `~/.config/ee-workbench/fault.log`. Restart it; it reopens the same instruments. On an unattended screen launch it with `./run.sh --restart-on-crash`. |
 | Status bar: "Skipped damaged watchdog rules", or "bench.json is damaged" | A hand edit or disk problem. The rest was loaded; fix or delete the file in `~/.config/ee-workbench/`. |
 | Status bar: "Output OFF … ⚠ FAILED for …" after Esc | That instrument didn't take the command (disconnected?). Every other output was still switched off; check the named one by hand. |
@@ -324,7 +326,7 @@ Then copy it to `~/.local/share/applications/` (menu), `~/Desktop/`, or `~/.conf
 | GPIO: "Permission denied" on `/dev/gpiochip…` | Not in the `gpio` group yet: `sudo usermod -aG gpio $USER`, log out and back in. |
 | GPIO: "Device or resource busy" on a pin | Something else holds it: I²C/SPI/serial console enabled on those pins, a 1-Wire overlay, or another program. `gpioinfo` shows the owner. |
 | PDF report: "PDF needs WeasyPrint" | `.venv/bin/pip install weasyprint` (and the pango packages above), or save HTML. |
-| Remote API: `connect()` says "remote API isn't on" or "Can't reach EE Workbench" | Switch it on in **Tools ▾**, or run with `--api`. A stale `api.json` from a crashed run is replaced when the API next starts. |
+| Remote API: `connect()` says "remote API isn't on" or "Can't reach OtterBench" | Switch it on in **Tools ▾**, or run with `--api`. A stale `api.json` from a crashed run is replaced when the API next starts. |
 | Remote API: "Can't listen on port 8765: … Address already in use" | Another copy of the app is running its API. Change `api_port` in config.toml. |
 | Module build fails after a kernel update | Run `git -C vendor/linux-gpib pull`, then run the script again. |
 

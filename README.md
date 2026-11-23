@@ -1,4 +1,6 @@
-# EE Workbench
+<img src="ee_workbench/gui/branding/logo.png" width="120" align="right" alt="OtterBench logo">
+
+# OtterBench
 
 A Linux desktop app (PyQt6) for controlling, logging and automating a bench of test instruments: GPIB and SCPI supplies, meters and electronic loads, oscilloscopes, a power profiler, logic analyzers, function generators and the Raspberry Pi's GPIO pins. It runs on a PC or full screen on a Pi with a touch screen, as a lab bench, an unattended soak-test rig, or a production test station.
 
@@ -6,6 +8,8 @@ A Linux desktop app (PyQt6) for controlling, logging and automating a bench of t
 |---|---|
 | Agilent 66321D / 66321B / 66311B DC source | Setpoints, protection, output resistance, DVM, pulse statistics; triggered waveform capture with cursors and automatic measurements; battery-life, battery-emulator, sequencer and I-V tests; rear port, display, saved setups, self-test |
 | HP 6632A / 6633A / 6634A DC supply | Setpoints, OVP/OCP, readback, status |
+| B&K Precision 393 / 393B handheld DMMs | Read-only over USB: reading, function, HOLD/MAX/REL, second display, statistics, CSV |
+| OWON XDM1041 / XDM1241 / XDM2041 bench DMMs | Function, range, rate, second display; follows the front panel; statistics, CSV |
 | HP 3456A 6½-digit DMM | Function, range, integration time, autozero, filter, null, statistics |
 | Nordic Power Profiler Kit II (USB) | Source or ampere meter at 100 kS/s; DUT power and voltage; live full-rate view with logic inputs D0–D7; trend with region average, charge and energy |
 | Saleae Logic 8 / Pro 8 / Pro 16 (via Logic 2) | Timed, triggered and manual captures of digital and analog channels; frequency, duty, pulse-width and voltage measurements over the view or a region; Logic 2's protocol decoders (UART, I²C, SPI, any other) in a searchable table; save as .sal or export CSV |
@@ -14,6 +18,10 @@ A Linux desktop app (PyQt6) for controlling, logging and automating a bench of t
 | Raspberry Pi GPIO header | Name pins, drive relays and resets, pulse a DUT's buttons, read "done" pins, log levels |
 | Bench multimeters (SCPI) | Keysight 34401A/344xxA, Keithley 2000-series and DMM6500/7510, Rigol DM3058/3068, Siglent SDM3000X, any SCPI meter: function, NPLC, readings with their unit |
 | Electronic loads (SCPI) | Rigol DL3021/3031, Siglent SDL1020X/1030X, Keithley 2380 / B&K 8600: CC/CV/CR/CP mode and levels, input, V/I/P readings |
+| Riden RD60xx / RK6006, Korad KA3005P / Tenma 72-2540, Atorch PX-100 / DL24 | Cheap USB supplies and loads, over their own protocols: setpoints, protection, output, readings |
+| Thermometers | Center 309 / Voltcraft K204 loggers (USB); on a Pi: DS18B20, MAX31855 and MAX31865 boards. For the watchdog, the sequencer and battery tests |
+| LCR meters | East Tester ET44/ET45, Keysight E4980A/AL: both parameters, frequency, level, model |
+| DUT serial console (UART) | Firmware output on the same time axis as current and voltage; numbers picked out of the text; the sequencer sends commands and judges the answers |
 | Programmable supplies (SCPI) | Rigol DP832/831/821, Keysight E36311A–13A, Siglent SPD3303X, any single-output SCPI supply: per-output setpoints, OVP/OCP, outputs |
 | Oscilloscopes | Rigol DS1000Z/DS2000A/MSO5000/DHO, Keysight InfiniiVision 1000X–6000X, Tektronix TBS/MDO3/MSO2–6/DPO, Siglent SDS1000X-E/2000X-E: channels, timebase, trigger, run/stop/single, waveforms with Vpp/freq/duty/rise… |
 | **Anything else that speaks SCPI** | Describe it in a [small TOML file](docs/06-howtos.md#add-your-own-scpi-instrument): its tab, simulator, sequencer and watchdog support come with it, no code needed |
@@ -28,6 +36,11 @@ Across instruments:
 - **Watchdog.** Rules across instruments: *PPK2 current > 50 mA for 10 ms → all outputs off*, *rail < 2.9 V → generator off*, *e-stop pin low → stop the sequence*, *current spike → capture on the scope*. **In HW** also sets a supply's own OVP / current limit from the rule, so the DUT stays protected even if the computer stops.
 - **PPK2 event finder.** Every current burst with its duration, peak and charge, histograms, the sleep current between bursts, and the decoded bus traffic during each burst.
 - **Math channels.** Live expressions such as `_66321d_out.power / _6632a_in.power * 100` (efficiency) or integrated energy, plotted and recorded. They work in the session viewer too.
+- **Bode plots.** Gain and phase with any supported generator and scope: −3 dB points, phase and gain margins, reference sweep.
+- **Regulator test.** Input voltage × load sweeps with a supply and a load: efficiency, losses, line and load regulation, pass / fail, report.
+- **Battery tester.** Charge / rest / discharge cycles with a load (or a 66321D sinking): capacity, energy and internal resistance per cycle.
+- **Calibration log.** Due dates per instrument, checks of one meter against a better one, and the status in every report.
+- **Identify port.** Finds out what is on a USB serial port by asking only read-only questions.
 - **PPK2 ↔ logic-analyzer alignment.** Wire one DUT pin to an analyzer channel and a PPK2 logic input. Each capture is then lined up with the PPK2 to within ±5–10 µs, with the current drawn under the decoded traffic.
 - **Sessions.** One file (`.eewb`, SQLite) records every instrument, capture, math channel, result and note. The viewer lays them out on one time axis, with cursors (Δt, mean, charge, energy), math, CSV/PNG export and reports. A **flight-recorder** mode keeps only the seconds before and after each event (a watchdog trip, a capture, a note), for overnight runs.
 - **Production test.** Scan a serial number, the sequence runs, a big PASS / FAIL banner says where the unit goes. Every unit goes into a results database with history, first-pass and final yield, per-unit HTML reports and CSV export.

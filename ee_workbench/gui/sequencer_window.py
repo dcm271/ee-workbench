@@ -45,6 +45,8 @@ EXAMPLE_SCRIPT = '''# The same `bench` the steps use. Stop / Esc ends it at the 
 # bench.capture(name)                       logic analyzer; returns the capture
 # bench.gpio(name, pin, "on"|"off"|"pulse 0.1")   bench.read_pin(name, pin)
 # bench.wait_for(name, pin, 1, timeout=10)  returns the seconds it took
+# bench.send(name, "text")                  serial console (or a SCPI tab's command)
+# bench.wait_text(name, r"adc=(\\d+)", timeout=2)   its value / text; None: no reply
 # bench.profile(name, "voltage", "ramp 3.0..3.6 for=10")
 # bench.expect("label", value, lo=None, hi=None)  → the row is PASS / FAIL
 # bench.wait(s)  bench.note(text)  bench.record(col=value, ...)  print(...)
@@ -123,7 +125,7 @@ class PanelInst(Inst):
         self.p, self.invoke, self.stop = panel, invoke, stop
         self.name = panel.display_name()
         self.kind = kind_of(panel)
-        if self.kind in ("scpi", "scope"):
+        if self.kind in ("scpi", "scope", "uart"):
             self.set_names = panel.set_names()
             self.setting_kinds = panel.setting_kinds()
             self.measure_names = panel.measure_names()
@@ -327,7 +329,9 @@ class SequencerWindow(QMainWindow):
                       "e.g.  x,  x / 2,  3.3 + 0.1 * i.   Measure's value = seconds to average "
                       "(blank: one reading); Min / Max make the pass PASS or FAIL.   "
                       "GPIO Set: on, off or pulse 0.1.   Wait for: a GPIO input's level, e.g. "
-                      "1 timeout=10 (its column = seconds it took).   Profile: e.g. "
+                      "1 timeout=10 (its column = seconds it took).   Serial console: Send a "
+                      "line, then Wait for a regex, e.g.  adc=(\\d+) timeout=2  (its column = "
+                      "the number in the parentheses; no reply fails the pass).   Profile: e.g. "
                       "ramp 3.0..3.6 for=10.   Note text can include {x} and {i}.")
         hint.setWordWrap(True)
         hint.setStyleSheet(f"color:{C_MUTED}; font-size:11px;")
@@ -442,6 +446,8 @@ class SequencerWindow(QMainWindow):
             panel = self._panel_for(target.currentText())
             if kind == "gpio" and a in ("Set", "Measure", "Wait for"):
                 opts = self._pins_for(target.currentText())
+            elif a == "Wait for":
+                opts = []
             elif panel is not None and a in ("Set", "Measure", "Profile"):
                 opts = {"Set": panel.set_names, "Measure": panel.measure_names,
                         "Profile": panel.profile_names}[a]()
@@ -456,9 +462,10 @@ class SequencerWindow(QMainWindow):
             what.addItems(opts)
             what.setCurrentText(keep if keep in opts or not opts else opts[0])
             what.blockSignals(False)
-            uses_inst = a in ("Set", "Measure", "Capture", "Profile", "Wait for")
+            uses_inst = a in ("Set", "Measure", "Capture", "Profile", "Wait for", "Send")
             target.setEnabled(uses_inst)
-            what.setEnabled(a in ("Set", "Measure", "Profile", "Wait for"))
+            what.setEnabled(a in ("Set", "Measure", "Profile") or
+                            a == "Wait for" and kind != "uart")
         act.currentTextChanged.connect(refresh)
         target.currentTextChanged.connect(refresh)
         refresh()
@@ -604,7 +611,7 @@ class SequencerWindow(QMainWindow):
                       on_note=self.sig.note.emit, stop=self.stop_event)
         self.bench = bench
         self.run_started = time.time()
-        self.run_insts = [(i.name, getattr(getattr(i.p, "caps", None), "idn", "") or i.p.resource)
+        self.run_insts = [(i.name, i.p.identity(), i.p.calibration())
                           for i in insts]
         self.run_plan_dict = self.state()
         plan = self.plan()

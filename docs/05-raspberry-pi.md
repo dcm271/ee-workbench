@@ -1,13 +1,13 @@
 ---
 title: Raspberry Pi & Touch Screen
-subtitle: Running EE Workbench full screen on a 10-inch 1280×800 panel
+subtitle: Running OtterBench full screen on a 10-inch 1280×800 panel
 ---
 
 # Raspberry Pi & Touch Screen
 
 Other chapters: [Hardware](01-hardware-and-resources.md) · [Installation](02-installation.md) · [User's Guide](03-users-guide.md) · [Technical Reference](04-technical-reference.md) · [How-to guides](06-howtos.md) · [README](../README.md)
 
-EE Workbench runs on a Raspberry Pi with a touch screen as a dedicated bench controller. The layout is tuned for a **10-inch 1280×800** panel. A mouse and keyboard work alongside touch.
+OtterBench runs on a Raspberry Pi with a touch screen as a dedicated bench controller. The layout is tuned for a **10-inch 1280×800** panel. A mouse and keyboard work alongside touch.
 
 ## What you need
 
@@ -38,7 +38,7 @@ The script is safe to re-run. It does the following:
 2. Creates `.venv` and installs `requirements.txt` into it (pyqtgraph, pyvisa-py, gpib-ctypes, …).
 3. Runs the test suite against the simulators.
 4. Builds the GPIB driver with `scripts/install-gpib-driver.sh`. It uses the Pi's `linux-headers-$(uname -r)` package, and skips the kernel-module build if the running kernel already provides `ni_usb_gpib`.
-5. Adds **EE Workbench** to the application menu and to `~/.config/autostart`, so it starts full screen at every login. The autostart entry also uses `--restart-on-crash`, so the screen never stays on an empty desktop (see [below](#start-again-after-a-crash)).
+5. Adds **OtterBench** to the application menu and to `~/.config/autostart`, so it starts full screen at every login. The autostart entry also uses `--restart-on-crash`, so the screen never stays on an empty desktop (see [below](#start-again-after-a-crash)).
 
 | Option | Effect |
 |---|---|
@@ -63,7 +63,7 @@ It assumes the project is in `~/ee-workbench` and starts full screen. If you clo
 
 ## Start again after a crash
 
-EE Workbench catches its own errors and keeps running (see *When something goes wrong* in the User's Guide), but a crash inside Qt or a driver library can still end it. On a bench screen nobody is watching, `run.sh --restart-on-crash` starts it again 3 s later, reopening the same instruments:
+OtterBench catches its own errors and keeps running (see *When something goes wrong* in the User's Guide), but a crash inside Qt or a driver library can still end it. On a bench screen nobody is watching, `run.sh --restart-on-crash` starts it again 3 s later, reopening the same instruments:
 
 ```
 Exec="/home/<you>/ee-workbench/run.sh" --restart-on-crash --fullscreen

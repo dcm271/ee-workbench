@@ -8,6 +8,10 @@ def open_sim(resource: str):
     from ..instruments.scpi_generic import definition_for
 
     d = definition_for(name)
+    if d is not None and d.protocol:
+        from ..instruments.adapters import open_adapter
+
+        return open_adapter(d, f"SIM::{d.id}")
     if d is not None:
         from .sscpi import SimScpi
 
@@ -36,6 +40,18 @@ def open_sim(resource: str):
         from .sdps150 import SimDPS150
 
         return SimDPS150()
+    if name == "UART":
+        from .suart import SimUart
+
+        return SimUart()
+    if name.startswith("XDM"):
+        from .sxdm import SimXDM
+
+        return SimXDM(name if len(name) > 3 else "XDM1041")
+    if "BK393" in name:
+        from .sbk393 import SimBK393, SimBK393B
+
+        return SimBK393B() if "393B" in name else SimBK393()
     if "PPK2" in name:
         from .sppk2 import SimPPK2
 

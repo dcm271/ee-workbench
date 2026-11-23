@@ -47,6 +47,15 @@ MainWindow
 | `instruments/agilent663xx.py` | 66311B/66321B/66321D SCPI driver |
 | `instruments/hp6632a.py` | 6632A/33A/34A driver (HP's pre-SCPI command language) |
 | `instruments/hp3456a.py` | 3456A driver (program codes) |
+| `instruments/bk393.py` | B&K 393 (streamed frames) and 393B (APPA 500-series packets), read-only |
+| `instruments/xdm.py` | OWON XDM1041 / XDM1241 / XDM2041 (flat ASCII commands over serial) |
+| `instruments/adapters.py` | Riden (Modbus), Korad, PX-100, Center 309, 1-Wire, MAX31855/65 and ET44 spoken behind the generic tab; `open_adapter`, `parse_resource` |
+| `instruments/uart.py`, `gui/uart_panel.py` | Serial console: lines, patterns, `send` / `match` |
+| `identify.py`, `gui/identify_dialog.py` | Read-only probes of one serial port |
+| `roles.py` | Sources, loads and the sinking 66321D, whatever the model (no Qt) |
+| `bode.py`, `regulator.py`, `battery.py`, `calibration.py` | Measurement engines on a `Bench` (no Qt) |
+| `gui/tool_window.py`, `gui/runner.py` | What their windows share: Run / Stop, instrument choosers, the thread |
+| `about.py`, `gui/branding_ui.py`, `gui/branding/` | Name, version, logo, splash screen, About box |
 | `instruments/ppk2.py` | Nordic PPK2: commands, calibration, vectorised spike filter, sample time base |
 | `instruments/__init__.py` | Model list, auto-detect, driver factory |
 | `analysis.py` | Waveform measurements (numpy only): levels, pulse timing, rise/fall, charge, cursors, histogram, spectrum |
@@ -162,6 +171,8 @@ One table per value. Each poll sends every reading's query, in file order, and p
 | `unit` | `V`, `A`, `W`, `Ω`, `Hz`, `F`, … (SI prefixes are added for display). |
 | `unit_from` | Name of a `choice` setting: the unit is that setting's current option's `unit` (a meter whose unit follows its function). |
 | `query_from` | Name of a `choice` setting: the query is that setting's current option's `read` (meters that read with `MEAS:VOLT:DC?`, `MEAS:CURR:AC?`, … instead of `READ?`). `query` is then the fallback. |
+| `field`, `unit_index` | Which comma-separated field of the answer; `1` takes the option's `unit2` (an LCR meter's second parameter). Readings with the same query share one answer per poll. |
+| `plot` | Readings naming the same `plot` share axes; `"-"` keeps one off the trend (it is still shown and logged). |
 | `sim` | Simulator only: a Python expression for the value (see below). |
 
 ### `[[setting]]`: things the panel can set
@@ -637,9 +648,10 @@ Other measures, by place:
 |---|---|
 | `~/.config/ee-workbench/config.toml` | Start-up settings (created with comments on first run) |
 | `~/.config/ee-workbench/last-session.json` | The open instruments and their panel settings, for the next start |
-| `~/.config/ee-workbench/bench.json` | Watchdog rules (and whether armed), math channels, and the record, safety and production settings ([keys](#setups-and-bench-state-setupspy)) |
+| `~/.config/ee-workbench/bench.json` | Watchdog rules (and whether armed), math channels, and the record, safety, production, Bode, regulator, battery and calibration-check settings ([keys](#setups-and-bench-state-setupspy)) |
 | `~/.config/ee-workbench/instruments/*.toml` | Your own [instrument definitions](#instrument-definition-files-toml) (read, never written) |
 | `~/.config/ee-workbench/results.db` | [Production-test results](#production-results-database) |
+| `~/.config/ee-workbench/calibration.json` | The calibration log (`.damaged`: a copy of one that couldn't be read, made before writing a new one) |
 | `~/.config/ee-workbench/running.json` | The [crash marker](#safety-and-crash-recovery-safetypy), only while the app runs |
 | `~/.config/ee-workbench/sequence-run.json` | A running sequence's checkpoint, with *resume* on |
 | `~/.config/ee-workbench/sequence.json` | The sequencer's steps and script as last run (`sequence.bad`: a damaged one, set aside at start-up) |
@@ -673,12 +685,16 @@ Colours are tokens in `theme.py`, and one application stylesheet uses them. Butt
 |---|---|
 | `SIM::66321D` | 47 Ω load with 4.7 Ω, 577 µs bursts every 4.615 ms. The output is modelled over time (40 µs step response from a history of setpoint changes), so level triggers, pre-trigger data, segments, output steps, external triggers (fires 0.4 s after arming) and `ABOR` behave like the real unit. Binary and ASCII arrays, the WTG bit, latched status events, every System-tab setting with `*RST` defaults, `*SAV/*RCL`, `*TST?`, a DVM at 3.7 V ± 0.15 V, the full SCPI error queue (including +603), and OCP trips |
 | `SIM::6632A` | 10 Ω load; ERR codes; OCP/OVP trips; 30 ms readback delay |
+| `SIM::BK393`, `SIM::BK393B` | DCV on a drifting 5 V rail; the 393 streams frames, the 393B answers APPA packets |
+| `SIM::XDM1041`, `SIM::XDM2041` | All functions and ranges; DCV on the same 5 V rail |
 | `SIM::3456A` | DCV 5 V with slow drift, Ω ~1 kΩ, ACV 120 mV; noise scales with integration time; null; syntax-error status |
 | `SIM::SALEAE` | A Logic Pro 16 behind a fake Logic 2: UART text on D0, square waves on D1/D2, clock bursts on D3, analog sine and RC-filtered square. Edges fall on the sample grid; the trigger finds the real first edge and times everything from it. It writes real version 0 or 1 binary files, rejects invalid sample rates like Logic 2, and decodes Async Serial on D0 at 115200. Its `speed` lets tests finish captures faster than real time |
 | `SIM::PPK2` | The real byte stream: a BLE-style DUT encoded through its own calibration (with range switching and a spike on each switch), metadata, mode, voltage and DUT power commands, counter, logic D0/D1, and a hook to drop samples. Its clock can be injected, so tests run without waiting |
 | `SIM::FGEN` | A two-channel Keysight 33522B: SCPI `SOUR{n}:…` / `OUTP{n}` with read-back and the error queue |
 | `SIM::SDG` | A two-channel Siglent SDG2042X: `C{n}:BSWV` / `C{n}:OUTP` |
 | `SIM::GPIO` | A Pi header with 26 lines, honouring direction, pull and active-low, wired as a small jig: GPIO21 follows GPIO20, GPIO12 is GPIO16 inverted, GPIO26 a button (low 0.2 s every 2 s); the rest float to their pull |
+| `SIM::UART` | Firmware that prints `temp=… vbat=… led=…` twice a second and answers `help`, `ver`, `led on`, `adc`, `slow`, `crash` |
+| `SIM::RD60XX`, `SIM::KA3005P`, `SIM::PX100`, `SIM::CENTER309`, `SIM::W1`, `SIM::MAX31855`, … | `sim/sadapters.py`: the device's own bytes (Modbus frames, SPI words…), so the adapter is exercised |
 | `SIM::SIGROK` | A fake `sigrok-cli` with an 8-channel 24 MHz fx2lafw analyzer: answers `--scan` / `--show` like the real program, writes real `.sr` files with the Saleae simulator's signals, triggers in software like libsigrok, ends a continuous capture on SIGINT, and decodes UART |
 
 | `SIM::<id>` of any definition | `sim/sscpi.py`: built from the definition (see [Simulator expressions](#simulator-expressions)) |
@@ -695,6 +711,10 @@ All three logic/power simulators share a **debug pin** (`sim/shared.py`): an irr
 ```
 
 The tests run each driver against its simulator: identification, CV/CC, protection trips and events, error decoding, every 663xx setting, saved setups, immediate/level/segmented/output-step captures with pre-trigger, abort, capture validation, the waveform measurements in `analysis.py`, the config files, and the 3456A reading formats. PPK2 tests cover metadata captured from a real unit, word decoding, the calibration formula, the spike filter against a sample-by-sample reference (across chunk boundaries), and the driver against the simulator: sample count, timing, levels, logic, lost samples, modes, and stop/start. `test_bench_features.py` covers profiles (parsing, timing, skipping), GPIO and both generator dialects against their simulators, limits and stop-on-fail, Wait for, the watchdog's hold logic across blocks, event finding and bus attachment, math evaluation and resampling, reports (HTML, and PDF when WeasyPrint is present), setups, and the Remote API end to end over HTTP. Saleae tests cover both binary-format versions (including multi-chunk files), the edge measurements and lane envelope, resource parsing, and timed, triggered, manual and aborted captures, decoding and save/export through the simulator and the real worker thread. `test_instruments_generic.py` loads every definition, round-trips every setting and option through its simulator, checks multi-channel expansion, units that follow a function, `query_from`, the scope dialects' decoding (Vpp and frequency for all four), the model names and auto-detect, the sequencer with SCPI and scope tabs, two units of one model, and two PPK2s aligning. `test_unattended.py` covers watchdog HW plans and re-arm, only-around-events sessions, the crash marker, safety settings and back-off, the results database and verdicts, resuming and `extra` in `run_plan`, and in an offscreen window: a limit pushed into a supply, outputs off on quit, outputs off after a crash, and a production run with the serial-format check. `test_robustness.py` covers the error handling: crash-log rate limiting and rotation, damaged `last-session.json` / `config.toml` / watchdog / math / sequence / setup data, math expressions that fail after evaluating, a session file whose last write fails, foreign session files, malformed Remote API requests, and, in an offscreen Qt window, an exception in a slot not aborting, a GPIO tab's lost link offering ⟳ Reconnect and clearing it on recovery, and Esc still reaching every instrument when one fails.
+
+## The name
+
+The visible name is `APP_NAME` in `about.py`. The package `ee_workbench`, `~/.config/ee-workbench`, `.eewb` session files, the environment variables and the launcher's file name keep their names, so settings and recordings stay valid. `gui/branding/logo.svg` is the logo's source; `logo.png` is drawn from it (512 px) and is what the program loads, since Qt's SVG plugin isn't always installed.
 
 ## Adding an instrument
 

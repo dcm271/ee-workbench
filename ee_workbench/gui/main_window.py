@@ -18,12 +18,16 @@ from ..config import Config, Entry, Session, load_config, norm_model, startup_en
 from ..instruments import model_for
 from ..session import SUFFIX
 from ..session import recorder as session
-from ..transport import describe, gpib_ready, list_resources, scan_gpib
+from ..transport import describe, gpib_ready, list_resources, scan_gpib, serial_path
 from . import touch
 from .connect_dialog import ConnectDialog
-from .dmm_panel import DmmPanel
+from .dmm_panel import DmmPanel, HandheldDmmPanel, XdmPanel
 from .fgen_panel import FgenPanel
+from ..about import APP_NAME, version_text
+from . import branding_ui
+from . import runner
 from .gpio_panel import GpioPanel
+from .uart_panel import UartPanel
 from .hub import hub
 from .logic_panel import LogicPanel
 from .ppk2_panel import Ppk2Panel
@@ -48,7 +52,7 @@ class MainWindow(QMainWindow):
         self._save_timer.setSingleShot(True)
         self._save_timer.setInterval(1000)
         self._save_timer.timeout.connect(self.save_session)
-        self.setWindowTitle("EE Workbench")
+        self.setWindowTitle(APP_NAME)
         self.resize(1440, 900)
         pg.setConfigOptions(antialias=True, background=PLOT_BG, foreground="#c9ccd1")
 
@@ -134,8 +138,8 @@ class MainWindow(QMainWindow):
                                 20000)
         if self._err_box is not None and self._err_box.isVisible():
             return                       # one box at a time
-        box = QMessageBox(QMessageBox.Icon.Warning, "EE Workbench: internal error",
-                          f"Something went wrong, but EE Workbench is still running and "
+        box = QMessageBox(QMessageBox.Icon.Warning, f"{APP_NAME}: internal error",
+                          f"Something went wrong, but {APP_NAME} is still running and "
                           f"your instruments are as they were.\n\n{summary}\n\n"
                           f"The details are in {crash.log_path()}; please include that "
                           f"file if you report it.", parent=self)
@@ -165,7 +169,8 @@ class MainWindow(QMainWindow):
             crash.write_log(self._bench_warning)
             return
         from ..mathchannels import Channel
-        prefs = {k: d.get(k) for k in ("recording", "safety", "production")
+        prefs = {k: d.get(k) for k in ("recording", "safety", "production", "bode",
+                                         "regulator", "battery", "metercheck")
                  if isinstance(d.get(k), dict)}
         self.prefs.update(prefs)
         bad = hub.watchdog.load(d.get("watchdog", []))
@@ -211,7 +216,7 @@ class MainWindow(QMainWindow):
         lay.addWidget(self._build_fs_button(56))
         self.quit_btn = QPushButton("✕")
         self.quit_btn.setFixedWidth(56)
-        self.quit_btn.setToolTip("Quit EE Workbench")
+        self.quit_btn.setToolTip(f"Quit {APP_NAME}")
         self.quit_btn.clicked.connect(self._confirm_quit)
         self.quit_btn.setVisible(False)   # shown in full-screen mode (no title bar)
         lay.addWidget(self.quit_btn)
@@ -236,6 +241,14 @@ class MainWindow(QMainWindow):
         menu.addAction("Watchdog…  (switch outputs off when a limit is crossed)",
                        self.show_watchdog)
         menu.addAction("Math channels…  (efficiency, power, energy, averages)", self.show_math)
+        menu.addAction("Bode plot…  (generator + scope: gain and phase against frequency)",
+                       self.show_bode)
+        menu.addAction("Regulator test…  (efficiency, line and load regulation)",
+                       self.show_regulator)
+        menu.addAction("Battery tester…  (charge / discharge cycles, capacity, resistance)",
+                       self.show_battery)
+        menu.addAction("Calibration…  (due dates, check against a reference)",
+                       self.show_calibration)
         menu.addAction("Production test…  (serial numbers, PASS / FAIL, yield)",
                        self.show_production)
         menu.addAction("Safety…  (outputs off on quit / crash, heartbeat, reconnect)",
@@ -249,6 +262,8 @@ class MainWindow(QMainWindow):
         self.api_action = menu.addAction("Remote API  (drive the bench from Python / Jupyter)")
         self.api_action.setCheckable(True)
         self.api_action.toggled.connect(self.toggle_api)
+        menu.addSeparator()
+        menu.addAction(f"About {APP_NAME}…", self.show_about)
         tools.setMenu(menu)
         self.tools_btn = tools
         lay.addWidget(tools)
@@ -271,7 +286,7 @@ class MainWindow(QMainWindow):
             self.save_bench_state()
             path, _ = QFileDialog.getSaveFileName(
                 self, "Record session", time.strftime("session_%Y%m%d_%H%M%S") + SUFFIX,
-                f"EE Workbench session (*{SUFFIX})")
+                f"{APP_NAME} session (*{SUFFIX})")
             if not path:
                 self.sess_btn.setChecked(False)
                 return
@@ -353,6 +368,31 @@ class MainWindow(QMainWindow):
     def show_watchdog(self):
         from .watchdog_window import WatchdogWindow
         return self._show("wd_win", lambda: WatchdogWindow(self))
+
+    def show_about(self):
+        branding_ui.AboutDialog(self).exec()
+
+    def show_bode(self):
+        from .bode_window import BodeWindow
+        return self._tool("bode_win", lambda: BodeWindow(self))
+
+    def show_regulator(self):
+        from .regulator_window import RegulatorWindow
+        return self._tool("reg_win", lambda: RegulatorWindow(self))
+
+    def show_battery(self):
+        from .battery_window import BatteryWindow
+        return self._tool("bat_win", lambda: BatteryWindow(self))
+
+    def show_calibration(self):
+        from .calibration_window import CalibrationWindow
+        return self._tool("cal_win", lambda: CalibrationWindow(self))
+
+    def _tool(self, attr, factory):
+        w = self._show(attr, factory)
+        if touch.TOUCH:
+            w.showMaximized()
+        return w
 
     def show_math(self):
         from .math_window import MathWindow
@@ -437,6 +477,7 @@ class MainWindow(QMainWindow):
             seq = getattr(self, "seq_win", None)
             if seq is not None:
                 seq.stop()
+            runner.stop_all()
             what += " → sequence stopped"
         elif rule.action == "capture":
             from ..signals import name_matches
@@ -518,7 +559,7 @@ class MainWindow(QMainWindow):
             self.open_instrument(dlg.resource, dlg.model)
 
     def _confirm_quit(self):
-        if QMessageBox.question(self, "Quit", "Quit EE Workbench?\n\nSupply outputs stay "
+        if QMessageBox.question(self, "Quit", f"Quit {APP_NAME}?\n\nSupply outputs stay "
                                 "as they are.") == QMessageBox.StandardButton.Yes:
             self.close()
 
@@ -583,10 +624,15 @@ class MainWindow(QMainWindow):
         lay.addWidget(self.model_combo)
         self.baud_label = QLabel("Baud")
         self.baud_combo = QComboBox()
-        self.baud_combo.addItems(["300", "600", "1200", "2400", "4800", "9600"])
+        self.baud_combo.addItems(["300", "600", "1200", "2400", "4800", "9600", "19200", "38400",
+                                  "57600", "115200"])
         self.baud_combo.setCurrentText("9600")
         lay.addWidget(self.baud_label)
         lay.addWidget(self.baud_combo)
+        self.ident_btn = QPushButton("Identify…")
+        self.ident_btn.setToolTip("Find out what is on this serial port")
+        self.ident_btn.clicked.connect(self._identify)
+        lay.addWidget(self.ident_btn)
         self.connect_btn = QPushButton("Connect")
         self.connect_btn.setMinimumWidth(100)
         self.connect_btn.clicked.connect(
@@ -603,11 +649,17 @@ class MainWindow(QMainWindow):
         lay.addWidget(off)
         lay.addWidget(self._build_fs_button())
         self.quit_btn = QPushButton("✕")
-        self.quit_btn.setToolTip("Quit EE Workbench")
+        self.quit_btn.setToolTip(f"Quit {APP_NAME}")
         self.quit_btn.clicked.connect(self._confirm_quit)
         self.quit_btn.setVisible(False)   # shown in full screen (no title bar)
         lay.addWidget(self.quit_btn)
         return w
+
+    def _identify(self):
+        from .identify_dialog import ask
+        hit = ask(self, self.res_combo.currentText().strip(), {p.resource for p in self.panels()})
+        if hit is not None:
+            self.open_instrument(hit.resource, hit.model)
 
     def refresh_resources(self, scan=True):
         cur = self.res_combo.currentText()
@@ -627,6 +679,7 @@ class MainWindow(QMainWindow):
         serial = text.upper().startswith("ASRL")
         self.baud_label.setVisible(serial)
         self.baud_combo.setVisible(serial)
+        self.ident_btn.setVisible(serial)
         implied = model_for(text.strip())
         if implied != "auto":
             self.model_combo.setCurrentIndex(self.model_combo.findData(implied))
@@ -715,9 +768,10 @@ class MainWindow(QMainWindow):
         elif model.startswith("SCOPE:"):
             from .scope_panel import ScopePanel as cls
         else:
-            cls = {"3456A": DmmPanel, "PPK2": Ppk2Panel, "SALEAE": LogicPanel,
-                   "SIGROK": LogicPanel, "FGEN": FgenPanel, "GPIO": GpioPanel
-                   }.get(model, SupplyPanel)
+            cls = {"3456A": DmmPanel, "BK393": HandheldDmmPanel,
+                   "BK393B": HandheldDmmPanel, "XDM": XdmPanel, "PPK2": Ppk2Panel, "SALEAE": LogicPanel,
+                   "SIGROK": LogicPanel, "FGEN": FgenPanel, "GPIO": GpioPanel,
+                   "UART": UartPanel}.get(model, SupplyPanel)
         baud = int(self.baud_combo.currentText()) if hasattr(self, "baud_combo") else 9600
         panel = cls(resource, model, baud)
         if settings:
@@ -828,6 +882,7 @@ class MainWindow(QMainWindow):
         seq = getattr(self, "seq_win", None)
         if seq is not None and seq.running():
             seq.stop()
+        runner.stop_all()
         stop = getattr(self, "_api_stop", None)
         if stop is not None:            # end any remote-API call in progress
             stop.set()
@@ -870,6 +925,7 @@ class MainWindow(QMainWindow):
         if seq is not None:
             step(seq.stop, "stop sequence")
             step(seq.close, "close sequencer")
+        step(self._stop_runners, "stop running tests")
         step(session.stop, "close session file")
         if getattr(self, "api", None) is not None:
             step(self.api.stop, "stop remote API")
@@ -887,6 +943,16 @@ class MainWindow(QMainWindow):
         from .. import safety as sf
         step(sf.clear_marker, "remove running.json")
         super().closeEvent(e)
+
+    @staticmethod
+    def _stop_runners():
+        """Let a running test switch its outputs off (its thread may need the
+        GUI thread for that, so keep the event loop turning)."""
+        runner.stop_all()
+        end = time.monotonic() + 5
+        while runner.RUNNERS and time.monotonic() < end:
+            QApplication.processEvents()
+            time.sleep(0.02)
 
     # ---------------------------------------------------------------- safety
     def _report_definition_problems(self):
@@ -1029,7 +1095,7 @@ class MainWindow(QMainWindow):
             return                                  # it came back by itself
         seq = getattr(self, "seq_win", None)
         dev = device_path(res)
-        if (seq is not None and seq.running()) or (dev and not os.path.exists(dev)):
+        if (seq is not None and seq.running()) or runner.RUNNERS or (dev and not os.path.exists(dev)):
             self._maybe_reconnect(p)                # try again later
             return
         self.reconnect(p)
@@ -1043,6 +1109,14 @@ def parse_target(s: str) -> tuple[str, str]:
         return "SIGROK", s
     if s.upper().startswith("GPIO::"):
         return "GPIO", s
+    if s.upper().startswith("ASRL"):
+        return "auto", s                   # ASRL/dev/ttyUSB0@115200::INSTR
+    if s.upper().startswith("UART::"):
+        return "UART", s                   # UART::/dev/ttyUSB0@115200
+    from ..instruments import resource_definition
+    d = resource_definition(s)
+    if d is not None:
+        return d.model_key, s              # its own '@115200' is not MODEL@ either
     if "@" in s:
         model, res = s.split("@", 1)
         model = {"66321D": "663xx", "66321B": "663xx", "66311B": "663xx",
@@ -1053,6 +1127,16 @@ def parse_target(s: str) -> tuple[str, str]:
             res = "PPK2::" + res           # PPK2@/dev/ttyACM0
         if model == "DPS150" and not res.upper().startswith(("DPS150::", "SIM")):
             res = "DPS150::" + res         # DPS150@/dev/ttyACM0
+        from ..instruments import SERIAL_ALIASES, SERIAL_DMMS
+        model = SERIAL_ALIASES.get(model.upper(), model)
+        if model.upper() in SERIAL_DMMS:
+            model = model.upper()
+            if not res.upper().startswith((model + "::", "SIM")):
+                res = f"{model}::{serial_path(res)}"   # 393B@/dev/ttyUSB0
+        if model.upper() == "UART":
+            model = "UART"
+            if not res.upper().startswith(("UART::", "SIM")):
+                res = "UART::" + serial_path(res)      # UART@/dev/ttyUSB0@115200
         if model.upper() == "SALEAE":
             model = "SALEAE"
             if not res.upper().startswith(("SALEAE::", "SIM")):
@@ -1062,9 +1146,14 @@ def parse_target(s: str) -> tuple[str, str]:
             if not res.upper().startswith(("SIGROK::", "SIM")):
                 res = "SIGROK::" + (res or "fx2lafw")   # SIGROK@fx2lafw
         if model not in ("PPK2", "SALEAE", "SIGROK", "FGEN", "GPIO", "663xx", "6632A",
-                         "DPS150", "3456A", "auto"):
+                         "DPS150", "3456A", "BK393", "BK393B", "XDM", "UART", "auto"):
             from ..instruments import resolve_model
             model = resolve_model(model)        # 34461A@…, DS1054Z@…, SCPI:DP832@…
+            from ..instruments import definition_for
+            d = definition_for(model) if model.startswith("SCPI:") else None
+            if d is not None and d.protocol and not res.upper().startswith("SIM") \
+                    and "::" not in res:
+                res = f"{d.id}::{res}"          # KA3005P@/dev/ttyUSB0
         return model, res
     return "auto", s
 
@@ -1072,7 +1161,7 @@ def parse_target(s: str) -> tuple[str, str]:
 def main(argv=None):
     import argparse
 
-    ap = argparse.ArgumentParser(description="EE Workbench instrument control")
+    ap = argparse.ArgumentParser(description=f"{APP_NAME}: bench instrument control")
     ap.add_argument("targets", nargs="*",
                     help="resources to open, optionally MODEL@RESOURCE, e.g. "
                          "GPIB0::5::INSTR 3456A@GPIB0::22::INSTR PPK2@/dev/ttyACM0 SALEAE@ "
@@ -1088,6 +1177,8 @@ def main(argv=None):
                     help="start full screen (F11 toggles; a quit button appears)")
     ap.add_argument("--hide-cursor", action="store_true",
                     help="hide the mouse pointer (touch-only kiosks)")
+    ap.add_argument("--no-splash", action="store_true", help="start without the splash screen")
+    ap.add_argument("--version", action="version", version=f"{APP_NAME} {version_text()}")
     ap.add_argument("--open", choices=["last", "list", "scan", "none"],
                     help="what to open at start-up (overrides config.toml)")
     ap.add_argument("--config", metavar="FILE",
@@ -1095,16 +1186,25 @@ def main(argv=None):
     args = ap.parse_args(argv)
     crash.install()
     app = QApplication(sys.argv[:1])
-    app.setApplicationName("EE Workbench")
+    app.setApplicationName(APP_NAME)
+    app.setDesktopFileName("ee-workbench")
+    app.setWindowIcon(branding_ui.icon())
     dark_palette(app)
     if touch.detect(app, args.touch):
         app.setStyleSheet(app.styleSheet() + touch.TOUCH_STYLE)
+    splash = None
+    if not args.no_splash:
+        splash = branding_ui.Splash(app)
+        splash.show()
+        splash.say("Starting…")
     from pathlib import Path
     cfg = load_config(Path(args.config).expanduser() if args.config else None)
     if cfg.warning:
         print("ee-workbench:", cfg.warning, file=sys.stderr)
     if args.api:
         cfg.api = True
+    if splash is not None:
+        splash.say("Opening instruments…")
     win = MainWindow([parse_target(t) for t in args.targets], cfg, Session(), args.open)
     crash.install_signal_handlers(app, win.close)
     if args.hide_cursor:
@@ -1115,6 +1215,8 @@ def main(argv=None):
         win.showMaximized()
     else:
         win.show()
+    if splash is not None:
+        splash.done()
     code = app.exec()
     from ..worker import wait_all
     if not wait_all(5.0):

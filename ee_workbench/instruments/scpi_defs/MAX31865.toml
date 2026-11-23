@@ -1,0 +1,55 @@
+# MAX31865 RTD boards on the Raspberry Pi (SPI).
+id = "MAX31865"
+name = "MAX31865 Pt100 / Pt1000 board (Raspberry Pi SPI)"
+maker = "Maxim"
+type = "meter"
+protocol = "max31865"
+idn = ["Maxim,MAX31865"]
+error_query = ""
+off = []
+poll_ms = 500
+notes = "Set the reference resistor on the board (430 Ω for most Pt100 boards, 4300 Ω for Pt1000) and the wiring. An open sensor shows OVLD."
+
+[[reading]]
+name = "t_n"
+label = "RTD"
+query = "T{n}?"
+unit = "°C"
+plot = "Temperature"
+
+[[reading]]
+name = "r_n"
+label = "Resistance"
+query = "R{n}?"
+unit = "Ω"
+plot = "Resistance"
+
+[[setting]]
+name = "rtd"
+label = "Sensor"
+kind = "choice"
+query = "RTD?"
+options = [
+  {label = "Pt100", set = "RTD 100", reply = "^100$"},
+  {label = "Pt1000", set = "RTD 1000", reply = "^1000$"},
+]
+
+[[setting]]
+name = "rref"
+label = "Reference resistor"
+kind = "number"
+unit = "Ω"
+min = 1
+max = 100000
+set = "RREF {value}"
+query = "RREF?"
+
+[[setting]]
+name = "wires"
+label = "Wiring"
+kind = "choice"
+query = "WIRES?"
+options = [
+  {label = "2 or 4 wires", set = "WIRES 4", reply = "^[24]$"},
+  {label = "3 wires", set = "WIRES 3", reply = "^3$"},
+]

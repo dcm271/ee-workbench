@@ -1,0 +1,71 @@
+# Korad-made supplies (many brands): text without line ends (instruments/adapters.py).
+id = "KA6003P"
+name = "Korad KA6003P / KD6005P, Tenma 72-2550 (60 V)"
+maker = "Korad"
+type = "supply"
+protocol = "korad"
+idn = ["KA6003P", "KD6005P", "72-2550"]
+error_query = ""
+off = ["OUT OFF"]
+poll_ms = 400
+notes = "Slow: about 80 ms per command. The OVP and OCP switches arm the protections at the set voltage and current."
+
+[[reading]]
+name = "voltage"
+label = "Voltage"
+query = "VOUT?"
+unit = "V"
+
+[[reading]]
+name = "current"
+label = "Current"
+query = "IOUT?"
+unit = "A"
+
+[[reading]]
+name = "cv"
+label = "Constant voltage (1 = yes)"
+query = "CV?"
+plot = "-"
+
+[[setting]]
+name = "vset"
+label = "Voltage"
+kind = "number"
+unit = "V"
+min = 0
+max = 62
+set = "VSET {value}"
+query = "VSET?"
+
+[[setting]]
+name = "iset"
+label = "Current limit"
+kind = "number"
+unit = "A"
+min = 0
+max = 5.1
+set = "ISET {value}"
+query = "ISET?"
+
+[[setting]]
+name = "ovp_on"
+label = "OVP"
+kind = "bool"
+set = "OVP {on_off}"
+query = "OVP?"
+
+[[setting]]
+name = "ocp_on"
+label = "OCP"
+kind = "bool"
+set = "OCP {on_off}"
+query = "OCP?"
+
+[[setting]]
+name = "out"
+label = "Output"
+kind = "bool"
+set = "OUT {on_off}"
+query = "OUT?"
+output = true

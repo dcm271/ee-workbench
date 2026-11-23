@@ -18,6 +18,8 @@ C_DMM = "#7ee787"
 C_POW = "#9e9e9e"
 C_ON = "#2e7d32"
 C_WARN = "#ef5350"
+C_GOOD = "#7ee787"
+C_BAD = "#ef5350"
 C_MUTED = "#8a93a0"
 MONO = "DejaVu Sans Mono"
 
@@ -54,7 +56,9 @@ def _eng_exp(ax: float, unit: str) -> int:
     exp = 0 if ax == 0 else int(math.floor(math.log10(ax) / 3) * 3)
     if unit == "V":
         exp = min(max(exp, -3), 0)
-    return max(min(exp, 9), -9)
+    if unit in ("°C", "°F", "°", "%"):
+        exp = 0                          # no m°C
+    return max(min(exp, 9), -12 if unit == "F" else -9)
 
 
 def fmt_fixed(x: float, unit: str, sig: int, full_scale: float | None = None) -> str:
@@ -65,7 +69,7 @@ def fmt_fixed(x: float, unit: str, sig: int, full_scale: float | None = None) ->
     if x is None or math.isnan(x):
         return "—"
     exp = _eng_exp(abs(full_scale if full_scale else x), unit)
-    prefix = {9: "G", 6: "M", 3: "k", 0: "", -3: "m", -6: "µ", -9: "n"}[exp]
+    prefix = {9: "G", 6: "M", 3: "k", 0: "", -3: "m", -6: "µ", -9: "n", -12: "p"}[exp]
     m = x / 10 ** exp
     ref = abs(full_scale / 10 ** exp) if full_scale else abs(m)
     int_digits = 1 if ref < 1 else int(math.log10(ref) + 1e-9) + 1

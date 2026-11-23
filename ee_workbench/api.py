@@ -31,7 +31,7 @@ from .config import config_dir
 DEFAULT_PORT = 8765
 MAX_BODY = 10_000_000        # bytes of one request
 METHODS = ("instruments", "set", "measure", "capture", "wait", "note", "record", "gpio",
-           "read_pin", "wait_for", "profile", "expect", "outputs_off", "log")
+           "read_pin", "wait_for", "send", "wait_text", "profile", "expect", "outputs_off", "log")
 
 
 def api_file():

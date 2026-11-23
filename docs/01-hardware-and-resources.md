@@ -7,17 +7,19 @@ subtitle: What you need, how to cable it, and where the reference manuals are
 
 Other chapters: [Installation](02-installation.md) · [User's Guide](03-users-guide.md) · [Technical Reference](04-technical-reference.md) · [Raspberry Pi](05-raspberry-pi.md) · [How-to guides](06-howtos.md) · [README](../README.md)
 
-This guide lists the hardware EE Workbench supports, what each instrument can do from software, how to set GPIB addresses and cables, and where to find the original manuals.
+This guide lists the hardware OtterBench supports, what each instrument can do from software, how to set GPIB addresses and cables, and where to find the original manuals.
 
 ## At a glance
 
-| Item | Role | Interface | Status in EE Workbench |
+| Item | Role | Interface | Status in OtterBench |
 |---|---|---|---|
 | **Agilent 66321D** Mobile Communications DC Source | Main supply with DVM input | GPIB (and RS-232) | **Fully supported**. Tested on real hardware (fw A.03.01) |
 | Agilent 66311B / 66321B | Same family without DVM | GPIB / RS-232 | Supported by the same driver; DVM hidden if absent |
 | **HP 6632A** System DC Power Supply (also 6633A, 6634A) | Second supply, 20 V / 5 A | GPIB only | Supported. Written from the manual and tested on the simulator |
 | **HP 3456A** 6½-digit DMM | Precision voltage / resistance | GPIB only | Supported. Written from the manual and tested on the simulator |
 | **FNIRSI DPS-150** USB-C bench supply | 30 V / 5.1 A / 150 W programmable supply | USB (ID `2e3c:5740`, serial) | Supported. Written from the community-documented protocol and tested on the simulator; not yet tried on real hardware |
+| **B&K Precision 393** and **393B** handheld DMMs | 60,000- and 100,000-count meters, read-only | USB cable (serial) | Supported. 393 written from B&K's PC software and a community driver that agree; 393B from the APPA 500-series protocol. Tested on simulators; not yet tried on real hardware |
+| **OWON XDM1041 / XDM1241 / XDM2041** bench DMMs | 55,000 counts | USB serial (CH340) or RS232, 115200 baud | Supported. Written from OWON's programming manual, a tested XDM1041 command list and logs of real meters. Tested on a simulator; not yet tried on real hardware |
 | **Nordic Power Profiler Kit II** (PPK2) | 100 kS/s current profiler and 0.8–5 V source | USB (ID `1915:c00a`, serial) | Supported. Tested on real hardware (HW 8682) |
 | **Saleae Logic 8 / Logic Pro 8 / Logic Pro 16** | Logic analyzer with analog inputs | USB, through the **Logic 2** software (automation API) | Supported. Written from Saleae's API and file-format docs and tested on the simulator; not yet tried on real hardware |
 | sigrok-supported logic analyzers (fx2lafw clones, DSLogic, …) | Logic analyzer | USB, through `sigrok-cli` | Supported, including on the Raspberry Pi. Tested on the simulator |
@@ -49,12 +51,16 @@ Every instrument below has a simulator, so its tab, the sequencer, the watchdog 
 | HP 6632A, 6633A, 6634A | `6632A` | yes (`ID?`) | Simulator | `SIM::6632A` |
 | HP 3456A | `3456A` | **no**: choose by hand (it doesn't answer `*IDN?`) | Simulator | `SIM::3456A` |
 | FNIRSI DPS-150 | `DPS150` | yes (USB ID) | Simulator | `SIM::DPS150` |
+| B&K Precision 393 | `BK393` (or `393`) | **no**: choose by hand (generic FTDI cable) | Simulator | `SIM::BK393` |
+| B&K Precision 393B | `BK393B` (or `393B`) | **no**: choose by hand (generic CP210x cable) | Simulator | `SIM::BK393B` |
+| OWON XDM1041 / XDM1241 / XDM2041 | `XDM` (or the model name) | **no**: choose by hand (generic CH340 chip) | Simulator | `SIM::XDM1041`, `SIM::XDM2041` |
 | Nordic PPK2 | `PPK2` | yes (USB ID) | Tested (HW 8682) | `SIM::PPK2` |
 | Saleae Logic 8 / Pro 8 / Pro 16 | `SALEAE` | through Logic 2 | Simulator | `SIM::SALEAE` |
 | sigrok analyzers | `SIGROK` | through `sigrok-cli --scan` | Simulator | `SIM::SIGROK` |
 | Keysight 33500B, 33600A, 33210A, 33220A; Rigol DG800–DG4000 | `FGEN` | yes | Simulator | `SIM::FGEN` |
 | Siglent SDG800, SDG1000X, SDG2000X, SDG6000X | `FGEN` | yes | Simulator | `SIM::SDG` |
 | Raspberry Pi GPIO header | `GPIO` | listed when present | Simulator | `SIM::GPIO` |
+| A DUT's serial console | `UART` | **no**: choose by hand, or **Identify port…** | Simulator | `SIM::UART` |
 
 ### Meters, loads and supplies (instrument definitions)
 
@@ -75,6 +81,21 @@ These are driven by the generic SCPI driver from the [definition files](04-techn
 | Keysight E36311A, E36312A, E36313A (3 outputs) | `SCPI:E36312A` | yes | voltage1–3, current1–3 | vset, iset, ovp, ocp_on, out (per output) | `SIM::E36312A` |
 | Siglent SPD3303X, SPD3303X-E (2 programmable outputs) | `SCPI:SPD3303X` | yes | voltage1–2, current1–2 | vset, iset, out (per output); no OVP over SCPI | `SIM::SPD3303X` |
 | Any single-output SCPI supply (`VOLT`, `CURR`, `OUTP`, `MEAS:VOLT?`): Keysight E36100/E3630/E3640 series, Rigol DP711/712, R&S NGE/HMP (output 1), TTi SCPI models… | `SCPI:SCPI-SUPPLY` | no | voltage, current | vset, iset, ovp, out | `SIM::SCPI-SUPPLY` |
+
+The following don't speak SCPI over VISA; an adapter (`instruments/adapters.py`) translates, so they get the same tab. Give the port in the resource: `KA3005P::/dev/ttyUSB0`, with `@baud` behind it if it isn't the usual speed.
+
+| Instrument | Resource | Readings | Settings | Simulator |
+|---|---|---|---|---|
+| Riden RD6006, RD6012, RD6018, RD6024, RK6006 (USB, 115200 baud) | `RD60XX::/dev/ttyUSB0` | voltage, current, power, vin, ah, wh, temp, cc, prot | vset, iset, ovp, ocp, out | `SIM::RD60XX` |
+| Korad KA3005P, KD3005P, Tenma 72-2540 / 72-2535 / 72-2710, RND 320, Velleman PS3005D | `KA3005P::/dev/ttyACM0` | voltage, current, cv | vset, iset, ovp_on, ocp_on, out | `SIM::KA3005P` |
+| Korad KA6003P, KD6005P, Tenma 72-2550 (60 V) | `KA6003P::/dev/ttyACM0` | as above | as above | `SIM::KA6003P` |
+| Atorch PX-100, and DL24 units whose firmware answers its protocol (not all do) | `PX100::/dev/ttyUSB0` | voltage, current, power, ah, wh, temp | cc, cutoff, input | `SIM::PX100` |
+| Center 309, Voltcraft K204 (4 thermocouples) | `CENTER309::/dev/ttyUSB0` | t1–t4 | | `SIM::CENTER309` |
+| DS18B20 (Pi 1-Wire, or any Linux 1-Wire bus) | `W1::` | one per sensor | | `SIM::W1` |
+| MAX31855 thermocouple board (SPI) | `MAX31855::/dev/spidev0.0` | temperature, cold junction | | `SIM::MAX31855` |
+| MAX31865 RTD board (SPI) | `MAX31865::/dev/spidev0.0` | temperature, resistance | | `SIM::MAX31865` |
+| East Tester ET44, ET45 LCR (SCPI over USB serial) | `ET44::/dev/ttyUSB0` | both parameters | function, frequency, level… | `SIM::ET44` |
+| Keysight E4980A / E4980AL LCR | `SCPI:E4980A` (auto-detected) | both parameters | function, frequency, level… | `SIM::E4980A` |
 
 All of these are at the **Simulator** level. Any instrument that is missing can be added with a file, see [Add your own instrument](06-howtos.md#add-your-own-scpi-instrument).
 
@@ -159,6 +180,37 @@ The DPS-150 is a USB serial device with FNIRSI's own binary protocol (not SCPI).
 - The **Console** tab takes hex frames: `START CMD [DATA…]`, and the app adds the length and checksum. For example `a1 de 00` asks for the model name and `b1 d6 0c` sets the brightness to 12. A line starting with `f1` is sent exactly as typed.
 - FNIRSI doesn't publish the protocol. The driver follows [cho45/fnirsi-dps-150](https://github.com/cho45/fnirsi-dps-150) and [Philipp-IoT/fnirsi_protocol](https://philipp-iot.github.io/fnirsi_protocol/).
 
+### B&K Precision 393 and 393B
+
+| | 393 | 393B |
+|---|---|---|
+| Display | 60,000 counts | 100,000 counts, two lines |
+| USB cable | FTDI serial (opto-isolated, USB390A) | CP210x serial, optical |
+| Protocol | One way: the meter streams 10-byte frames, 9600 8N1 | Request / reply, 9600 8N1 (APPA 500 series) |
+| From the app | Reading, function | Reading, function, auto/manual range, HOLD/MIN/MAX/REL…, second line |
+
+Both are **read-only**: function and range are set with the meter's knob and buttons, and the tab follows. Their USB cables use generic serial chips, so the app can't recognise them: pick the `/dev/ttyUSB…` port and the **B&K 393** or **B&K 393B** model. From the command line or `config.toml` use `393@/dev/ttyUSB0`, `393B@/dev/ttyUSB0`, or `resource = "BK393B::/dev/serial/by-id/…"` (that path stays the same when port numbers change). You need to be in the `dialout` group.
+
+- **393:** press the **RS232** key (6000/RS232) to turn the computer interface on. To stop the meter switching itself off after 30 minutes, hold **MAX/MIN** while turning it on.
+- **393B:** nothing to switch on; set auto power off to *never* in the meter's setup menu for long runs. It measures 3 times a second, so the tab asks every 300 ms.
+- **Overload** shows as OL and leaves a gap in the trend and CSV. A range code that isn't in the 393's table shows as "unknown range" instead of a guess; please report it with the frame from the **Console** tab.
+- The driver only ever sends the 393B's read commands. The same protocol can write calibration and firmware, so the Console refuses everything else.
+- B&K publishes no protocol for either. The 393 follows B&K's AK393 software (serial settings, frame, scale table, status bits) and [dstahlke's Linux driver](https://gist.github.com/dstahlke/d0621a061eb8839e2f5f). The 393B follows libsigrok's [appa-dmm](https://github.com/Cymaphore/libsigrok) driver; B&K's own software for it is APPA's WinDMM500, whose function, unit and status tables match. Older meters that use APPA's earlier frames are detected automatically.
+- There is no 393A in B&K's catalogue; `393A` is accepted as another name for the 393.
+
+### OWON XDM1041, XDM1241 and XDM2041
+
+Bench meters that share one command set: the XDM1041 (mains), the XDM1241 (the same with a battery) and the XDM2041 (adds 4-wire ohms). Plug in USB, pick the `/dev/ttyUSB…` port and the **OWON XDM1041** model, or use `XDM1041@/dev/ttyUSB0` or `resource = "XDM::/dev/serial/by-id/…"`. The meter's baud rate must be 115200, its default. You need to be in the `dialout` group.
+
+- **Function, range, rate and the second display** can be set in the tab, and it follows the meter's own buttons, which stay unlocked. A session remembers only the name and poll delay; `function`, `range` and `rate` in `config.toml` are applied when connecting.
+- **AUTO** on these meters stays within a group of ranges. **AUTO (mV)** and **AUTO (mA)** start in the low ranges. The (mA) sequence is inferred from the mV one.
+- **Current:** the 10 A and mA inputs are different jacks. Owners report a reading of 0 when the 10 A jack is used with a mA range selected, *although current is flowing*.
+- **Poll delay** is 250 ms (the slow rate measures 4 times a second). Lower it for the Medium and Fast rates. Owners have seen only 2–3 new readings a second over USB.
+- **K type:** the meter stops answering for about 3 s every 10 minutes while it measures its cold junction. The driver waits.
+- **The Console accepts documented measuring commands only.** An owner reports an undocumented command (`INT:START`) that starts a factory calibration.
+- The XDM3041 and XDM3051 use a different command set. The driver refuses XDM3… meters; try the generic *Any SCPI meter* definition.
+- Sources: OWON's XDM2041 programming manual, [TheHWcave's XDM1041 command list](https://github.com/TheHWcave/OWON-XDM1041), [ElDuderino's session log](https://github.com/ElDuderino/XDM1041Python) (V4.0.0), [an XDM1241 reference](https://kenosinc.github.io/sigrok-mcp-server/devices/owon-xdm1241) (V4.3.0) and libsigrok's scpi-dmm driver (overload limit).
+
 ### HP 3456A digital multimeter
 
 | Parameter | Value |
@@ -195,7 +247,7 @@ Each unit stores its own calibration, which the app reads at connect. The PPK2 c
 | Analog rate | Up to 10 MS/s (Logic 8) or 50 MS/s (Pro) |
 | Threshold | Pro: 1.2, 1.8 or 3.3 V; Logic 8: fixed |
 
-Saleae doesn't publish the USB protocol of these analyzers. The only supported way to control them is **Logic 2's automation server**, so EE Workbench talks to a running copy of Logic 2 (on this computer, port 10430), and Logic 2 talks to the analyzer. Logic 2 runs on x86-64 Linux, Windows and macOS, **not on the Raspberry Pi**, so on the Pi only the simulator (`SIM::SALEAE`) is available.
+Saleae doesn't publish the USB protocol of these analyzers. The only supported way to control them is **Logic 2's automation server**, so OtterBench talks to a running copy of Logic 2 (on this computer, port 10430), and Logic 2 talks to the analyzer. Logic 2 runs on x86-64 Linux, Windows and macOS, **not on the Raspberry Pi**, so on the Pi only the simulator (`SIM::SALEAE`) is available.
 
 Older Saleae models (the original 8-channel Logic and the original Logic16) aren't supported by Logic 2. Use them through sigrok instead (below).
 
@@ -290,7 +342,7 @@ Waveforms are fetched as bytes (8 bits per sample). Rigol and Keysight scopes se
 
 The E3610A is a manual bench supply (front-panel knobs, analog meters) with **no GPIB, RS-232 or USB port**, so no software can control or read it directly. Two practical options:
 
-1. **Monitor it with the 3456A.** Connect the 3456A's HI/LO inputs across the E3610A's output, then open the 3456A in EE Workbench and type a channel name such as "E3610A output". You get a logged, plotted, 6½-digit record of its voltage.
+1. **Monitor it with the 3456A.** Connect the 3456A's HI/LO inputs across the E3610A's output, then open the 3456A in OtterBench and type a channel name such as "E3610A output". You get a logged, plotted, 6½-digit record of its voltage.
 2. Measure its current by putting a precision shunt in series and reading the shunt voltage with the 3456A (DCV, 100 mV range).
 
 ## GPIB addresses
