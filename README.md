@@ -118,3 +118,17 @@ Read the guides here on GitHub (the Markdown sources in [`docs/`](docs/)), or as
 ## Reporting what works
 
 Many instruments here have so far been checked only against simulators written from their makers' programming manuals. If you use one on real hardware, whether it works or not, please report it with the instrument's `*IDN?` answer and, for a problem, the tab's **Console** output and `~/.config/ee-workbench/crash.log`. A definition file that you got working on a new model is the most useful contribution of all.
+
+## Safety
+
+OtterBench switches real power supplies, loads and batteries. It is **not a safety device**: software, cables and computers fail. Its limits, watchdog and battery cut-offs don't replace fuses, a battery's own protection circuit, or someone nearby. Many instruments, and the Bode, regulator and battery tests, have been checked only against simulators. Try them first with something that can't be hurt.
+
+## License
+
+Copyright © 2026 Daniel McCall.
+
+OtterBench is free software: you can redistribute it and/or modify it under the terms of the [GNU General Public License, version 3](LICENSE) (GPL-3.0-only). It comes with **no warranty**, to the extent the law allows, and the license limits the authors' liability: see its sections 15 to 17. Using it at work is fine. If you distribute it, changed or not, sold or not, the people you give it to must get the source code under the same license.
+
+The license covers the code, not the OtterBench name and logo as marks of origin: a changed version that you distribute should use another name and logo.
+
+Other people's software that it uses keeps its own license: see the [Technical Reference](docs/04-technical-reference.md#licences-and-third-party-code). To contribute, see [CONTRIBUTING.md](CONTRIBUTING.md).

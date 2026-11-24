@@ -732,6 +732,8 @@ The visible name is `APP_NAME` in `about.py`. The package `ee_workbench`, `~/.co
 
 ## Licences and third-party code
 
+OtterBench itself is under the GNU GPL, version 3 only (`LICENSE`); contributions follow `CONTRIBUTING.md`. What it uses:
+
 - **linux-gpib** (GPL): built from `vendor/linux-gpib` (not committed; fetched by the install script).
-- **pyvisa, pyvisa-py** (MIT), **pyqtgraph** (MIT), **PyQt6** (GPL v3), **gpib-ctypes** (GPL v2), **pyserial** (BSD), **pyusb** (BSD), **libgpiod** Python bindings (LGPL), **WeasyPrint** (BSD; optional), **sigrok-cli** (GPL; run as a separate program), **logic2-automation** (Apache 2.0; optional).
+- **pyvisa, pyvisa-py** (MIT), **pyqtgraph** (MIT), **PyQt6** (GPL v3), **gpib-ctypes** (GPL v2, with no "or later"; installed separately by the user, and needed for GPIB only), **pyserial** (BSD), **pyusb** (BSD), **libgpiod** Python bindings (LGPL), **WeasyPrint** (BSD; optional), **sigrok-cli** (GPL; run as a separate program), **logic2-automation** (Apache 2.0; optional).
 - **PPK2 protocol and calibration:** our own implementation, following the behaviour of Nordic's open-source nRF Connect Power Profiler (`pc-nrfconnect-ppk`); no code is copied from it.

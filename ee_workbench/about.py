@@ -16,6 +16,8 @@ TAGLINE = "Control, log and automate a bench of test instruments"
 VERSION = "0.9.0"
 AUTHOR = "Daniel McCall"
 COPYRIGHT = f"© 2026 {AUTHOR}"
+LICENSE = "GNU General Public License, version 3"
+LICENSE_URL = "https://www.gnu.org/licenses/gpl-3.0.html"
 URL = "https://github.com/dcm271/ee-workbench"
 
 ROOT = Path(__file__).resolve().parent.parent

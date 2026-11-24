@@ -110,6 +110,8 @@ class AboutDialog(QDialog):
             f"<div style='font-size:26px; font-weight:bold'>{about.APP_NAME}</div>"
             f"<div>{about.TAGLINE}</div>"
             f"<p>Version {about.version_text()}<br>{about.COPYRIGHT}</p>"
+            f"<p><a style='color:{ACCENT}' href='{about.LICENSE_URL}'>{about.LICENSE}</a>: free "
+            "software, with no warranty, to the extent the law allows</p>"
             f"<p><a style='color:{ACCENT}' href='{about.URL}'>{about.URL}</a></p>")
         text.setOpenExternalLinks(True)
         text.setTextFormat(Qt.TextFormat.RichText)
@@ -131,7 +133,8 @@ class AboutDialog(QDialog):
         v.addWidget(t)
         note = QLabel("Instrument names are their makers' trademarks; they are used here only "
                       "to say what the program works with. Measurements and switched outputs are "
-                      "your responsibility: no software is a safety device.")
+                      "your responsibility: no software is a safety device. Many instruments and the "
+                      "Bode, regulator and battery tests have been checked on simulators only.")
         note.setWordWrap(True)
         note.setStyleSheet(f"color:{MUTED}; font-size:11px;")
         v.addWidget(note)

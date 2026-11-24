@@ -34,6 +34,7 @@ def test_about_box():
     d = b.AboutDialog()
     text = " ".join(x.text() for x in d.findChildren(QLabel))
     assert about.APP_NAME in text and about.VERSION in text
+    assert about.LICENSE in text and "no warranty" in text
     d._copy()
     assert about.APP_NAME in QApplication.clipboard().text()
 
