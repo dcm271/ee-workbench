@@ -1,8 +1,8 @@
 import pytest
 
-from ee_workbench.instruments.base import DmmConfig
-from ee_workbench.instruments.hp3456a import HP3456A, parse_reading
-from ee_workbench.sim.s3456a import Sim3456A
+from otterbench.instruments.base import DmmConfig
+from otterbench.instruments.hp3456a import HP3456A, parse_reading
+from otterbench.sim.s3456a import Sim3456A
 
 
 @pytest.mark.parametrize("raw,val", [

@@ -18,12 +18,12 @@ for a in "$@"; do
 done
 
 if (( ! restart )); then
-  exec .venv/bin/python -m ee_workbench "${args[@]}"
+  exec .venv/bin/python -m otterbench "${args[@]}"
 fi
 
 crashes=()
 while true; do
-  .venv/bin/python -m ee_workbench "${args[@]}"
+  .venv/bin/python -m otterbench "${args[@]}"
   rc=$?
   # 0: quit normally; 2: bad command-line options (restarting won't help)
   if (( rc == 0 || rc == 2 )); then exit "$rc"; fi
@@ -32,7 +32,7 @@ while true; do
   recent=()
   for t in "${crashes[@]}"; do (( now - t < 120 )) && recent+=("$t"); done
   crashes=("${recent[@]}")
-  log="${XDG_CONFIG_HOME:-$HOME/.config}/ee-workbench/crash.log"
+  log="${XDG_CONFIG_HOME:-$HOME/.config}/otterbench/crash.log"
   mkdir -p "$(dirname "$log")"
   echo "---- $(date '+%Y-%m-%d %H:%M:%S')  run.sh: OtterBench exited with status $rc" >> "$log"
   if (( ${#crashes[@]} >= 5 )); then

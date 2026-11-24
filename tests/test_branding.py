@@ -8,8 +8,8 @@ from PyQt6.QtWidgets import QApplication, QLabel  # noqa: E402
 
 _APP = QApplication.instance() or QApplication([])
 
-from ee_workbench import about  # noqa: E402
-from ee_workbench.gui import branding_ui as b  # noqa: E402
+from otterbench import about  # noqa: E402
+from otterbench.gui import branding_ui as b  # noqa: E402
 
 
 def test_logo_and_icon():

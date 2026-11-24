@@ -7,11 +7,11 @@ import time
 import numpy as np
 import pytest
 
-from ee_workbench import bode
-from ee_workbench.clock import now
-from ee_workbench.instruments import make_driver
-from ee_workbench.sequencer import Bench, Inst, SequenceError, Stopped
-from ee_workbench.sim import open_sim, shared
+from otterbench import bode
+from otterbench.clock import now
+from otterbench.instruments import make_driver
+from otterbench.sequencer import Bench, Inst, SequenceError, Stopped
+from otterbench.sim import open_sim, shared
 
 
 def P(f, g, ph):
@@ -141,8 +141,8 @@ def test_window(tmp_path, monkeypatch):
     global _APP
     _APP = QApplication.instance() or QApplication([])
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
-    from ee_workbench.config import Config
-    from ee_workbench.gui.main_window import MainWindow
+    from otterbench.config import Config
+    from otterbench.gui.main_window import MainWindow
     w = MainWindow([("FGEN", "SIM::FGEN"), ("auto", "SIM::SCOPE")], Config(), None)
     try:
         def spin(cond, s=25):
@@ -168,7 +168,7 @@ def test_window(tmp_path, monkeypatch):
         b.use_reference()
         assert max(abs(p.gain_db) for p in b.shown()) < 1e-9
         b.clear_reference()
-        from ee_workbench import report
+        from otterbench import report
         f, g, ph = bode.arrays(b.points)
         html = report.bode_report("x", f, g, ph, "s", b.settings(), b.inst_list())
         assert "33522B" in html and "<svg" in html

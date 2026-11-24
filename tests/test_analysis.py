@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from ee_workbench.analysis import between, histogram, levels, measure, spectrum
+from otterbench.analysis import between, histogram, levels, measure, spectrum
 
 
 def pulses(period=4.615e-3, width=0.577e-3, hi=1.0, lo=0.1, dt=15.6e-6, n=4096, edge=0):

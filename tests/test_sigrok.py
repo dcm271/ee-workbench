@@ -3,14 +3,14 @@ import time
 import numpy as np
 import pytest
 
-from ee_workbench.instruments import make_driver, model_for
-from ee_workbench.instruments.logic import LogicConfig, digital_stats
-from ee_workbench.instruments.sigrok import (SigrokLink, SigrokLogic, device_spec,
+from otterbench.instruments import make_driver, model_for
+from otterbench.instruments.logic import LogicConfig, digital_stats
+from otterbench.instruments.sigrok import (SigrokLink, SigrokLogic, device_spec,
                                              parse_annotations, parse_hz, parse_scan,
                                              parse_show, read_sr, sigrok_cli, trigger_index,
                                              traces_from_samples, write_sr)
-from ee_workbench.sim.slogic import UART_TEXT
-from ee_workbench.sim.ssigrok import SHOW, SimSigrokCli
+from otterbench.sim.slogic import UART_TEXT
+from otterbench.sim.ssigrok import SHOW, SimSigrokCli
 
 # Real sigrok-cli 0.7.2 output (demo device)
 DEMO_SHOW = """demo - Demo device with 13 channels: D0 D1 D2 D3 D4 D5 D6 D7 A0 A1 A2 A3 A4

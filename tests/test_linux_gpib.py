@@ -23,15 +23,15 @@ def fake(tmp_path_factory):
 
 
 def run(code, lib):
-    env = dict(os.environ, EEWB_GPIB_LIB=lib, PYTHONPATH=str(HERE.parent))
-    env.pop("EEWB_VISA_LIB", None)
+    env = dict(os.environ, OTTERBENCH_GPIB_LIB=lib, PYTHONPATH=str(HERE.parent))
+    env.pop("OTTERBENCH_VISA_LIB", None)
     r = subprocess.run([sys.executable, "-W", "ignore", "-c", code], env=env, timeout=60,
                        capture_output=True, text=True)
     assert r.returncode == 0, r.stderr
     return r.stdout.split()
 
 
-OPEN = "from ee_workbench.transport import *\nimport ee_workbench.linux_gpib as g\n"
+OPEN = "from otterbench.transport import *\nimport otterbench.linux_gpib as g\n"
 
 
 def test_query_block_status_and_timeouts(fake):
@@ -127,6 +127,6 @@ assert g.lib.open_count() == 0
 def test_a_library_that_isnt_libgpib_is_reported(tmp_path):
     bad = tmp_path / "libgpib.so.0"
     bad.write_bytes(b"not a library")
-    out = run("import ee_workbench.linux_gpib as g\n"
+    out = run("import otterbench.linux_gpib as g\n"
               f"try:\n    g.load({str(bad)!r})\nexcept OSError:\n    print('refused', g.lib)", "")
     assert out == ["refused", "None"]

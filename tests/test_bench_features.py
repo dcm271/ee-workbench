@@ -8,14 +8,14 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-from ee_workbench import events, mathchannels as mc, profile, report, setups, watchdog
-from ee_workbench.instruments.fgen import FunctionGenerator, looks_like_fgen
-from ee_workbench.instruments.gpio import GpioDriver, PinConfig
-from ee_workbench.sequencer import (Bench, Inst, Plan, SequenceError, Step, LimitFailed,
+from otterbench import events, mathchannels as mc, profile, report, setups, watchdog
+from otterbench.instruments.fgen import FunctionGenerator, looks_like_fgen
+from otterbench.instruments.gpio import GpioDriver, PinConfig
+from otterbench.sequencer import (Bench, Inst, Plan, SequenceError, Step, LimitFailed,
                                     run_plan)
-from ee_workbench.signals import signals_of, slug
-from ee_workbench.sim.sfgen import SimFgen
-from ee_workbench.sim.sgpio import SimGpio
+from otterbench.signals import signals_of, slug
+from otterbench.sim.sfgen import SimFgen
+from otterbench.sim.sgpio import SimGpio
 
 
 # ---------------------------------------------------------------- fakes
@@ -363,9 +363,9 @@ def test_sequence_report_and_pdf(tmp_path, bench):
 
 
 def test_session_report(tmp_path):
-    from ee_workbench.session import SessionWriter
+    from otterbench.session import SessionWriter
     w = SessionWriter()
-    p = str(tmp_path / "s.eewb")
+    p = str(tmp_path / "s.otter")
     w.start(p)
     w.stream("a", "66321D", "663xx", "SIM", ["voltage_V", "current_A"])
     for k in range(50):
@@ -409,13 +409,13 @@ def test_setups(tmp_path, monkeypatch):
 # ---------------------------------------------------------------- remote API
 def test_api_roundtrip(tmp_path, monkeypatch, bench):
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
-    from ee_workbench.api import ApiServer
-    from ee_workbench.client import BenchError, RemoteBench, connect
+    from otterbench.api import ApiServer
+    from otterbench.client import BenchError, RemoteBench, connect
     srv = ApiServer(lambda: bench, port=0)
     srv.start()
     try:
-        info = json.loads((tmp_path / "ee-workbench" / "api.json").read_text())
-        assert (tmp_path / "ee-workbench" / "api.json").stat().st_mode & 0o777 == 0o600
+        info = json.loads((tmp_path / "otterbench" / "api.json").read_text())
+        assert (tmp_path / "otterbench" / "api.json").stat().st_mode & 0o777 == 0o600
         b = connect()
         assert b.instruments() == ["66321D", "GPIO", "33522B"]
         b.set("66321D", "voltage", 3.3)
@@ -431,15 +431,15 @@ def test_api_roundtrip(tmp_path, monkeypatch, bench):
             RemoteBench(info["url"], "wrong").instruments()
     finally:
         srv.stop()
-    assert not (tmp_path / "ee-workbench" / "api.json").exists()
+    assert not (tmp_path / "otterbench" / "api.json").exists()
 
 
 # ---------------------------------------------------------------- open-sense detection
 def test_sense_protect_from_a_sequence():
-    from ee_workbench.instruments.agilent663xx import Agilent663xx
-    from ee_workbench.instruments.hp6632a import HP6632A
-    from ee_workbench.sim.s663xx import Sim663xx
-    from ee_workbench.sim.s6632a import Sim6632A
+    from otterbench.instruments.agilent663xx import Agilent663xx
+    from otterbench.instruments.hp6632a import HP6632A
+    from otterbench.sim.s663xx import Sim663xx
+    from otterbench.sim.s6632a import Sim6632A
     a = Agilent663xx(Sim663xx())
     a.identify()
     b = HP6632A(Sim6632A())

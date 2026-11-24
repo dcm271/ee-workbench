@@ -64,7 +64,7 @@ Every instrument below has a simulator, so its tab, the sequencer, the watchdog 
 
 ### Meters, loads and supplies (instrument definitions)
 
-These are driven by the generic SCPI driver from the [definition files](04-technical-reference.md#instrument-definition-files-toml) in `ee_workbench/instruments/scpi_defs/`. Each one lists the model families its commands cover; close relatives usually work with the same file.
+These are driven by the generic SCPI driver from the [definition files](04-technical-reference.md#instrument-definition-files-toml) in `otterbench/instruments/scpi_defs/`. Each one lists the model families its commands cover; close relatives usually work with the same file.
 
 | Instrument | Model key | Auto-detect | Readings | Settings | Simulator |
 |---|---|---|---|---|---|

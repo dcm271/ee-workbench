@@ -5,19 +5,19 @@ import time
 import numpy as np
 import pytest
 
-from ee_workbench.instruments import (all_models, make_driver, model_for, resolve_model,
+from otterbench.instruments import (all_models, make_driver, model_for, resolve_model,
                                       scopes)
-from ee_workbench.instruments import scpi_generic as g
-from ee_workbench.sequencer import Bench, Plan, Step, run_plan
-from ee_workbench.sim import open_sim
-from ee_workbench.signals import name_matches
+from otterbench.instruments import scpi_generic as g
+from otterbench.sequencer import Bench, Plan, Step, run_plan
+from otterbench.sim import open_sim
+from otterbench.signals import name_matches
 
 
 @pytest.fixture
 def cfgdir(tmp_path, monkeypatch):
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
     g.definitions(reload=True)
-    yield tmp_path / "ee-workbench"
+    yield tmp_path / "otterbench"
     g.definitions(reload=True)
 
 
@@ -238,8 +238,8 @@ def _wait(app, cond, seconds=8):
 
 
 def test_gui_scpi_scope_and_two_units(qapp, cfgdir):
-    from ee_workbench.config import Config
-    from ee_workbench.gui.main_window import MainWindow
+    from otterbench.config import Config
+    from otterbench.gui.main_window import MainWindow
     win = MainWindow([("auto", "SIM::DP832"), ("auto", "SIM::DP832#2"),
                       ("auto", "SIM::34461A"), ("auto", "SIM::SCOPE")], Config(), None)
     try:
@@ -265,14 +265,14 @@ def test_gui_scpi_scope_and_two_units(qapp, cfgdir):
 
 def test_gui_auto_detect_reopens_as_the_right_tab(qapp, cfgdir, monkeypatch):
     """A resource opened as "auto" that answers *IDN? as a meter gets a meter tab."""
-    from ee_workbench.config import Config
-    from ee_workbench.gui.main_window import MainWindow
-    from ee_workbench.instruments import __init__ as _  # noqa: F401
-    import ee_workbench.instruments as inst
+    from otterbench.config import Config
+    from otterbench.gui.main_window import MainWindow
+    from otterbench.instruments import __init__ as _  # noqa: F401
+    import otterbench.instruments as inst
     monkeypatch.setattr(inst, "model_for",
                         lambda res, model="auto": model if model != "auto" else "auto")
-    import ee_workbench.gui.main_window as mw
-    import ee_workbench.worker as wk
+    import otterbench.gui.main_window as mw
+    import otterbench.worker as wk
     monkeypatch.setattr(mw, "model_for", inst.model_for)
     monkeypatch.setattr(wk, "model_for", inst.model_for)
     monkeypatch.setattr(inst, "SIM_MODELS", {})
@@ -287,9 +287,9 @@ def test_gui_auto_detect_reopens_as_the_right_tab(qapp, cfgdir, monkeypatch):
 
 
 def test_gui_two_ppk2s_align_through_a_shared_pin(qapp, cfgdir):
-    from ee_workbench.config import Config
-    from ee_workbench.gui.main_window import MainWindow
-    from ee_workbench.instruments.ppk2 import PpkReading
+    from otterbench.config import Config
+    from otterbench.gui.main_window import MainWindow
+    from otterbench.instruments.ppk2 import PpkReading
     win = MainWindow([("auto", "SIM::PPK2"), ("auto", "SIM::PPK2#2")], Config(), None)
     try:
         assert _wait(qapp, lambda: all(p.connected for p in win.panels()))
@@ -334,7 +334,7 @@ def test_self_test_finds_overlapping_replies(tmp_path):
 
 
 def test_check_instruments_cli(tmp_path, capsys):
-    from ee_workbench.check_instruments import main
+    from otterbench.check_instruments import main
     bad = tmp_path / "bad.toml"
     bad.write_text('id = "B"\ntype = "meter"\n')
     assert main([str(bad)]) == 1

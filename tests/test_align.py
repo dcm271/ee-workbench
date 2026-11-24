@@ -3,12 +3,12 @@ import time
 import numpy as np
 import pytest
 
-from ee_workbench.align import align, edges_from_samples
-from ee_workbench.clock import now
-from ee_workbench.instruments import make_driver
-from ee_workbench.instruments.logic import LogicConfig
-from ee_workbench.sim.shared import shared_edges, shared_level
-from ee_workbench.sim.ssigrok import SimSigrokCli
+from otterbench.align import align, edges_from_samples
+from otterbench.clock import now
+from otterbench.instruments import make_driver
+from otterbench.instruments.logic import LogicConfig
+from otterbench.sim.shared import shared_edges, shared_level
+from otterbench.sim.ssigrok import SimSigrokCli
 
 RNG = np.random.default_rng(3)
 

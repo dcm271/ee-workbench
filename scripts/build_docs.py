@@ -93,7 +93,7 @@ def main():
         write_pdf(body, out)
         combined.append(body)
         print(f"  {out.relative_to(ROOT)}")
-    manual = OUT / "EE-Workbench-Manual.pdf"
+    manual = OUT / "OtterBench-Manual.pdf"
     write_pdf('<div style="page-break-after: always"></div>'.join(combined), manual)
     print(f"  {manual.relative_to(ROOT)}  (all guides combined)")
 

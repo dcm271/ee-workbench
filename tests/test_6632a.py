@@ -1,7 +1,7 @@
-from ee_workbench.instruments import detect
-from ee_workbench.instruments.base import SupplyPoll
-from ee_workbench.instruments.hp6632a import HP6632A
-from ee_workbench.sim.s6632a import Sim6632A
+from otterbench.instruments import detect
+from otterbench.instruments.base import SupplyPoll
+from otterbench.instruments.hp6632a import HP6632A
+from otterbench.sim.s6632a import Sim6632A
 
 
 def make():

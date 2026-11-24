@@ -2,8 +2,8 @@
 #   QT_QPA_PLATFORM=offscreen .venv/bin/python scripts/make_screenshots.py --touch
 # which sets up `app`, `OUT` and touch mode, then runs this.
 from PyQt6.QtCore import QTimer  # noqa: F811
-from ee_workbench.gui.connect_dialog import ConnectDialog
-from ee_workbench.gui.touch import NumPad
+from otterbench.gui.connect_dialog import ConnectDialog
+from otterbench.gui.touch import NumPad
 
 tw = MainWindow([parse_target(t) for t in ("SIM::66321D", "SIM::3456A")])  # noqa: F821
 tw.resize(1280, 800)
@@ -80,8 +80,8 @@ def t_new():
         app.processEvents()  # noqa: F821
         pw.grab().save(str(OUT / "touch-production.png"))  # noqa: F821
         pw.close()
-        from ee_workbench.gui.safety_dialog import SafetyDialog
-        from ee_workbench.safety import Safety
+        from otterbench.gui.safety_dialog import SafetyDialog
+        from otterbench.safety import Safety
         d = SafetyDialog(nw, Safety(off_on_quit=True, auto_reconnect=True))
         d.show()
         app.processEvents()  # noqa: F821

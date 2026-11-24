@@ -8,17 +8,17 @@ import time
 import numpy as np
 import pytest
 
-from ee_workbench import production, safety, watchdog
-from ee_workbench.instruments import make_driver, model_for
-from ee_workbench.sequencer import Bench, Plan, Step, run_plan
-from ee_workbench.session import SessionWriter
-from ee_workbench.sim import open_sim
+from otterbench import production, safety, watchdog
+from otterbench.instruments import make_driver, model_for
+from otterbench.sequencer import Bench, Plan, Step, run_plan
+from otterbench.session import SessionWriter
+from otterbench.sim import open_sim
 
 
 @pytest.fixture
 def cfgdir(tmp_path, monkeypatch):
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
-    return tmp_path / "ee-workbench"
+    return tmp_path / "otterbench"
 
 
 def _drv(res):
@@ -82,7 +82,7 @@ def test_hw_plan_refuses_what_it_cannot_do():
 # ---------------------------------------------------------------- flight recorder
 def test_gated_session_keeps_only_around_events(tmp_path):
     w = SessionWriter()
-    path = str(tmp_path / "g.eewb")
+    path = str(tmp_path / "g.otter")
     w.start(path, gate=(1.0, 0.5))
     w._shift = 0.0
     w.stream("k", "x", "m", "r", ["v"])
@@ -104,7 +104,7 @@ def test_gated_session_keeps_only_around_events(tmp_path):
 
 def test_ungated_trigger_is_a_no_op(tmp_path):
     w = SessionWriter()
-    w.start(str(tmp_path / "a.eewb"))
+    w.start(str(tmp_path / "a.otter"))
     assert w.trigger(1.0) is False
     w.stop()
 
@@ -210,9 +210,9 @@ def _wait(app, cond, seconds=8):
 
 
 def test_gui_hw_limit_pushed_to_supply(qapp, cfgdir):
-    from ee_workbench.config import Config
-    from ee_workbench.gui.hub import hub
-    from ee_workbench.gui.main_window import MainWindow
+    from otterbench.config import Config
+    from otterbench.gui.hub import hub
+    from otterbench.gui.main_window import MainWindow
     win = MainWindow([("auto", "SIM::DP832")], Config(), None)
     old = hub.watchdog.rules
     try:
@@ -229,9 +229,9 @@ def test_gui_hw_limit_pushed_to_supply(qapp, cfgdir):
 
 
 def test_gui_outputs_off_on_quit_and_marker(qapp, cfgdir):
-    from ee_workbench.config import Config
-    from ee_workbench.gui.main_window import MainWindow
-    from ee_workbench.instruments.scpi_generic import ScpiDriver
+    from otterbench.config import Config
+    from otterbench.gui.main_window import MainWindow
+    from otterbench.instruments.scpi_generic import ScpiDriver
     win = MainWindow([("auto", "SIM::DL3021")], Config(), None)
     p = win.panels()[0]
     assert _wait(qapp, lambda: p.connected)
@@ -252,14 +252,14 @@ def test_gui_outputs_off_on_quit_and_marker(qapp, cfgdir):
 
 
 def test_gui_off_after_crash(qapp, cfgdir):
-    from ee_workbench.config import Config
-    from ee_workbench.gui.main_window import MainWindow
+    from otterbench.config import Config
+    from otterbench.gui.main_window import MainWindow
     safety.marker_path().parent.mkdir(parents=True, exist_ok=True)
     safety.marker_path().write_text(json.dumps({"pid": 2 ** 22 + 999, "started": "x",
                                                 "open": [{"resource": "SIM::E36312A",
                                                           "model": "SCPI:E36312A"}]}))
     (cfgdir / "bench.json").write_text(json.dumps({"safety": {"off_after_crash": True}}))
-    from ee_workbench.instruments.scpi_generic import ScpiDriver
+    from otterbench.instruments.scpi_generic import ScpiDriver
     sent = []
     real = ScpiDriver.set_output
     ScpiDriver.set_output = lambda self, on: (sent.append(on), real(self, on))[1]
@@ -274,8 +274,8 @@ def test_gui_off_after_crash(qapp, cfgdir):
 
 
 def test_gui_production_run(qapp, cfgdir, tmp_path):
-    from ee_workbench.config import Config
-    from ee_workbench.gui.main_window import MainWindow
+    from otterbench.config import Config
+    from otterbench.gui.main_window import MainWindow
     win = MainWindow([("auto", "SIM::34461A")], Config(), None)
     try:
         p = win.panels()[0]

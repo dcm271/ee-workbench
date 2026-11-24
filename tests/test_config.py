@@ -1,4 +1,5 @@
-from ee_workbench.config import Entry, Session, load_config, startup_entries
+from otterbench.config import (Entry, Session, config_dir, load_config, migrate_old_dir,
+                               startup_entries)
 
 
 def test_first_run_writes_commented_template(tmp_path):
@@ -74,3 +75,45 @@ def test_scan_uses_remembered_models(tmp_path):
 def test_corrupt_session_is_ignored(tmp_path):
     (tmp_path / "last-session.json").write_text("{not json")
     assert Session(tmp_path / "last-session.json").open == []
+
+
+def _old_dir(tmp_path, monkeypatch):
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    old = tmp_path / "ee-workbench"
+    (old / "setups").mkdir(parents=True)
+    (old / "setups" / "a.json").write_text("{}")
+    (old / "config.toml").write_text("[startup]\nopen = 'none'\n")
+    (old / "crash.log").write_text("old")
+    return old
+
+
+def test_settings_from_the_old_name_are_moved(tmp_path, monkeypatch):
+    old = _old_dir(tmp_path, monkeypatch)
+    assert migrate_old_dir() == ""
+    assert not old.exists()
+    assert (config_dir() / "setups" / "a.json").exists()
+    assert load_config().open == "none"
+    assert migrate_old_dir() == ""
+
+
+def test_migration_keeps_newer_files(tmp_path, monkeypatch):
+    old = _old_dir(tmp_path, monkeypatch)
+    config_dir().mkdir()                 # e.g. run.sh logged a crash first
+    (config_dir() / "crash.log").write_text("new")
+    assert migrate_old_dir() == ""
+    assert (config_dir() / "crash.log").read_text() == "new"
+    assert (old / "crash.log").read_text() == "old"
+    assert (config_dir() / "config.toml").exists()
+
+
+def test_migration_happens_once(tmp_path, monkeypatch):
+    old = _old_dir(tmp_path, monkeypatch)
+    config_dir().mkdir()
+    (config_dir() / "config.toml").write_text("")
+    assert migrate_old_dir() == ""
+    assert (old / "config.toml").exists() and not (config_dir() / "setups").exists()
+
+
+def test_migration_without_old_settings(tmp_path, monkeypatch):
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    assert migrate_old_dir() == "" and not config_dir().exists()

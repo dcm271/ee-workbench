@@ -229,8 +229,8 @@ Keep **Watchdog armed** ticked. A trip shows a message, writes a note into the s
 2. In a notebook (any Python 3.9+; pandas and matplotlib for the plotting below):
 
 ```python
-import sys; sys.path.insert(0, "/home/me/ee-workbench")
-from ee_workbench.client import connect
+import sys; sys.path.insert(0, "/home/me/otterbench")
+from otterbench.client import connect
 import numpy as np, pandas as pd
 
 bench = connect()
@@ -258,7 +258,7 @@ On a bench computer (a Pi is fine) running the app with `api = true` in `config.
 ```python
 # tests_hw/test_board.py
 import pytest
-from ee_workbench.client import connect, BenchError
+from otterbench.client import connect, BenchError
 
 @pytest.fixture(scope="module")
 def bench():
@@ -292,13 +292,13 @@ Run it as `pytest tests_hw -v`. As a CI step on a self-hosted runner on the benc
 
 ## Analyse a recorded session
 
-1. **Tools ▾ → Open session…** and pick the `.eewb` file.
+1. **Tools ▾ → Open session…** and pick the `.otter` file.
 2. Tick the signals to plot. Scroll to zoom, or click a capture, note or decoded row to jump to it.
 3. Turn on **Cursors** and drag **A** and **B** around the stretch you care about. The table gives the value at each cursor, the difference, the mean, the min/max, and the charge or energy between them.
 4. **Math…** derives a new trace, e.g. power = `_66321d.voltage * ppk2.current`, or energy with **Integrate**.
 5. Zoom to the stretch to keep, then use **Export CSV…** (the ticked signals), **Save PNG…**, or **Report…** (HTML/PDF with plots, notes and results).
 
-Other tools can read the file too. It's SQLite: `sqlite3 run.eewb "select * from notes"`, or in Python `pandas.read_sql("select * from s_1", sqlite3.connect("run.eewb"))`. The tables are listed in the [Technical Reference](04-technical-reference.md#session-files-sessionpy).
+Other tools can read the file too. It's SQLite: `sqlite3 run.otter "select * from notes"`, or in Python `pandas.read_sql("select * from s_1", sqlite3.connect("run.otter"))`. The tables are listed in the [Technical Reference](04-technical-reference.md#session-files-sessionpy).
 
 ---
 
@@ -328,13 +328,13 @@ If VXI-11 doesn't answer, use the raw socket form: `TCPIP::192.168.1.50::5025::S
 
 With **Reconnect automatically** ticked in **Tools ▾ → Safety…**, step 2 happens by itself, as soon as the instrument answers again (a USB device: as soon as it is plugged back in).
 
-**A window "OtterBench: internal error" appeared:** the app caught a problem and carried on. Close the window and keep working. To report it, send `~/.config/ee-workbench/crash.log`.
+**A window "OtterBench: internal error" appeared:** the app caught a problem and carried on. Close the window and keep working. To report it, send `~/.config/otterbench/crash.log`.
 
 **The app closed by itself:**
 
 1. Check the bench first: outputs stay as they were when the app ended.
 2. Start it again (`./run.sh`). It reopens the same instruments; supply setpoints are read from the supplies.
-3. The cause is in `~/.config/ee-workbench/fault.log` (a crash in Qt or a driver) or `crash.log`.
+3. The cause is in `~/.config/otterbench/fault.log` (a crash in Qt or a driver) or `crash.log`.
 4. On a screen nobody watches, launch it with `./run.sh --restart-on-crash --fullscreen` so it comes back by itself (the Pi's autostart already does), and see [Leave a test running overnight](#leave-a-test-running-overnight) for switching outputs off and resuming automatically.
 
 **Esc reported "⚠ FAILED for …":** every other output was switched off; switch the named instrument off at its front panel, then reconnect it.
@@ -354,11 +354,11 @@ Any instrument that takes SCPI-style commands (a meter, load, supply, switch uni
 | Errors | | `SYST:ERR?` | `0,"No error"` |
 
 1. **Check the commands on the instrument.** Open it with any SCPI model (say **Model → Any SCPI meter (READ? only)**), go to its **Console** tab, and try each query: `*IDN?`, `FUNC?`, `MEAS:VOLT?`. Note the exact answers; the console shows them verbatim. Also note a part of the `*IDN?` answer that names the model (`EL-150`).
-2. **Start from the closest built-in.** Copy one from `ee_workbench/instruments/scpi_defs/` (here `DL3021.toml`, a load) to `~/.config/ee-workbench/instruments/el150.toml`:
+2. **Start from the closest built-in.** Copy one from `otterbench/instruments/scpi_defs/` (here `DL3021.toml`, a load) to `~/.config/otterbench/instruments/el150.toml`:
 
    ```bash
-   mkdir -p ~/.config/ee-workbench/instruments
-   cp ee_workbench/instruments/scpi_defs/DL3021.toml ~/.config/ee-workbench/instruments/el150.toml
+   mkdir -p ~/.config/otterbench/instruments
+   cp otterbench/instruments/scpi_defs/DL3021.toml ~/.config/otterbench/instruments/el150.toml
    ```
 
 3. **Edit it** to match the manual:
@@ -422,7 +422,7 @@ Any instrument that takes SCPI-style commands (a meter, load, supply, switch uni
 4. **Check it:**
 
    ```bash
-   .venv/bin/python -m ee_workbench.check_instruments ~/.config/ee-workbench/instruments/el150.toml
+   .venv/bin/python -m otterbench.check_instruments ~/.config/otterbench/instruments/el150.toml
    ```
 
    `ok` means the file is valid and works with its own simulator. Errors name the key and say what's wrong.

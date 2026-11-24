@@ -26,13 +26,13 @@ These steps take a fresh Ubuntu machine to OtterBench talking to your instrument
 
 ## 1. Get the project
 
-The project lives in `~/Dev/ee-workbench`:
+The project lives in `~/Dev/otterbench`:
 
 ```
-ee-workbench/
+otterbench/
 ├── run.sh                       launch the GUI (--restart-on-crash: start again after a crash)
-├── ee-workbench.desktop         launcher for the menu, desktop or autostart
-├── ee_workbench/                application source
+├── otterbench.desktop           launcher for the menu, desktop or autostart
+├── otterbench/                  application source
 ├── scripts/
 │   ├── install-gpib-driver.sh   builds and installs linux-gpib
 │   ├── prepare-kernel-tree.sh   kernel tree for boards with no headers package (called by the above)
@@ -53,7 +53,7 @@ PyQt6 comes from the distribution; everything else goes into a project virtualen
 
 ```bash
 sudo apt install python3-pyqt6 python3-numpy python3-venv python3-serial libxcb-cursor0
-cd ~/Dev/ee-workbench
+cd ~/Dev/otterbench
 python3 -m venv --system-site-packages .venv
 .venv/bin/pip install -r requirements.txt
 ```
@@ -81,7 +81,7 @@ Check that it works without any hardware:
 Ubuntu's kernel is built with **`CONFIG_GPIB` off**, so the NI GPIB-USB-HS has no driver until you build one. The script does it all:
 
 ```bash
-cd ~/Dev/ee-workbench
+cd ~/Dev/otterbench
 ./scripts/install-gpib-driver.sh
 ```
 
@@ -163,7 +163,7 @@ The package's udev rules give USB analyzers to the desktop user, so unplug the a
 Nothing extra to install: generators use the same VISA library as GPIB.
 
 - **LAN** (recommended): give the generator a fixed IP address on its front panel (Utility → I/O → LAN), check you can `ping` it, and connect to `TCPIP::192.168.1.50::INSTR` (VXI-11; Keysight, Rigol and Siglent all answer it). If VXI-11 is blocked, `TCPIP::192.168.1.50::5025::SOCKET` (Keysight, Siglent port 5025; Rigol 5555) works too. Type the resource in the toolbar, with model **Function generator** or **Auto-detect**.
-- **USB**: plug it in and it appears in the resource list as `USB0::0x1AB1::0x0642::DG1ZA2xxxxxxx::INSTR`. pyvisa-py drives USB-TMC through `pyusb` (in `requirements.txt`), and needs permission on the device: the setup scripts install `/etc/udev/rules.d/60-ee-workbench-usbtmc.rules` for Keysight/Agilent (`0957`, `2a8d`), Rigol (`1ab1`), Siglent (`f4ec`, `f4ed`), Tektronix (`0699`) and Keithley (`05e6`), giving them to the `plugdev` group. Another brand: add a line with its USB vendor ID (`lsusb`), then `sudo udevadm control --reload-rules` and replug.
+- **USB**: plug it in and it appears in the resource list as `USB0::0x1AB1::0x0642::DG1ZA2xxxxxxx::INSTR`. pyvisa-py drives USB-TMC through `pyusb` (in `requirements.txt`), and needs permission on the device: the setup scripts install `/etc/udev/rules.d/60-otterbench-usbtmc.rules` for Keysight/Agilent (`0957`, `2a8d`), Rigol (`1ab1`), Siglent (`f4ec`, `f4ed`), Tektronix (`0699`) and Keithley (`05e6`), giving them to the `plugdev` group. Another brand: add a line with its USB vendor ID (`lsusb`), then `sudo udevadm control --reload-rules` and replug.
 - **GPIB**: as any other GPIB instrument.
 
 Auto-detect recognises the Keysight 33xxx, Rigol DG and Siglent SDG families by their `*IDN?` answer; otherwise choose **Function generator** by hand. Test with the simulators first: `./run.sh SIM::FGEN` (SCPI) or `SIM::SDG` (Siglent).
@@ -189,11 +189,11 @@ A few instruments need a setting on their front panel first:
 | Rigol DS1000Z | Over USB, set **Utility → IO Setting → USB Device: Computer**. Over LAN, turn on DHCP or set a static address |
 | Tektronix TBS1000C/2000 | Over USB, set **Utility → Config → USB Device Port: Connect to Computer** |
 
-**Your own instruments.** An instrument without a built-in definition can be added with a small TOML file in `~/.config/ee-workbench/instruments/`. No programming is needed: see [Add your own SCPI instrument](06-howtos.md#add-your-own-scpi-instrument). Check a file with:
+**Your own instruments.** An instrument without a built-in definition can be added with a small TOML file in `~/.config/otterbench/instruments/`. No programming is needed: see [Add your own SCPI instrument](06-howtos.md#add-your-own-scpi-instrument). Check a file with:
 
 ```bash
-.venv/bin/python -m ee_workbench.check_instruments ~/.config/ee-workbench/instruments/my-meter.toml
-.venv/bin/python -m ee_workbench.check_instruments          # every definition in use
+.venv/bin/python -m otterbench.check_instruments ~/.config/otterbench/instruments/my-meter.toml
+.venv/bin/python -m otterbench.check_instruments          # every definition in use
 ```
 
 ## Raspberry Pi GPIO (optional)
@@ -223,13 +223,13 @@ Without it, choosing PDF says "PDF needs WeasyPrint" and HTML still works; a bro
 Nothing to install. Switch it on with **Tools ▾ → Remote API**, or start it with the app:
 
 ```toml
-# ~/.config/ee-workbench/config.toml
+# ~/.config/otterbench/config.toml
 [startup]
 api = true
 api_port = 8765
 ```
 
-(or `./run.sh --api`). It listens on `127.0.0.1` only. A notebook or script on the same computer uses `from ee_workbench.client import connect`; that file needs only Python's standard library. From another computer, tunnel it over SSH (`ssh -L 8765:127.0.0.1:8765 user@bench`) and copy `~/.config/ee-workbench/api.json` (it holds the access token). See the [User's Guide](03-users-guide.md#remote-api-python-and-jupyter).
+(or `./run.sh --api`). It listens on `127.0.0.1` only. A notebook or script on the same computer uses `from otterbench.client import connect`; that file needs only Python's standard library. From another computer, tunnel it over SSH (`ssh -L 8765:127.0.0.1:8765 user@bench`) and copy `~/.config/otterbench/api.json` (it holds the access token). See the [User's Guide](03-users-guide.md#remote-api-python-and-jupyter).
 
 ## 4. Launching
 
@@ -253,10 +253,10 @@ api_port = 8765
 
 ### Desktop launcher (optional)
 
-The repository includes `ee-workbench.desktop`. It assumes the project is in `~/ee-workbench` and starts full screen, so edit its `Exec=` line to suit, for example:
+The repository includes `otterbench.desktop`. It assumes the project is in `~/otterbench` and starts full screen, so edit its `Exec=` line to suit, for example:
 
 ```
-Exec=/home/ghost/Dev/ee-workbench/run.sh
+Exec=/home/ghost/Dev/otterbench/run.sh
 ```
 
 Then copy it to `~/.local/share/applications/` (menu), `~/Desktop/`, or `~/.config/autostart/` (start at login).
@@ -273,14 +273,14 @@ Then copy it to `~/.local/share/applications/` (menu), `~/Desktop/`, or `~/.conf
 | `--api` | Start the [Remote API](#remote-api-optional) |
 | `--no-splash` | Start without the splash screen |
 | `--version` | Print the version and quit |
-| `--restart-on-crash` | **`run.sh` only.** If the app ends with an error or crashes, start it again after 3 s. A normal quit ends it; five crashes within two minutes give up. Each restart is noted in `~/.config/ee-workbench/crash.log`. Meant for unattended screens: the Pi's autostart uses it. |
+| `--restart-on-crash` | **`run.sh` only.** If the app ends with an error or crashes, start it again after 3 s. A normal quit ends it; five crashes within two minutes give up. Each restart is noted in `~/.config/otterbench/crash.log`. Meant for unattended screens: the Pi's autostart uses it. |
 
 ## Alternatives
 
 | Situation | What to do |
 |---|---|
 | 66321D on RS-232 instead of GPIB | Use resource `ASRL/dev/ttyUSB0::INSTR` and pick the baud rate that matches the supply's I/O menu (factory 9600). Hidden `ttyS` ports can be typed in by hand. |
-| NI-VISA or Keysight IO Libraries installed | `EEWB_VISA_LIB=@ivi ./run.sh` uses the vendor VISA instead of pyvisa-py |
+| NI-VISA or Keysight IO Libraries installed | `OTTERBENCH_VISA_LIB=@ivi ./run.sh` uses the vendor VISA instead of pyvisa-py |
 | A different GPIB adapter | Set `board_type` in `/etc/gpib.conf` (e.g. `agilent_82357a`) and run `sudo gpib_config` |
 
 ## Troubleshooting
@@ -304,7 +304,7 @@ Then copy it to `~/.local/share/applications/` (menu), `~/Desktop/`, or `~/.conf
 | Saleae: "invalid digital sample rate" (or similar) at Capture | That rate isn't possible with this many channels on. Pick a lower rate or turn channels off. |
 | Saleae: a decoder finds nothing | Wrong channel or bit rate, or the analyzer setting names don't match Logic 2's (for **Other…** decoders they must match exactly). |
 | "Couldn't identify the instrument" | Its `*IDN?` answer isn't in any definition. Pick the model by hand (the 3456A always needs this), or [write a definition](06-howtos.md#add-your-own-scpi-instrument) with an `idn` entry for it. |
-| Status bar: "⚠ N instrument definition file(s) not loaded" | A file in `~/.config/ee-workbench/instruments/` has a mistake. `python -m ee_workbench.check_instruments` says which and why; the full list is in `crash.log`. |
+| Status bar: "⚠ N instrument definition file(s) not loaded" | A file in `~/.config/otterbench/instruments/` has a mistake. `python -m otterbench.check_instruments` says which and why; the full list is in `crash.log`. |
 | SCPI tab: a reading shows **—** and the console shows `-113` / `Undefined header` | The instrument doesn't know that command (another model of the family, or another firmware). Type the right one in the **Console** to find it, then change it in a copy of the definition. |
 | SCPI tab: a reading shows **OVLD** | The instrument answered 9.9E+37: overload or no reading at the present range. |
 | Keithley DMM6500: nothing but errors | It's in TSP mode: switch its command set to SCPI (see above). |
@@ -312,9 +312,9 @@ Then copy it to `~/.local/share/applications/` (menu), `~/Desktop/`, or `~/.conf
 | Scope: waveform is flat or clipped | The channel's V/div or offset puts the signal off screen: the screen record is all that is fetched. |
 | Production test: the banner says **SERIAL?** | The serial-format pattern is a regular expression matched against the whole serial: `SB\d{6}` means SB and six digits. Clear the box to accept anything. |
 | Readings stop and "Polling paused" appears; the tab shows ⚠ and **⟳ Reconnect** | A bus error occurred, or the instrument was switched off or unplugged. Fix the cause, then press **Resume polling**, or **⟳ Reconnect** to reopen the tab with its settings. |
-| A window "OtterBench: internal error" | A bug was caught; the app keeps running and the instruments are untouched. Details are in `~/.config/ee-workbench/crash.log`; include it when reporting the problem. |
-| The app vanished (no window, no message) | A crash inside Qt or a driver library. The stack is in `~/.config/ee-workbench/fault.log`. Restart it; it reopens the same instruments. On an unattended screen launch it with `./run.sh --restart-on-crash`. |
-| Status bar: "Skipped damaged watchdog rules", or "bench.json is damaged" | A hand edit or disk problem. The rest was loaded; fix or delete the file in `~/.config/ee-workbench/`. |
+| A window "OtterBench: internal error" | A bug was caught; the app keeps running and the instruments are untouched. Details are in `~/.config/otterbench/crash.log`; include it when reporting the problem. |
+| The app vanished (no window, no message) | A crash inside Qt or a driver library. The stack is in `~/.config/otterbench/fault.log`. Restart it; it reopens the same instruments. On an unattended screen launch it with `./run.sh --restart-on-crash`. |
+| Status bar: "Skipped damaged watchdog rules", or "bench.json is damaged" | A hand edit or disk problem. The rest was loaded; fix or delete the file in `~/.config/otterbench/`. |
 | Status bar: "Output OFF … ⚠ FAILED for …" after Esc | That instrument didn't take the command (disconnected?). Every other output was still switched off; check the named one by hand. |
 | 66321D waveform capture is slow | Normal: the instrument sends arrays at about 3.7 KB/s (about 1.2 s per 1024 points in binary). |
 | Function generator: "Could not open TCPIP::…" | Wrong IP, or the generator's LAN is off. `ping` it; check its I/O menu. Try the `::5025::SOCKET` form. |

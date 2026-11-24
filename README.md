@@ -1,4 +1,4 @@
-<img src="ee_workbench/gui/branding/logo.png" width="120" align="right" alt="OtterBench logo">
+<img src="otterbench/gui/branding/logo.png" width="120" align="right" alt="OtterBench logo">
 
 # OtterBench
 
@@ -43,7 +43,7 @@ Across instruments:
 - **Calibration log.** Due dates per instrument, checks of one meter against a better one, and the status in every report.
 - **Identify port.** Finds out what is on a USB serial port by asking only read-only questions.
 - **PPK2 ↔ logic-analyzer alignment.** Wire one DUT pin to an analyzer channel and a PPK2 logic input. Each capture is then lined up with the PPK2 to within ±5–10 µs, with the current drawn under the decoded traffic.
-- **Sessions.** One file (`.eewb`, SQLite) records every instrument, capture, math channel, result and note. The viewer lays them out on one time axis, with cursors (Δt, mean, charge, energy), math, CSV/PNG export and reports. A **flight-recorder** mode keeps only the seconds before and after each event (a watchdog trip, a capture, a note), for overnight runs.
+- **Sessions.** One file (`.otter`, SQLite) records every instrument, capture, math channel, result and note. The viewer lays them out on one time axis, with cursors (Δt, mean, charge, energy), math, CSV/PNG export and reports. A **flight-recorder** mode keeps only the seconds before and after each event (a watchdog trip, a capture, a note), for overnight runs.
 - **Production test.** Scan a serial number, the sequence runs, a big PASS / FAIL banner says where the unit goes. Every unit goes into a results database with history, first-pass and final yield, per-unit HTML reports and CSV export.
 - **Unattended runs.** Outputs off on quit or after a crash, automatic reconnect when a USB cable is replugged or an instrument power-cycled, resuming a sequence after a crash, and a heartbeat GPIO pin for an external hardware watchdog.
 - **Several PPK2s in step.** Line up two or more PPK2s' time axes through a shared logic input, to within tens of µs.
@@ -52,7 +52,7 @@ Across instruments:
 
 Each instrument opens in its own tab with live readouts, trend plots on a shared time base, and CSV recording. **Esc turns every output off**: supplies, PPK2 DUT power, generator channels and GPIO outputs. It also stops a running sequence or profile.
 
-**Built to keep running.** An error inside the app is logged to `~/.config/ee-workbench/crash.log` and reported once, never closing the window or touching the outputs. An instrument that stops answering gets a **⟳ Reconnect** button on its tab. Damaged settings files cost only the damaged entries, and Esc still reaches every other instrument if one fails. `./run.sh --restart-on-crash` brings an unattended screen back after a hard crash (the Pi's autostart uses it). See [When something goes wrong](docs/03-users-guide.md#when-something-goes-wrong). Every instrument has a simulator (`SIM::66321D`, `SIM::PPK2`, `SIM::34461A`, `SIM::DP832`, `SIM::DL3021`, `SIM::SCOPE`, … see [Simulators](docs/03-users-guide.md#simulators)), so everything can be tried without hardware.
+**Built to keep running.** An error inside the app is logged to `~/.config/otterbench/crash.log` and reported once, never closing the window or touching the outputs. An instrument that stops answering gets a **⟳ Reconnect** button on its tab. Damaged settings files cost only the damaged entries, and Esc still reaches every other instrument if one fails. `./run.sh --restart-on-crash` brings an unattended screen back after a hard crash (the Pi's autostart uses it). See [When something goes wrong](docs/03-users-guide.md#when-something-goes-wrong). Every instrument has a simulator (`SIM::66321D`, `SIM::PPK2`, `SIM::34461A`, `SIM::DP832`, `SIM::DL3021`, `SIM::SCOPE`, … see [Simulators](docs/03-users-guide.md#simulators)), so everything can be tried without hardware.
 
 ![66321D panel](docs/images/supply-66321d.png)
 
@@ -87,12 +87,12 @@ Each instrument opens in its own tab with live readouts, trend plots on a shared
 ./run.sh --restart-on-crash --fullscreen   # kiosk: start again if it ever crashes
 ```
 
-On a Raspberry Pi with a touch screen, `./scripts/setup-pi.sh` installs everything and sets the app to start full screen at login. `ee-workbench.desktop` is a ready-made launcher. See [Raspberry Pi & Touch Screen](docs/05-raspberry-pi.md).
+On a Raspberry Pi with a touch screen, `./scripts/setup-pi.sh` installs everything and sets the app to start full screen at login. `otterbench.desktop` is a ready-made launcher. See [Raspberry Pi & Touch Screen](docs/05-raspberry-pi.md).
 
 From Python (with **Tools ▾ → Remote API** on):
 
 ```python
-from ee_workbench.client import connect
+from otterbench.client import connect
 bench = connect()
 bench.set("66321D", "voltage", 3.3); bench.set("66321D", "output", "on")
 print(bench.measure("PPK2", "current", 2.0))
@@ -100,7 +100,7 @@ print(bench.measure("PPK2", "current", 2.0))
 
 ## Documentation
 
-Read the guides here on GitHub (the Markdown sources in [`docs/`](docs/)), or as PDFs in [`docs/pdf/`](docs/pdf/). The whole manual is in one file, [EE-Workbench-Manual.pdf](docs/pdf/EE-Workbench-Manual.pdf). Rebuild the PDFs with `scripts/build-docs.sh`.
+Read the guides here on GitHub (the Markdown sources in [`docs/`](docs/)), or as PDFs in [`docs/pdf/`](docs/pdf/). The whole manual is in one file, [OtterBench-Manual.pdf](docs/pdf/OtterBench-Manual.pdf). Rebuild the PDFs with `scripts/build-docs.sh`.
 
 1. [Hardware & Resources](docs/01-hardware-and-resources.md): the compatibility list, supported instruments, scopes, meters, loads, the Pi's GPIO header and its wiring, GPIB addresses, cabling, manuals
 2. [Installation & Setup](docs/02-installation.md): setup scripts and their options, GPIB driver, PPK2, Saleae, sigrok, LAN/USB instruments (generators, meters, loads, scopes), GPIO, PDF reports, Remote API, troubleshooting
@@ -113,12 +113,12 @@ Read the guides here on GitHub (the Markdown sources in [`docs/`](docs/)), or as
 
 ```bash
 .venv/bin/python -m pytest tests          # runs everything against the simulators; no hardware needed
-.venv/bin/python -m ee_workbench.check_instruments   # validate every instrument definition file
+.venv/bin/python -m otterbench.check_instruments   # validate every instrument definition file
 ```
 
 ## Reporting what works
 
-Many instruments here have so far been checked only against simulators written from their makers' programming manuals. If you use one on real hardware, whether it works or not, please report it with the instrument's `*IDN?` answer and, for a problem, the tab's **Console** output and `~/.config/ee-workbench/crash.log`. A definition file that you got working on a new model is the most useful contribution of all.
+Many instruments here have so far been checked only against simulators written from their makers' programming manuals. If you use one on real hardware, whether it works or not, please report it with the instrument's `*IDN?` answer and, for a problem, the tab's **Console** output and `~/.config/otterbench/crash.log`. A definition file that you got working on a new model is the most useful contribution of all.
 
 ## Safety
 

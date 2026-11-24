@@ -4,12 +4,12 @@ import struct
 
 import pytest
 
-from ee_workbench.gui.main_window import parse_target
-from ee_workbench.instruments import adapters as ad
-from ee_workbench.instruments import definition_for, make_driver, model_for
-from ee_workbench.instruments import scpi_generic as g
-from ee_workbench.sim import open_sim, sadapters
-from ee_workbench.transport import TransportError, TransportTimeout, describe
+from otterbench.gui.main_window import parse_target
+from otterbench.instruments import adapters as ad
+from otterbench.instruments import definition_for, make_driver, model_for
+from otterbench.instruments import scpi_generic as g
+from otterbench.sim import open_sim, sadapters
+from otterbench.transport import TransportError, TransportTimeout, describe
 
 
 def drv(res):
@@ -42,8 +42,8 @@ def test_serial_speed_and_path(monkeypatch):
     class Fake:
         def __init__(self, path, baud=0, wait_s=0):
             seen.append((path, baud))
-    monkeypatch.setattr("ee_workbench.transport.SerialStream", Fake)
-    from ee_workbench.transport import open_transport
+    monkeypatch.setattr("otterbench.transport.SerialStream", Fake)
+    from otterbench.transport import open_transport
     open_transport("RD60XX::/dev/ttyUSB0", 9600, "SCPI:RD60XX")
     open_transport("RD60XX::/dev/ttyUSB0@19200", 9600, "SCPI:RD60XX")
     open_transport("ASRL/dev/ttyUSB2::INSTR", 9600, "SCPI:KA3005P")

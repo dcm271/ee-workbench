@@ -2,9 +2,9 @@ import time
 
 import numpy as np
 
-from ee_workbench.instruments.agilent663xx import Agilent663xx
-from ee_workbench.instruments.base import CaptureSpec, SupplyPoll
-from ee_workbench.sim.s663xx import Sim663xx
+from otterbench.instruments.agilent663xx import Agilent663xx
+from otterbench.instruments.base import CaptureSpec, SupplyPoll
+from otterbench.sim.s663xx import Sim663xx
 
 
 def make():

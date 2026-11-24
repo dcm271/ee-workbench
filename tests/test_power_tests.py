@@ -6,10 +6,10 @@ from types import SimpleNamespace as NS
 
 import pytest
 
-from ee_workbench import battery as bat
-from ee_workbench import regulator as reg
-from ee_workbench import roles
-from ee_workbench.sequencer import Bench, Inst, SequenceError, Stopped
+from otterbench import battery as bat
+from otterbench import regulator as reg
+from otterbench import roles
+from otterbench.sequencer import Bench, Inst, SequenceError, Stopped
 
 
 class World:
@@ -103,7 +103,7 @@ def bench_for(w, log=None):
 
 # ---- roles -------------------------------------------------------------------
 def test_ports_of_real_definitions():
-    from ee_workbench.instruments import definition_for
+    from otterbench.instruments import definition_for
 
     def inst(key):
         d = definition_for(key)
@@ -121,7 +121,7 @@ def test_ports_of_real_definitions():
 
 
 def test_cc_mode_of_every_load_definition():
-    from ee_workbench.instruments import definition_for
+    from otterbench.instruments import definition_for
     for k in ("DL3021", "SDL1020", "K2380"):
         d = definition_for("SCPI:" + k)
         ld = roles.Load.__new__(roles.Load)

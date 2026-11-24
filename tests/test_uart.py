@@ -10,14 +10,14 @@ from PyQt6.QtWidgets import QApplication  # noqa: E402
 
 _APP = QApplication.instance() or QApplication([])
 
-from ee_workbench.clock import now  # noqa: E402
-from ee_workbench.gui.main_window import parse_target  # noqa: E402
-from ee_workbench.instruments import make_driver, model_for  # noqa: E402
-from ee_workbench.instruments import uart as u  # noqa: E402
-from ee_workbench.sequencer import Bench, Inst, Plan, SequenceError, Step, run_plan  # noqa: E402
-from ee_workbench.session import SessionReader, recorder  # noqa: E402
-from ee_workbench.sim import open_sim  # noqa: E402
-from ee_workbench.signals import signals_of  # noqa: E402
+from otterbench.clock import now  # noqa: E402
+from otterbench.gui.main_window import parse_target  # noqa: E402
+from otterbench.instruments import make_driver, model_for  # noqa: E402
+from otterbench.instruments import uart as u  # noqa: E402
+from otterbench.sequencer import Bench, Inst, Plan, SequenceError, Step, run_plan  # noqa: E402
+from otterbench.session import SessionReader, recorder  # noqa: E402
+from otterbench.sim import open_sim  # noqa: E402
+from otterbench.signals import signals_of  # noqa: E402
 
 
 class Link:
@@ -215,14 +215,14 @@ def spin(cond, s=5.0):
 
 
 def test_tab_console_values_and_session(tmp_path):
-    from ee_workbench.gui.uart_panel import UartPanel
+    from otterbench.gui.uart_panel import UartPanel
     p = UartPanel("SIM::UART", "UART", 9600)
     try:
         p.restore_settings({"name": "DUT", "eol": "CR LF",
                             "patterns": [["temp", r"temp=([\d.]+)", "°C"], ["x", "(", ""]]})
         spin(lambda: p.connected)
         assert p.quantities() == ["temp"] and p.unit_of("temp") == "°C"
-        path = str(tmp_path / "a.eewb")
+        path = str(tmp_path / "a.otter")
         recorder.start(path)
         spin(lambda: "temp" in p.latest)
         p.raw_line.setText("ver")
@@ -237,7 +237,7 @@ def test_tab_console_values_and_session(tmp_path):
         assert ("tx", "ver") in [(d, x) for _, d, x in st.lines]
         assert 20 < st.data["temp_°C"][~(st.data["temp_°C"] != st.data["temp_°C"])][0] < 28
         s.close()
-        from ee_workbench.gui.session_viewer import SessionViewer
+        from otterbench.gui.session_viewer import SessionViewer
         w = SessionViewer(path)
         assert w.serial.count() == len(st.lines) and w.side_tabs.isTabVisible(3)
         w.close()

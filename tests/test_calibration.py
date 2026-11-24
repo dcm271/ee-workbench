@@ -12,8 +12,8 @@ from PyQt6.QtWidgets import QApplication  # noqa: E402
 
 _APP = QApplication.instance() or QApplication([])
 
-from ee_workbench import calibration as cal  # noqa: E402
-from ee_workbench import report  # noqa: E402
+from otterbench import calibration as cal  # noqa: E402
+from otterbench import report  # noqa: E402
 
 IDN = "KEITHLEY INSTRUMENTS,MODEL DMM6500,04412345,1.7.0"
 
@@ -101,8 +101,8 @@ def spin(cond, s=30.0):
 @pytest.fixture
 def main(tmp_path, monkeypatch):
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
-    from ee_workbench.config import Config
-    from ee_workbench.gui.main_window import MainWindow
+    from otterbench.config import Config
+    from otterbench.gui.main_window import MainWindow
     made = []
 
     def make(*targets):
@@ -121,7 +121,7 @@ def done(w):
 
 
 def test_check_window(main, monkeypatch):
-    from ee_workbench.gui import calibration_window as cw
+    from otterbench.gui import calibration_window as cw
     m = main(("auto", "SIM::34461A"), ("auto", "SIM::DMM6500"))
     w = m.show_calibration()
     names = w.dut.names()
@@ -183,7 +183,7 @@ def test_regulator_window(main, monkeypatch):
 
 
 def reg_analyse(w):
-    from ee_workbench import regulator
+    from otterbench import regulator
     return regulator.analyse(w.rows, w.run_with)
 
 
@@ -204,7 +204,7 @@ def test_battery_window_runs_and_esc_stops_it(main, monkeypatch):
     w.cutoff_v.setValue(0.5)
     w.run()
     spin(lambda: len(w.samples) > 3)
-    from ee_workbench.gui import runner
+    from otterbench.gui import runner
     assert runner.busy() == "Battery tester"
     m.all_outputs_off()
     done(w)
@@ -221,8 +221,8 @@ def test_chemistry_preset(main):
 
 
 def test_session_keeps_the_status(tmp_path):
-    from ee_workbench.session import SessionReader, recorder
-    p = str(tmp_path / "s.eewb")
+    from otterbench.session import SessionReader, recorder
+    p = str(tmp_path / "s.otter")
     recorder.start(p)
     recorder.stream("k", "Meter", "DMM", "USB::1", ["v"], lambda: "in calibration (x)")
     recorder.add("k", 1.0, [2.0])

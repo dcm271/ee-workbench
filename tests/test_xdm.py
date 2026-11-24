@@ -4,13 +4,13 @@ import time
 
 import pytest
 
-from ee_workbench import config
-from ee_workbench.instruments import make_driver, model_for, resolve_model
-from ee_workbench.instruments import xdm
-from ee_workbench.instruments.xdm import OwonXDM, XdmConfig, allowed, norm_range, ranges_for, scale
-from ee_workbench.sim import open_sim
-from ee_workbench.sim.sxdm import SimXDM
-from ee_workbench.transport import TransportTimeout, describe, open_transport, serial_path
+from otterbench import config
+from otterbench.instruments import make_driver, model_for, resolve_model
+from otterbench.instruments import xdm
+from otterbench.instruments.xdm import OwonXDM, XdmConfig, allowed, norm_range, ranges_for, scale
+from otterbench.sim import open_sim
+from otterbench.sim.sxdm import SimXDM
+from otterbench.transport import TransportTimeout, describe, open_transport, serial_path
 
 
 def connect(sim=None):
@@ -214,13 +214,13 @@ def test_routing():
     for s in ("SIM::XDM1041", "SIM::XDM2041", "SIM::XDM"):
         d = make_driver("auto", open_sim(s), s)
         assert isinstance(d, OwonXDM)
-    from ee_workbench.gui.main_window import parse_target
+    from otterbench.gui.main_window import parse_target
     assert parse_target("XDM1041@/dev/ttyUSB0") == ("XDM", "XDM::/dev/ttyUSB0")
     assert parse_target("XDM@ASRL/dev/ttyUSB0::INSTR") == ("XDM", "XDM::/dev/ttyUSB0")
 
 
 def test_serial_settings(monkeypatch):
-    import ee_workbench.transport as tr
+    import otterbench.transport as tr
     got = {}
     monkeypatch.setattr(tr, "SerialStream", lambda p, baud=9600, wait_s=0.05: got.update(p=p, baud=baud))
     open_transport("ASRL/dev/ttyUSB0::INSTR", 9600, "XDM")
@@ -232,9 +232,9 @@ def test_panel():
     from PyQt6.QtWidgets import QApplication
     global _APP
     _APP = app = QApplication.instance() or QApplication([])
-    from ee_workbench.config import Config
-    from ee_workbench.gui.dmm_panel import XdmPanel
-    from ee_workbench.gui.main_window import MainWindow
+    from otterbench.config import Config
+    from otterbench.gui.dmm_panel import XdmPanel
+    from otterbench.gui.main_window import MainWindow
     win = MainWindow([("auto", "SIM::XDM1041")], Config(), None)
 
     def wait(cond, s=8):

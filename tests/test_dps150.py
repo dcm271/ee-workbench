@@ -2,11 +2,11 @@ import struct
 
 import pytest
 
-from ee_workbench.instruments import make_driver, model_for
-from ee_workbench.instruments.base import SupplyPoll
-from ee_workbench.instruments.dps150 import DPS150, frame, f32, parse_frames, Reg, START_SET
-from ee_workbench.sim.sdps150 import SimDPS150, dframe
-from ee_workbench.transport import describe, serial_path
+from otterbench.instruments import make_driver, model_for
+from otterbench.instruments.base import SupplyPoll
+from otterbench.instruments.dps150 import DPS150, frame, f32, parse_frames, Reg, START_SET
+from otterbench.sim.sdps150 import SimDPS150, dframe
+from otterbench.transport import describe, serial_path
 
 
 def make():

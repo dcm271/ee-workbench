@@ -154,7 +154,7 @@ The rest of the 66321D's features. Each group appears only on models that have i
 - **Protection events:** trips and warnings the supply reports (over-current, over-voltage, over-temperature, open sense lead, remote inhibit, unregulated, measurement overload), with the time. They also appear in the status bar. The software limits log here too.
 - **Rear control port:** choose what pins 1–3 do. With **Remote inhibit / fault**, set the **Remote inhibit** input to latching, live or off, and the **Fault output** and what drives it. With **Digital I/O**, tick **Out 0** and **Out 1** to drive pins 1 and 2, and press **Read** to read the pin 3 input. **External trigger** makes pin 3 the Capture tab's external trigger. The port setting is stored in the supply's non-volatile memory, so the app asks first.
 - **Front-panel display:** switch the display off, show a message of up to 14 characters, or press **Normal** to go back to readings.
-- **Saved setups:** **Recall 0–3** and **Save 1–3** use the supply's own memories (the app asks first, because a recalled setup can turn the output on). **At power-on** chooses between defaults and saved setup 0. **In this app** keeps named presets of voltage, current limit, voltage limit, OCP and output resistance in `~/.config/ee-workbench/presets.json`; applying one never turns the output on.
+- **Saved setups:** **Recall 0–3** and **Save 1–3** use the supply's own memories (the app asks first, because a recalled setup can turn the output on). **At power-on** chooses between defaults and saved setup 0. **In this app** keeps named presets of voltage, current limit, voltage limit, OCP and output resistance in `~/.config/otterbench/presets.json`; applying one never turns the output on.
 - **Instrument:** model, serial number, firmware, options and calibration date. **Self-test** runs the supply's self-test, **Read error queue** shows any errors waiting, and **Reset** sends `*RST`.
 
 ### Console tab
@@ -601,7 +601,7 @@ Values update five times a second, on a 50 ms grid over the last minute: each si
 A **report** is one page with everything about a test, as **HTML** (a single file that opens in any browser, plots included) or **PDF** (needs WeasyPrint, which the setup scripts install; see [Installation](02-installation.md#pdf-reports)).
 
 - **Sequencer → Report…**: title, date, computer; a **PASS** / **FAIL** badge with the counts; every instrument with its identification; plots of the measured columns against `x` (or the pass); the results table with failures shaded; the sequence itself (steps with limits, or the script); and the log.
-- **Session viewer → Report…**, or **Tools ▾ → Session report…** for any `.eewb`: the instruments, one plot per signal over the stretch shown (or the whole session) with notes as dashed lines, the sequencer results, the notes and the logic captures.
+- **Session viewer → Report…**, or **Tools ▾ → Session report…** for any `.otter`: the instruments, one plot per signal over the stretch shown (or the whole session) with notes as dashed lines, the sequencer results, the notes and the logic captures.
 
 **Open it** opens the saved report in your browser. Plots keep their spikes (each is drawn from a min/max envelope).
 
@@ -681,7 +681,7 @@ A serial number that has **already passed** asks before testing it again. The se
 | **Final yield** | units whose **latest** test passed (after rework and retest) |
 | **Pass / fail / error** | test runs of each result |
 
-**Export CSV…** writes every test of the product (one row per test, with the failures) for a spreadsheet. The database is `~/.config/ee-workbench/results.db` (SQLite; see the [Technical Reference](04-technical-reference.md#production-results-database) for its table). To share one database between stations, put `"db": "/path/on/a/share/results.db"` under `"production"` in `bench.json`.
+**Export CSV…** writes every test of the product (one row per test, with the failures) for a spreadsheet. The database is `~/.config/otterbench/results.db` (SQLite; see the [Technical Reference](04-technical-reference.md#production-results-database) for its table). To share one database between stations, put `"db": "/path/on/a/share/results.db"` under `"production"` in `bench.json`.
 
 On a touch screen the window fills the screen, and the banner is readable from across the bench:
 
@@ -720,7 +720,7 @@ Choose a **GPIO tab** and an **output pin** on it (set it up as an output on tha
 - the watchdog rules, and
 - the math channels.
 
-**Save current as…** asks for a name and an optional description. **Recall** (or double-click) closes the open tabs and opens the setup's. **Export… / Import…** move a setup to another computer as a JSON file. Setups live in `~/.config/ee-workbench/setups/`.
+**Save current as…** asks for a name and an optional description. **Recall** (or double-click) closes the open tabs and opens the setup's. **Export… / Import…** move a setup to another computer as a JSON file. Setups live in `~/.config/otterbench/setups/`.
 
 A recall **never switches an output on** and doesn't send supply setpoints (they're read from the supply, as always): put the setpoints in the sequence's first steps.
 
@@ -731,8 +731,8 @@ A setup file is checked before anything is closed: if it is damaged (say, a hand
 **Tools ▾ → Remote API** (or `api = true` in [config.toml](#instruments-at-start-up), or `./run.sh --api`) lets Python outside the app drive the open instruments: a Jupyter notebook, pytest, a CI job. The calls are those of the [Script tab](#script-tab), carried out through the tabs as usual, so you watch it happen on screen and Esc still stops everything.
 
 ```python
-import sys; sys.path.insert(0, "/home/me/ee-workbench")    # where the project is
-from ee_workbench.client import connect
+import sys; sys.path.insert(0, "/home/me/otterbench")    # where the project is
+from otterbench.client import connect
 
 bench = connect()                       # finds the running app
 bench.instruments()                     # ['66321D (GPIB0::5::INSTR)', 'PPK2 · node', 'GPIO']
@@ -746,13 +746,13 @@ cap = bench.capture("Logic")            # {'header': [...], 'rows': [...], 'offs
 bench.record(boot_s=t, i_sleep=i)       # a row in the sequencer's results and the session
 ```
 
-`ee_workbench/client.py` needs only the Python standard library, so it works from any Python 3.9+, inside or outside the project's `.venv`; you can copy the one file. A failed call raises `BenchError` with the app's message (e.g. `No open instrument called 'scope'`), and **Esc** in the app ends a call in progress with `stopped`.
+`otterbench/client.py` needs only the Python standard library, so it works from any Python 3.9+, inside or outside the project's `.venv`; you can copy the one file. A failed call raises `BenchError` with the app's message (e.g. `No open instrument called 'scope'`), and **Esc** in the app ends a call in progress with `stopped`.
 
-The API listens only on `127.0.0.1` (this computer), on port 8765 by default (`api_port` in config.toml). Every request must carry a random token that the app writes, with the address, to `~/.config/ee-workbench/api.json` (readable only by you) when the API starts; `connect()` reads it from there. To reach a bench Pi from your desk computer, tunnel the port over SSH, `ssh -L 8765:127.0.0.1:8765 pi@bench-pi`, and copy its `api.json` across (or pass `connect(url, token)`). The protocol is documented in the [Technical Reference](04-technical-reference.md#remote-api-apipy-clientpy).
+The API listens only on `127.0.0.1` (this computer), on port 8765 by default (`api_port` in config.toml). Every request must carry a random token that the app writes, with the address, to `~/.config/otterbench/api.json` (readable only by you) when the API starts; `connect()` reads it from there. To reach a bench Pi from your desk computer, tunnel the port over SSH, `ssh -L 8765:127.0.0.1:8765 pi@bench-pi`, and copy its `api.json` across (or pass `connect(url, token)`). The protocol is documented in the [Technical Reference](04-technical-reference.md#remote-api-apipy-clientpy).
 
 ## Sessions: everything in one file
 
-**⏺ Record** in the top bar asks for a file name and then records, into one session file (`.eewb`):
+**⏺ Record** in the top bar asks for a file name and then records, into one session file (`.otter`):
 
 - every open instrument's readings, in the same columns as its CSV (the PPK2 as 1 ms average/min/max rows),
 - every logic-analyzer capture: the traces, the decoded table, and its time (to µs if it was aligned to a PPK2),
@@ -788,7 +788,7 @@ Before/after times are remembered. The memory needed is about the before-time's 
 - **Notes** are dashed yellow lines. The **Notes** and **Captures** lists jump to each one.
 - The table holds the decoded data of every capture in time order. Click a row to zoom to it.
 
-A session file is a plain SQLite database, so other tools can read it too: `sqlite3 bench.eewb ".tables"`. The [Technical Reference](04-technical-reference.md#session-files-sessionpy) lists its tables.
+A session file is a plain SQLite database, so other tools can read it too: `sqlite3 bench.otter ".tables"`. The [Technical Reference](04-technical-reference.md#session-files-sessionpy) lists its tables.
 
 ### Looking through a session
 
@@ -886,7 +886,7 @@ With a scope, use the [Bode plot](#bode-plot), which gives phase too.
 
 ### From a Jupyter notebook
 
-Switch on **Tools ▾ → Remote API**, then in the notebook `from ee_workbench.client import connect; bench = connect()`, and use the same calls as the Script tab. Results come back as plain numbers and lists, ready for pandas and matplotlib; anything you `bench.record()` also lands in the sequencer's results and the session.
+Switch on **Tools ▾ → Remote API**, then in the notebook `from otterbench.client import connect; bench = connect()`, and use the same calls as the Script tab. Results come back as plain numbers and lists, ready for pandas and matplotlib; anything you `bench.record()` also lands in the sequencer's results and the session.
 
 ## CSV formats
 
@@ -924,9 +924,9 @@ Every [instrument definition](01-hardware-and-resources.md#meters-loads-and-supp
 
 ## Instruments at start-up
 
-OtterBench remembers which instruments were open, and reopens them the next time it starts. Panel settings come back too: the 3456A's channel name, function, range, integration and filter/autozero; GPIO pin modes and names; analyzer decoders. The watchdog rules and math channels are kept too (`~/.config/ee-workbench/bench.json`). For several bench arrangements you switch between, use [setups](#setups-the-whole-bench-by-name). **Supply setpoints and outputs are never restored.** They are always read from the supply itself, so starting the app never changes what a supply is doing.
+OtterBench remembers which instruments were open, and reopens them the next time it starts. Panel settings come back too: the 3456A's channel name, function, range, integration and filter/autozero; GPIO pin modes and names; analyzer decoders. The watchdog rules and math channels are kept too (`~/.config/otterbench/bench.json`). For several bench arrangements you switch between, use [setups](#setups-the-whole-bench-by-name). **Supply setpoints and outputs are never restored.** They are always read from the supply itself, so starting the app never changes what a supply is doing.
 
-What happens at start-up is set in `~/.config/ee-workbench/config.toml`. The file is created, with comments, the first time the app runs:
+What happens at start-up is set in `~/.config/otterbench/config.toml`. The file is created, with comments, the first time the app runs:
 
 ```toml
 [startup]
@@ -962,7 +962,7 @@ Notes:
 - An instrument that doesn't answer (switched off, say) gets a **⟳ Retry** button on its tab. It stays in the session, so it's tried again at the next start. Close its tab to forget it.
 - A damaged `last-session.json`, `bench.json` or `sequence.json` (a hand edit gone wrong, a disk problem) never stops the app starting: the damaged entries are skipped, the rest is loaded, and the status bar says what was skipped. A sequence file that can't be read is kept as `sequence.bad` and the Sequencer starts empty.
 - The session is saved within a second of any change, and again on quit, so pulling the power on a Pi loses nothing.
-- The remembered session is in `~/.config/ee-workbench/last-session.json`. Delete it to start fresh.
+- The remembered session is in `~/.config/otterbench/last-session.json`. Delete it to start fresh.
 
 ## When something goes wrong
 
@@ -977,15 +977,15 @@ GPIO tabs have no Resume button: they retry by themselves every 5 s. As soon as 
 
 **A file can't be written** (a full disk, a read-only folder, a removed USB stick). Saving or exporting shows a warning naming the file. A CSV recording that fails part way stops itself (the **● Record CSV** button comes back up) and says why in the status bar and the tab's console. A session recording that fails stops with a warning; everything up to the last second is in the file.
 
-**An internal error** (a bug in OtterBench). The app does not close. A window titled *OtterBench: internal error* says what happened; **Show Details…** has the technical details. Your instruments and their outputs are left as they were, and you can carry on working. The same error is reported at most once a minute, however often it happens. Everything is recorded in `~/.config/ee-workbench/crash.log`; please include that file if you report a problem.
+**An internal error** (a bug in OtterBench). The app does not close. A window titled *OtterBench: internal error* says what happened; **Show Details…** has the technical details. Your instruments and their outputs are left as they were, and you can carry on working. The same error is reported at most once a minute, however often it happens. Everything is recorded in `~/.config/otterbench/crash.log`; please include that file if you report a problem.
 
-**The app closes unexpectedly** (a crash inside Qt or a driver library). The stack of every thread is written to `~/.config/ee-workbench/fault.log`. Instrument outputs stay as they were, so check the bench. Start the app again and it reopens the same instruments. To have it restart by itself (an unattended Pi, for example), launch it as `./run.sh --restart-on-crash`: see [Raspberry Pi](05-raspberry-pi.md#start-again-after-a-crash).
+**The app closes unexpectedly** (a crash inside Qt or a driver library). The stack of every thread is written to `~/.config/otterbench/fault.log`. Instrument outputs stay as they were, so check the bench. Start the app again and it reopens the same instruments. To have it restart by itself (an unattended Pi, for example), launch it as `./run.sh --restart-on-crash`: see [Raspberry Pi](05-raspberry-pi.md#start-again-after-a-crash).
 
 **Unattended.** [Safety](#safety-and-unattended-runs) can reconnect instruments by themselves, switch outputs off on quit or after a crash, resume a sequence, and drive a heartbeat pin for an external watchdog.
 
 **Quitting from outside** (Ctrl+C in the terminal you started it from, logging out, `kill`). The app closes as if you had pressed ✕: the session file, the open instruments and the bench state are saved, and every instrument is released. If an instrument is stuck in a long operation (a slow decoder, a bus timeout), the app waits a few seconds for it and then exits anyway.
 
-| File (in `~/.config/ee-workbench/`) | What's in it |
+| File (in `~/.config/otterbench/`) | What's in it |
 |---|---|
 | `crash.log` | Errors the app caught and carried on from, with details; also when it was closed by a signal, and when `run.sh --restart-on-crash` restarted it. Kept under about 1 MB (older entries move to `crash.log.1`). |
 | `fault.log` | One line per start-up, plus the stack of every thread if the app ever crashed hard. Also kept under about 1 MB. |

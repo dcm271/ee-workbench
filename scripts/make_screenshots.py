@@ -14,10 +14,10 @@ sys.path.insert(0, str(ROOT))
 from PyQt6.QtCore import QTimer  # noqa: E402
 from PyQt6.QtWidgets import QApplication, QMessageBox  # noqa: E402
 
-from ee_workbench.gui import touch as touch_mode  # noqa: E402
-from ee_workbench.gui.forms import select  # noqa: E402
-from ee_workbench.gui.main_window import MainWindow, parse_target  # noqa: E402
-from ee_workbench.gui.widgets import dark_palette  # noqa: E402
+from otterbench.gui import touch as touch_mode  # noqa: E402
+from otterbench.gui.forms import select  # noqa: E402
+from otterbench.gui.main_window import MainWindow, parse_target  # noqa: E402
+from otterbench.gui.widgets import dark_palette  # noqa: E402
 
 OUT = ROOT / "docs" / "images"
 OUT.mkdir(parents=True, exist_ok=True)
@@ -182,13 +182,13 @@ def features_start():
     """PPK2 alignment, the sequencer and a recorded session."""
     import tempfile
 
-    from ee_workbench.gui.logic_panel import LogicPanel
-    from ee_workbench.gui.ppk2_panel import Ppk2Panel
-    from ee_workbench.gui.session_viewer import SessionViewer
-    from ee_workbench.sequencer import Step
-    from ee_workbench.session import recorder
+    from otterbench.gui.logic_panel import LogicPanel
+    from otterbench.gui.ppk2_panel import Ppk2Panel
+    from otterbench.gui.session_viewer import SessionViewer
+    from otterbench.sequencer import Step
+    from otterbench.session import recorder
     global fw, sess_path
-    sess_path = str(Path(tempfile.mkdtemp()) / "demo.eewb")
+    sess_path = str(Path(tempfile.mkdtemp()) / "demo.otter")
     fw = MainWindow([parse_target(t) for t in ("SIM::66321D", "SIM::PPK2", "SIM::SIGROK")])
     fw.resize(1440, 900)
     fw.show()
@@ -286,10 +286,10 @@ def features_start():
 
 def bench_start():
     """GPIO, function generator, profiles, events, math, watchdog, setups."""
-    from ee_workbench.gui.hub import hub
-    from ee_workbench.gui.setups_dialog import SetupsDialog
-    from ee_workbench.mathchannels import Channel
-    from ee_workbench.watchdog import Rule
+    from otterbench.gui.hub import hub
+    from otterbench.gui.setups_dialog import SetupsDialog
+    from otterbench.mathchannels import Channel
+    from otterbench.watchdog import Rule
     global bw
     bw = MainWindow([parse_target(t) for t in ("SIM::66321D", "SIM::PPK2", "SIM::GPIO",
                                                "SIM::FGEN")])
@@ -352,7 +352,7 @@ def bench_start():
         pp.events_tab.table.selectRow(0)
         app.processEvents()
         bw.grab().save(str(OUT / "ppk2-events.png"))
-        from ee_workbench.signals import slug
+        from otterbench.signals import slug
         rail = slug(P["supply"].display_name())
         hub.math.channels = [Channel("P_rail", f"{rail}.power", "W"),
                              Channel("E_rail", f"{rail}.power", "J", True),
@@ -375,8 +375,8 @@ def bench_start():
         bw.wd_win.close()
         hub.watchdog.rules = []
         hub.math.channels = []
-        from ee_workbench import setups
-        from ee_workbench.gui.setups_dialog import capture_bench
+        from otterbench import setups
+        from otterbench.gui.setups_dialog import capture_bench
         setups.save_setup("nRF52 sleep current", capture_bench(bw), "PPK2 + rail + jig, "
                           "sleep < 10 µA")
         setups.save_setup("Regulator efficiency", capture_bench(bw), "two supplies, "
@@ -407,12 +407,12 @@ def extras_start():
     limits, recording mode, safety and production test."""
     import tempfile
 
-    from ee_workbench.gui.hub import hub
-    from ee_workbench.gui.record_dialog import RecordDialog
-    from ee_workbench.gui.safety_dialog import SafetyDialog
-    from ee_workbench.safety import Safety
-    from ee_workbench.sequencer import Plan, Step
-    from ee_workbench.watchdog import Rule
+    from otterbench.gui.hub import hub
+    from otterbench.gui.record_dialog import RecordDialog
+    from otterbench.gui.safety_dialog import SafetyDialog
+    from otterbench.safety import Safety
+    from otterbench.sequencer import Plan, Step
+    from otterbench.watchdog import Rule
     global xw
     xw = MainWindow([parse_target(t) for t in ("SIM::DP832", "SIM::34461A", "SIM::DL3021",
                                                "SIM::SCOPE", "SIM::PPK2", "SIM::PPK2#2")])

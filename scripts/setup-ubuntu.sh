@@ -81,7 +81,7 @@ for g in dialout plugdev gpio; do
 done
 # USB-TMC instruments (generators, meters, loads, supplies, scopes) for
 # pyvisa-py: Keysight/Agilent, Rigol, Siglent, Tektronix, Keithley. Members of 'plugdev' may open them.
-TMC_RULES=/etc/udev/rules.d/60-ee-workbench-usbtmc.rules
+TMC_RULES=/etc/udev/rules.d/60-otterbench-usbtmc.rules
 TMC_TEXT='SUBSYSTEM=="usb", ATTR{idVendor}=="0957", MODE="0660", GROUP="plugdev"
 SUBSYSTEM=="usb", ATTR{idVendor}=="2a8d", MODE="0660", GROUP="plugdev"
 SUBSYSTEM=="usb", ATTR{idVendor}=="1ab1", MODE="0660", GROUP="plugdev"
@@ -89,6 +89,10 @@ SUBSYSTEM=="usb", ATTR{idVendor}=="f4ec", MODE="0660", GROUP="plugdev"
 SUBSYSTEM=="usb", ATTR{idVendor}=="f4ed", MODE="0660", GROUP="plugdev"
 SUBSYSTEM=="usb", ATTR{idVendor}=="0699", MODE="0660", GROUP="plugdev"
 SUBSYSTEM=="usb", ATTR{idVendor}=="05e6", MODE="0660", GROUP="plugdev"'
+# From before the program was renamed
+if [[ -e /etc/udev/rules.d/60-ee-workbench-usbtmc.rules ]]; then
+  run sudo rm -f /etc/udev/rules.d/60-ee-workbench-usbtmc.rules
+fi
 if (( DRY )); then
   echo "  (would write $TMC_RULES)"
 else
@@ -132,17 +136,20 @@ fi
 
 # ---------------------------------------------------------------- menu
 step "Adding OtterBench to the application menu"
-DESK=~/.local/share/applications/ee-workbench.desktop
+DESK=~/.local/share/applications/otterbench.desktop
 run mkdir -p ~/.local/share/icons/hicolor/512x512/apps
-run cp "$HERE/ee_workbench/gui/branding/logo.png" ~/.local/share/icons/hicolor/512x512/apps/ee-workbench.png
+run cp "$HERE/otterbench/gui/branding/logo.png" ~/.local/share/icons/hicolor/512x512/apps/otterbench.png
 run mkdir -p ~/.local/share/applications
-# The ee-workbench.desktop in the repo, with this checkout's path; windowed.
+# The otterbench.desktop in the repo, with this checkout's path; windowed.
 if (( DRY )); then
   printf '   $ write %s\n' "$DESK"
 else
-  sed "s|^Exec=.*|Exec=\"$HERE/run.sh\"|" "$HERE/ee-workbench.desktop" > "$DESK"
+  sed "s|^Exec=.*|Exec=\"$HERE/run.sh\"|" "$HERE/otterbench.desktop" > "$DESK"
 fi
 run chmod +x "$HERE/run.sh"
+# From before the program was renamed
+run rm -f ~/.local/share/applications/ee-workbench.desktop \
+  ~/.local/share/icons/hicolor/512x512/apps/ee-workbench.png
 
 step "Done"
 cat <<EOF

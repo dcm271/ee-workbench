@@ -1,10 +1,10 @@
 import numpy as np
 import pytest
 
-from ee_workbench.instruments import make_driver, model_for
-from ee_workbench.instruments.ppk2 import (DT, PPK2, SAMPLE_RATE, Calibration, SpikeFilter,
+from otterbench.instruments import make_driver, model_for
+from otterbench.instruments.ppk2 import (DT, PPK2, SAMPLE_RATE, Calibration, SpikeFilter,
                                            decode_words, voltage_bytes)
-from ee_workbench.sim.sppk2 import SimPPK2
+from otterbench.sim.sppk2 import SimPPK2
 
 # Captured from a real PPK2 (HW 8682), trimmed to the keys we use.
 REAL_META = """Calibrated: 0

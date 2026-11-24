@@ -21,16 +21,16 @@ OtterBench runs on a Raspberry Pi with a touch screen as a dedicated bench contr
 
 ## One-step setup
 
-Clone the project to `~/ee-workbench` and run the setup script:
+Clone the project to `~/otterbench` and run the setup script:
 
 ```bash
-git clone git@github.com:dcm271/ee-workbench.git ~/ee-workbench
-cd ~/ee-workbench
+git clone git@github.com:dcm271/otterbench.git ~/otterbench
+cd ~/otterbench
 ./scripts/setup-pi.sh
 sudo reboot
 ```
 
-The SSH clone needs a GitHub key on the Pi. For read-only use, `https://github.com/dcm271/ee-workbench.git` works too.
+The SSH clone needs a GitHub key on the Pi. For read-only use, `https://github.com/dcm271/otterbench.git` works too.
 
 The script is safe to re-run. It does the following:
 
@@ -51,7 +51,7 @@ The script is safe to re-run. It does the following:
 
 ## The launcher file
 
-The repository includes **`ee-workbench.desktop`**. Copy it to the place you want the launcher:
+The repository includes **`otterbench.desktop`**. Copy it to the place you want the launcher:
 
 | Where | Copy to |
 |---|---|
@@ -59,19 +59,19 @@ The repository includes **`ee-workbench.desktop`**. Copy it to the place you wan
 | Application menu | `~/.local/share/applications/` |
 | Desktop icon | `~/Desktop/` (the file manager may ask you to trust it the first time) |
 
-It assumes the project is in `~/ee-workbench` and starts full screen. If you cloned somewhere else, edit its `Exec=` line. Remove `--fullscreen` to start in a window. `setup-pi.sh` installs the file with the correct path filled in (and, for autostart, `--restart-on-crash` added).
+It assumes the project is in `~/otterbench` and starts full screen. If you cloned somewhere else, edit its `Exec=` line. Remove `--fullscreen` to start in a window. `setup-pi.sh` installs the file with the correct path filled in (and, for autostart, `--restart-on-crash` added).
 
 ## Start again after a crash
 
 OtterBench catches its own errors and keeps running (see *When something goes wrong* in the User's Guide), but a crash inside Qt or a driver library can still end it. On a bench screen nobody is watching, `run.sh --restart-on-crash` starts it again 3 s later, reopening the same instruments:
 
 ```
-Exec="/home/<you>/ee-workbench/run.sh" --restart-on-crash --fullscreen
+Exec="/home/<you>/otterbench/run.sh" --restart-on-crash --fullscreen
 ```
 
 - A normal quit (**✕**, logging out, shutting down) is not a crash, so it stays closed.
 - Five crashes within two minutes stop the restarts, so a fault that happens at every start can't loop for ever.
-- Each restart is noted in `~/.config/ee-workbench/crash.log`; the crash itself is in `fault.log` next to it.
+- Each restart is noted in `~/.config/otterbench/crash.log`; the crash itself is in `fault.log` next to it.
 - Outputs are never switched on by a restart: supplies keep whatever they were doing, and the app reads their state as usual. To have them switched **off** after a crash instead, tick *After a crash, switch off the outputs…* in **Tools ▾ → Safety…** (see below).
 
 ## Unattended bench
@@ -98,7 +98,7 @@ As long as a rising edge arrives every second (the pin toggles every 0.5 s), the
 
 ## Instruments at start-up
 
-By default the app reopens whatever was open last time, and waits up to 30 s at boot for the GPIB adapter to come up. If you'd rather it always open a fixed set of instruments, or scan the bus, edit `~/.config/ee-workbench/config.toml`. *Instruments at start-up* in the User's Guide explains the file. If an instrument is off when the Pi boots, switch it on and tap **⟳ Retry** on its tab.
+By default the app reopens whatever was open last time, and waits up to 30 s at boot for the GPIB adapter to come up. If you'd rather it always open a fixed set of instruments, or scan the bus, edit `~/.config/otterbench/config.toml`. *Instruments at start-up* in the User's Guide explains the file. If an instrument is off when the Pi boots, switch it on and tap **⟳ Retry** on its tab.
 
 ## Full screen
 
@@ -119,8 +119,8 @@ The touch layout turns on automatically when the app finds a touch screen, or a 
 
 | Force it | How |
 |---|---|
-| Touch layout | `./run.sh --touch`, or `EEWB_TOUCH=1` |
-| Desktop layout | `./run.sh --no-touch`, or `EEWB_TOUCH=0` |
+| Touch layout | `./run.sh --touch`, or `OTTERBENCH_TOUCH=1` |
+| Desktop layout | `./run.sh --no-touch`, or `OTTERBENCH_TOUCH=0` |
 
 ![Touch layout, 66321D at 1280×800](images/touch-supply.png)
 
@@ -174,12 +174,12 @@ With **Tools ▾ → Remote API** on (or `api = true` in `config.toml` for a Pi 
 
 ```bash
 ssh -L 8765:127.0.0.1:8765 pi@bench-pi      # leave this open
-scp pi@bench-pi:.config/ee-workbench/api.json ~/bench-pi-api.json
+scp pi@bench-pi:.config/otterbench/api.json ~/bench-pi-api.json
 ```
 
 ```python
 import json
-from ee_workbench.client import connect
+from otterbench.client import connect
 d = json.load(open("/home/me/bench-pi-api.json"))
 bench = connect("http://127.0.0.1:8765", d["token"])
 ```
@@ -207,6 +207,6 @@ The touch layout needs about 1180×460 pixels. Smaller screens (an 800×480 pane
 | GPIO tab: "No GPIO chip found" | `python3-libgpiod` missing or no `/dev/gpiochip*` (not a Pi?). `ls /dev/gpiochip*`; re-run `setup-pi.sh`. |
 | GPIO: "Permission denied" | Log out and back in after setup, for the `gpio` group. |
 | GPIO: a pin is "busy" | I²C, SPI, the serial console, 1-Wire or a HAT's overlay uses it (`gpioinfo` shows the owner). Pick another pin or turn that interface off in `raspi-config`. |
-| App doesn't start at login | Run `~/ee-workbench/run.sh --fullscreen` from a terminal to see the error. Check `~/.config/autostart/ee-workbench.desktop` points at the right folder. |
-| App keeps restarting, or stopped after several restarts | It crashes at start-up. Look at the end of `~/.config/ee-workbench/crash.log` and `fault.log`. Starting with `./run.sh --open none` (no instruments) shows whether one instrument is the cause. |
+| App doesn't start at login | Run `~/otterbench/run.sh --fullscreen` from a terminal to see the error. Check `~/.config/autostart/otterbench.desktop` points at the right folder. |
+| App keeps restarting, or stopped after several restarts | It crashes at start-up. Look at the end of `~/.config/otterbench/crash.log` and `fault.log`. Starting with `./run.sh --open none` (no instruments) shows whether one instrument is the cause. |
 | A tab shows ⚠ and **⟳ Reconnect** | The instrument stopped answering (switched off, cable pulled). Fix that and tap **⟳ Reconnect**. |

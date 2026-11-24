@@ -54,7 +54,7 @@ for g in dialout plugdev gpio; do
 done
 # USB-TMC instruments (generators, meters, loads, supplies, scopes) for
 # pyvisa-py: Keysight/Agilent, Rigol, Siglent, Tektronix, Keithley. Members of 'plugdev' may open them.
-TMC_RULES=/etc/udev/rules.d/60-ee-workbench-usbtmc.rules
+TMC_RULES=/etc/udev/rules.d/60-otterbench-usbtmc.rules
 TMC_TEXT='SUBSYSTEM=="usb", ATTR{idVendor}=="0957", MODE="0660", GROUP="plugdev"
 SUBSYSTEM=="usb", ATTR{idVendor}=="2a8d", MODE="0660", GROUP="plugdev"
 SUBSYSTEM=="usb", ATTR{idVendor}=="1ab1", MODE="0660", GROUP="plugdev"
@@ -62,6 +62,8 @@ SUBSYSTEM=="usb", ATTR{idVendor}=="f4ec", MODE="0660", GROUP="plugdev"
 SUBSYSTEM=="usb", ATTR{idVendor}=="f4ed", MODE="0660", GROUP="plugdev"
 SUBSYSTEM=="usb", ATTR{idVendor}=="0699", MODE="0660", GROUP="plugdev"
 SUBSYSTEM=="usb", ATTR{idVendor}=="05e6", MODE="0660", GROUP="plugdev"'
+# From before the program was renamed
+sudo rm -f /etc/udev/rules.d/60-ee-workbench-usbtmc.rules
 echo "$TMC_TEXT" | sudo tee "$TMC_RULES" >/dev/null
 sudo udevadm control --reload-rules
 sudo udevadm trigger --subsystem-match=usb
@@ -97,21 +99,25 @@ fi
 
 step "Adding OtterBench to the application menu"
 mkdir -p ~/.local/share/applications
-DESK=~/.local/share/applications/ee-workbench.desktop
+DESK=~/.local/share/applications/otterbench.desktop
 mkdir -p ~/.local/share/icons/hicolor/512x512/apps
-cp "$HERE/ee_workbench/gui/branding/logo.png" ~/.local/share/icons/hicolor/512x512/apps/ee-workbench.png
-# Same as the ee-workbench.desktop in the repo, with this checkout's real path.
-sed "s|^Exec=.*|Exec=\"$HERE/run.sh\" --fullscreen|" "$HERE/ee-workbench.desktop" > "$DESK"
+cp "$HERE/otterbench/gui/branding/logo.png" ~/.local/share/icons/hicolor/512x512/apps/otterbench.png
+# Same as the otterbench.desktop in the repo, with this checkout's real path.
+sed "s|^Exec=.*|Exec=\"$HERE/run.sh\" --fullscreen|" "$HERE/otterbench.desktop" > "$DESK"
 chmod +x "$HERE/run.sh"
+# From before the program was renamed (the old autostart would start a second copy)
+rm -f ~/.local/share/applications/ee-workbench.desktop \
+  ~/.local/share/icons/hicolor/512x512/apps/ee-workbench.png \
+  ~/.config/autostart/ee-workbench.desktop
 
 if (( AUTOSTART )); then
   step "Starting full screen at login"
   mkdir -p ~/.config/autostart
   # At login it also restarts itself after a crash (see run.sh), so an
   # unattended bench screen doesn't stay on an empty desktop.
-  sed "s|^Exec=.*|Exec=\"$HERE/run.sh\" --restart-on-crash --fullscreen|" "$HERE/ee-workbench.desktop" \
-    > ~/.config/autostart/ee-workbench.desktop
-  echo "Remove ~/.config/autostart/ee-workbench.desktop to stop this."
+  sed "s|^Exec=.*|Exec=\"$HERE/run.sh\" --restart-on-crash --fullscreen|" "$HERE/otterbench.desktop" \
+    > ~/.config/autostart/otterbench.desktop
+  echo "Remove ~/.config/autostart/otterbench.desktop to stop this."
 fi
 
 step "Done"

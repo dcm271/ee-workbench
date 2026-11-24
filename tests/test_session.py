@@ -1,9 +1,9 @@
 import numpy as np
 import pytest
 
-from ee_workbench.instruments.logic import (AnalogTrace, DigitalTrace, LogicCapture,
+from otterbench.instruments.logic import (AnalogTrace, DigitalTrace, LogicCapture,
                                             LogicConfig)
-from ee_workbench.session import SessionReader, SessionWriter
+from otterbench.session import SessionReader, SessionWriter
 
 
 def capture(offset=None):
@@ -20,7 +20,7 @@ def capture(offset=None):
 
 
 def test_write_and_read_back(tmp_path):
-    path = str(tmp_path / "s.eewb")
+    path = str(tmp_path / "s.otter")
     w = SessionWriter()
     w.start(path)
     key = object()
@@ -55,12 +55,12 @@ def test_write_and_read_back(tmp_path):
 
 
 def test_appending_keeps_the_first_time_base(tmp_path, monkeypatch):
-    path = str(tmp_path / "s.eewb")
+    path = str(tmp_path / "s.otter")
     w = SessionWriter()
     w.start(path)
     w.note("first", 1.0)
     w.stop()
-    import ee_workbench.session as S
+    import otterbench.session as S
     monkeypatch.setattr(S, "APP_T0", S.APP_T0 + 100.0)     # "a run of the app started 100 s later"
     w.start(path)
     w.note("second", 1.0)
@@ -71,7 +71,7 @@ def test_appending_keeps_the_first_time_base(tmp_path, monkeypatch):
 
 def test_not_a_session(tmp_path):
     import sqlite3
-    p = tmp_path / "x.eewb"
+    p = tmp_path / "x.otter"
     sqlite3.connect(p).execute("CREATE TABLE meta(key, value)").connection.commit()
     with pytest.raises(ValueError):
         SessionReader(str(p))

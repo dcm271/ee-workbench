@@ -4,11 +4,11 @@ import threading
 
 import pytest
 
-from ee_workbench import identify as idn
-from ee_workbench.gui.main_window import parse_target
-from ee_workbench.instruments import definition_for
-from ee_workbench.sim import sadapters, sbk393, suart, sxdm
-from ee_workbench.transport import serial_path
+from otterbench import identify as idn
+from otterbench.gui.main_window import parse_target
+from otterbench.instruments import definition_for
+from otterbench.sim import sadapters, sbk393, suart, sxdm
+from otterbench.transport import serial_path
 
 
 class At:
@@ -147,7 +147,7 @@ def test_dialog():
     from PyQt6.QtWidgets import QApplication
     global _APP
     _APP = QApplication.instance() or QApplication([])
-    from ee_workbench.gui.identify_dialog import IdentifyDialog
+    from otterbench.gui.identify_dialog import IdentifyDialog
     d = IdentifyDialog(None, "/dev/ttyUSB0", At(9600, sadapters.SimKorad), quick=0.2)
     import time
     end = time.monotonic() + 8

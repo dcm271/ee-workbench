@@ -4,13 +4,13 @@ import time
 import numpy as np
 import pytest
 
-from ee_workbench.config import norm_model
-from ee_workbench.instruments import make_driver, model_for
-from ee_workbench.instruments.saleae import (DigitalTrace, LogicConfig, SaleaeLogic,
+from otterbench.config import norm_model
+from otterbench.instruments import make_driver, model_for
+from otterbench.instruments.saleae import (DigitalTrace, LogicConfig, SaleaeLogic,
                                              analog_stats, digital_envelope, digital_stats,
                                              parse_analog, parse_digital, parse_resource,
                                              read_export)
-from ee_workbench.sim.slogic import (UART_TEXT, SimLogic2, channel_edges, write_analog,
+from otterbench.sim.slogic import (UART_TEXT, SimLogic2, channel_edges, write_analog,
                                      write_digital)
 
 
@@ -98,7 +98,7 @@ def test_digital_stats_window_and_idle():
 
 
 def test_analog_stats_window():
-    from ee_workbench.instruments.saleae import AnalogTrace
+    from otterbench.instruments.saleae import AnalogTrace
     tr = AnalogTrace(0, 0.0, 1e-3, np.arange(1000, dtype=np.float32))
     s = analog_stats(tr, 0.1, 0.2)
     assert s["min"] == 100 and s["max"] == 200 and s["mean"] == pytest.approx(150)
@@ -132,7 +132,7 @@ def test_parse_resource():
 
 
 def test_parse_target():
-    from ee_workbench.gui.main_window import parse_target
+    from otterbench.gui.main_window import parse_target
     assert parse_target("SALEAE@F4241") == ("SALEAE", "SALEAE::F4241")
     assert parse_target("SALEAE@") == ("SALEAE", "SALEAE::")
     assert parse_target("SALEAE::F4241@host:10430") == ("SALEAE", "SALEAE::F4241@host:10430")
@@ -259,7 +259,7 @@ def test_worker_capture_end_to_end():
     pytest.importorskip("PyQt6")
     from PyQt6.QtCore import QCoreApplication
 
-    from ee_workbench.worker import InstrumentWorker
+    from otterbench.worker import InstrumentWorker
     app = QCoreApplication.instance() or QCoreApplication([])
     w = InstrumentWorker("SIM::SALEAE", "auto")
     w.poll_enabled = False

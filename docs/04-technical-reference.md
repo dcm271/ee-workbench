@@ -86,7 +86,7 @@ MainWindow
 | `gui/watchdog_window.py`, `math_window.py`, `setups_dialog.py`, `report_dialog.py` | Tools-menu windows |
 | `instruments/scpi_generic.py`, `instruments/scpi_defs/*.toml` | Generic SCPI driver and the [definition files](#instrument-definition-files-toml) it reads; `self_test()` |
 | `instruments/scopes.py` | Oscilloscopes: four command dialects, waveform decoding, measurements |
-| `check_instruments.py` | `python -m ee_workbench.check_instruments`: validate and self-test definition files |
+| `check_instruments.py` | `python -m otterbench.check_instruments`: validate and self-test definition files |
 | `sim/sscpi.py`, `sim/sscope.py` | Simulator for any definition; four-dialect scope simulator |
 | `gui/scpi_panel.py`, `gui/scope_panel.py` | The meter / load / supply tab built from a definition; the scope tab |
 | `production.py`, `gui/production_window.py` | Production-test results database and yield; the station window |
@@ -95,7 +95,7 @@ MainWindow
 
 ## Instrument definition files (TOML)
 
-Meters, loads, supplies and other SCPI instruments that only need "set this, read that" are described by a [TOML](https://toml.io) file instead of a Python driver. The built-in ones are in `ee_workbench/instruments/scpi_defs/`; your own go in `~/.config/ee-workbench/instruments/*.toml` and are read at start-up. A file of yours with the same `id` as a built-in replaces it, so the easiest start is to copy the closest built-in and edit it. Check a file with `python -m ee_workbench.check_instruments FILE` (it also runs the file against its simulator), and see the [how-to](06-howtos.md#add-your-own-scpi-instrument) for a worked example.
+Meters, loads, supplies and other SCPI instruments that only need "set this, read that" are described by a [TOML](https://toml.io) file instead of a Python driver. The built-in ones are in `otterbench/instruments/scpi_defs/`; your own go in `~/.config/otterbench/instruments/*.toml` and are read at start-up. A file of yours with the same `id` as a built-in replaces it, so the easiest start is to copy the closest built-in and edit it. Check a file with `python -m otterbench.check_instruments FILE` (it also runs the file against its simulator), and see the [how-to](06-howtos.md#add-your-own-scpi-instrument) for a worked example.
 
 A complete small example:
 
@@ -521,7 +521,7 @@ The engine doesn't import Qt. `Bench` holds one `Inst` per instrument tab and of
 
 ## Production results database
 
-`production.py`: one SQLite file, `~/.config/ee-workbench/results.db` by default (`"production": {"db": "…"}` in `bench.json` moves it):
+`production.py`: one SQLite file, `~/.config/otterbench/results.db` by default (`"production": {"db": "…"}` in `bench.json` moves it):
 
 ```sql
 CREATE TABLE units(
@@ -539,9 +539,9 @@ CREATE INDEX units_serial ON units(product, serial);
 `verdict(outcome, passed, failed)`: FAIL if any pass failed a limit, ERROR if the sequence didn't finish (other than *Stopped at the first fail*), else PASS. `ResultsDB.yield_stats(product, since)` counts runs (`tested`, `passed`, `failed`, `errors`) and units (`units`, `first_pass`: first run passed, `final_pass`: latest run passed). Examples:
 
 ```bash
-sqlite3 ~/.config/ee-workbench/results.db \
+sqlite3 ~/.config/otterbench/results.db \
   "select serial, result, finished, failures from units where product='Sensor board rev C' order by id desc limit 20"
-sqlite3 -csv ~/.config/ee-workbench/results.db "select * from units" > all-units.csv
+sqlite3 -csv ~/.config/otterbench/results.db "select * from units" > all-units.csv
 ```
 
 ## Safety and crash recovery (`safety.py`)
@@ -570,7 +570,7 @@ At start-up, a marker whose `pid` is no longer running means the last run didn't
 
 ## Setups and bench state (`setups.py`)
 
-A setup is a JSON file in `~/.config/ee-workbench/setups/<name>.json`:
+A setup is a JSON file in `~/.config/otterbench/setups/<name>.json`:
 
 ```json
 {"version": 1, "name": "nRF52 sleep current", "description": "…", "saved": "2026-11-20 14:02:11",
@@ -585,7 +585,7 @@ A setup is a JSON file in `~/.config/ee-workbench/setups/<name>.json`:
  "math": [{"name": "P", "expr": "…", "unit": "W", "integrate": false, "enabled": true}]}
 ```
 
-`settings` is each panel's `session_settings()` (what `last-session.json` keeps too). Recall (`gui/setups_dialog.apply_bench`) closes the tabs, opens the listed instruments through the normal connect path (which reads each instrument's state and never writes setpoints or outputs), applies the settings, then the sequence, rules and channels. The current watchdog rules and math channels are also kept in `~/.config/ee-workbench/bench.json`, saved whenever they change. Its keys:
+`settings` is each panel's `session_settings()` (what `last-session.json` keeps too). Recall (`gui/setups_dialog.apply_bench`) closes the tabs, opens the listed instruments through the normal connect path (which reads each instrument's state and never writes setpoints or outputs), applies the settings, then the sequence, rules and channels. The current watchdog rules and math channels are also kept in `~/.config/otterbench/bench.json`, saved whenever they change. Its keys:
 
 | Key | |
 |---|---|
@@ -601,7 +601,7 @@ JSON over HTTP on `127.0.0.1:<api_port>` (default 8765), served by a `ThreadingH
 
 | Request | Reply |
 |---|---|
-| `GET /` | `{"app": "ee-workbench", "methods": [...]}`, no token needed |
+| `GET /` | `{"app": "otterbench", "methods": [...]}`, no token needed |
 | `POST /call` with `Authorization: Bearer <token>` and body `{"method": "measure", "args": ["PPK2", "current", 1.0], "kwargs": {}}` | `200 {"result": 0.000123}` |
 | bad token | `401 {"error": …}` |
 | unknown method | `404 {"error": "no method …"}` |
@@ -611,10 +611,10 @@ JSON over HTTP on `127.0.0.1:<api_port>` (default 8765), served by a `ThreadingH
 
 Methods (`METHODS`): `instruments set measure capture wait note record gpio read_pin wait_for profile expect outputs_off log`, the [Script-tab](03-users-guide.md#script-tab) `bench` calls. Each request gets a fresh `Bench` over the open tabs (`PanelInst`, as the sequencer uses), so calls are queued on each instrument's worker thread like any other command; concurrent requests are allowed but queue per instrument. Results go through `to_json()`: a capture becomes `{header, rows, offset, span, channels}`, numpy scalars become floats. `record()` and `expect()` rows go to the sequencer window's results (and the session).
 
-The token is 24 random bytes (`secrets.token_urlsafe(24)`), checked with `hmac.compare_digest`, and written with the URL, port and PID to `~/.config/ee-workbench/api.json`, created with mode 600 and removed when the API stops. `client.connect(url=None, token=None, timeout=600)` reads that file, and the returned `RemoteBench` turns `bench.anything(*a, **k)` into a call; errors raise `BenchError`. A raw call with curl:
+The token is 24 random bytes (`secrets.token_urlsafe(24)`), checked with `hmac.compare_digest`, and written with the URL, port and PID to `~/.config/otterbench/api.json`, created with mode 600 and removed when the API stops. `client.connect(url=None, token=None, timeout=600)` reads that file, and the returned `RemoteBench` turns `bench.anything(*a, **k)` into a call; errors raise `BenchError`. A raw call with curl:
 
 ```bash
-TOKEN=$(python3 -c 'import json,os;print(json.load(open(os.path.expanduser("~/.config/ee-workbench/api.json")))["token"])')
+TOKEN=$(python3 -c 'import json,os;print(json.load(open(os.path.expanduser("~/.config/otterbench/api.json")))["token"])')
 curl -s -H "Authorization: Bearer $TOKEN" -d '{"method":"instruments"}' http://127.0.0.1:8765/call
 ```
 
@@ -647,21 +647,21 @@ Other measures, by place:
 
 | File | What |
 |---|---|
-| `~/.config/ee-workbench/config.toml` | Start-up settings (created with comments on first run) |
-| `~/.config/ee-workbench/last-session.json` | The open instruments and their panel settings, for the next start |
-| `~/.config/ee-workbench/bench.json` | Watchdog rules (and whether armed), math channels, and the record, safety, production, Bode, regulator, battery and calibration-check settings ([keys](#setups-and-bench-state-setupspy)) |
-| `~/.config/ee-workbench/instruments/*.toml` | Your own [instrument definitions](#instrument-definition-files-toml) (read, never written) |
-| `~/.config/ee-workbench/results.db` | [Production-test results](#production-results-database) |
-| `~/.config/ee-workbench/calibration.json` | The calibration log (`.damaged`: a copy of one that couldn't be read, made before writing a new one) |
-| `~/.config/ee-workbench/running.json` | The [crash marker](#safety-and-crash-recovery-safetypy), only while the app runs |
-| `~/.config/ee-workbench/sequence-run.json` | A running sequence's checkpoint, with *resume* on |
-| `~/.config/ee-workbench/sequence.json` | The sequencer's steps and script as last run (`sequence.bad`: a damaged one, set aside at start-up) |
-| `~/.config/ee-workbench/presets.json` | 663xx System-tab presets |
-| `~/.config/ee-workbench/setups/*.json` | Named [setups](#setups-and-bench-state-setupspy) |
-| `~/.config/ee-workbench/api.json` | Remote API address and token (mode 600), only while it runs |
-| `~/.config/ee-workbench/crash.log` (`.1`) | Caught errors with tracebacks, signals received, `run.sh` restarts ([details](#errors-and-recovery-crashpy)) |
-| `~/.config/ee-workbench/fault.log` (`.1`) | A line per start-up; every thread's stack after a hard crash |
-| `*.csv`, `*.eewb`, `*.html` / `*.pdf` | Wherever you save recordings, sessions and reports |
+| `~/.config/otterbench/config.toml` | Start-up settings (created with comments on first run) |
+| `~/.config/otterbench/last-session.json` | The open instruments and their panel settings, for the next start |
+| `~/.config/otterbench/bench.json` | Watchdog rules (and whether armed), math channels, and the record, safety, production, Bode, regulator, battery and calibration-check settings ([keys](#setups-and-bench-state-setupspy)) |
+| `~/.config/otterbench/instruments/*.toml` | Your own [instrument definitions](#instrument-definition-files-toml) (read, never written) |
+| `~/.config/otterbench/results.db` | [Production-test results](#production-results-database) |
+| `~/.config/otterbench/calibration.json` | The calibration log (`.damaged`: a copy of one that couldn't be read, made before writing a new one) |
+| `~/.config/otterbench/running.json` | The [crash marker](#safety-and-crash-recovery-safetypy), only while the app runs |
+| `~/.config/otterbench/sequence-run.json` | A running sequence's checkpoint, with *resume* on |
+| `~/.config/otterbench/sequence.json` | The sequencer's steps and script as last run (`sequence.bad`: a damaged one, set aside at start-up) |
+| `~/.config/otterbench/presets.json` | 663xx System-tab presets |
+| `~/.config/otterbench/setups/*.json` | Named [setups](#setups-and-bench-state-setupspy) |
+| `~/.config/otterbench/api.json` | Remote API address and token (mode 600), only while it runs |
+| `~/.config/otterbench/crash.log` (`.1`) | Caught errors with tracebacks, signals received, `run.sh` restarts ([details](#errors-and-recovery-crashpy)) |
+| `~/.config/otterbench/fault.log` (`.1`) | A line per start-up; every thread's stack after a hard crash |
+| `*.csv`, `*.otter`, `*.html` / `*.pdf` | Wherever you save recordings, sessions and reports |
 
 `$XDG_CONFIG_HOME` moves `~/.config`.
 
@@ -669,11 +669,11 @@ Other measures, by place:
 
 | Variable | Effect |
 |---|---|
-| `XDG_CONFIG_HOME` | Where `ee-workbench/` (all the files above) lives, instead of `~/.config` |
-| `EEWB_VISA_LIB` | VISA library for pyvisa: `@py` (default, pyvisa-py) or `@ivi` (NI-VISA / Keysight IO Libraries) |
-| `EEWB_GPIB_LIB` | Full path of `libgpib.so.0`, tried before the usual locations |
-| `EEWB_SIGROK_CLI` | The `sigrok-cli` program to run, instead of the one on `PATH` |
-| `EEWB_TOUCH` | `1` / `0`: force the touch or desktop layout (`--touch` / `--no-touch` win) |
+| `XDG_CONFIG_HOME` | Where `otterbench/` (all the files above) lives, instead of `~/.config` |
+| `OTTERBENCH_VISA_LIB` | VISA library for pyvisa: `@py` (default, pyvisa-py) or `@ivi` (NI-VISA / Keysight IO Libraries) |
+| `OTTERBENCH_GPIB_LIB` | Full path of `libgpib.so.0`, tried before the usual locations |
+| `OTTERBENCH_SIGROK_CLI` | The `sigrok-cli` program to run, instead of the one on `PATH` |
+| `OTTERBENCH_TOUCH` | `1` / `0`: force the touch or desktop layout (`--touch` / `--no-touch` win) |
 | `QT_QPA_PLATFORM` | Qt's display back end, e.g. `xcb` when Wayland misbehaves, `offscreen` for screenshots and tests |
 
 ## Look and feel (`gui/theme.py`)
@@ -715,7 +715,11 @@ The tests run each driver against its simulator: identification, CV/CC, protecti
 
 ## The name
 
-The visible name is `APP_NAME` in `about.py`. The package `ee_workbench`, `~/.config/ee-workbench`, `.eewb` session files, the environment variables and the launcher's file name keep their names, so settings and recordings stay valid. `gui/branding/logo.svg` is the logo's source; `logo.png` is drawn from it (512 px) and is what the program loads, since Qt's SVG plugin isn't always installed.
+The visible name is `APP_NAME` in `about.py`. The package, the config folder, the launcher and the repository are all called `otterbench`; session files end in `.otter`, and environment variables start with `OTTERBENCH_`.
+
+The program used to be called EE Workbench. The first start after the rename moves the contents of `~/.config/ee-workbench` to `~/.config/otterbench` (`config.migrate_old_dir()`), and `.eewb` session files still open. The old `EEWB_…` environment variables are no longer read. The setup scripts remove the old launcher, icon, autostart entry and udev rules.
+
+`gui/branding/logo.svg` is the logo's source; `logo.png` is drawn from it (512 px) and is what the program loads, since Qt's SVG plugin isn't always installed.
 
 ## Adding an instrument
 

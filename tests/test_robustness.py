@@ -1,5 +1,5 @@
 """Crash resistance: damaged files, failing writes, bad expressions and
-uncaught exceptions must leave the app running (see ee_workbench/crash.py)."""
+uncaught exceptions must leave the app running (see otterbench/crash.py)."""
 import json
 import os
 import sqlite3
@@ -10,16 +10,16 @@ import urllib.request
 import numpy as np
 import pytest
 
-from ee_workbench import config, crash, mathchannels as mc, setups, watchdog
-from ee_workbench.api import ApiServer
-from ee_workbench.sequencer import Plan
-from ee_workbench.session import SessionReader, SessionWriter
+from otterbench import config, crash, mathchannels as mc, setups, watchdog
+from otterbench.api import ApiServer
+from otterbench.sequencer import Plan
+from otterbench.session import SessionReader, SessionWriter
 
 
 @pytest.fixture
 def cfgdir(tmp_path, monkeypatch):
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
-    return tmp_path / "ee-workbench"
+    return tmp_path / "otterbench"
 
 
 # ---------------------------------------------------------------- crash log
@@ -127,7 +127,7 @@ def test_live_math_tick_survives_bad_channel():
 # ---------------------------------------------------------------- session file
 def test_session_stop_never_raises(tmp_path):
     w = SessionWriter()
-    w.start(str(tmp_path / "s.eewb"))
+    w.start(str(tmp_path / "s.otter"))
     w.stream("k", "PPK2", "PPK2", "SIM::PPK2", ["a"])
     w.add("k", 1.0, [1.0])
     w._pending[999] = [[1.0, 2.0]]        # a table that doesn't exist: flush fails
@@ -152,7 +152,7 @@ def test_session_reader_rejects_foreign_file(tmp_path):
 # ---------------------------------------------------------------- setups
 def test_damaged_setup_rejected_before_anything_closes(cfgdir):
     pytest.importorskip("PyQt6")
-    from ee_workbench.gui.setups_dialog import check_bench
+    from otterbench.gui.setups_dialog import check_bench
     with pytest.raises(ValueError):
         check_bench({"instruments": [{"model": "PPK2"}]})
     with pytest.raises(ValueError):
@@ -221,8 +221,8 @@ def test_exception_in_slot_does_not_abort(qapp, cfgdir, monkeypatch):
 
 
 def test_gpio_poll_failure_offers_reconnect(qapp, cfgdir):
-    from ee_workbench.gui.main_window import MainWindow
-    from ee_workbench.config import Config
+    from otterbench.gui.main_window import MainWindow
+    from otterbench.config import Config
     win = MainWindow([("GPIO", "SIM::GPIO")], Config(), None)
     try:
         panel = win.panels()[0]
@@ -248,8 +248,8 @@ def test_gpio_poll_failure_offers_reconnect(qapp, cfgdir):
 
 
 def test_all_outputs_off_survives_a_failing_tab(qapp, cfgdir):
-    from ee_workbench.gui.main_window import MainWindow
-    from ee_workbench.config import Config
+    from otterbench.gui.main_window import MainWindow
+    from otterbench.config import Config
     win = MainWindow([("auto", "SIM::66321D"), ("auto", "SIM::6632A")], Config(), None)
     try:
         deadline = time.monotonic() + 5

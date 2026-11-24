@@ -141,7 +141,7 @@ sudo /usr/local/sbin/gpib_config --minor 0 || true
 step "Checking that Python can load libgpib"
 if [[ -x "$HERE/.venv/bin/python" ]]; then
   (cd "$HERE" && .venv/bin/python -W ignore -c "
-from ee_workbench.transport import load_gpib_lib
+from otterbench.transport import load_gpib_lib
 ok, problem = load_gpib_lib()
 print('libgpib loads OK' if ok else problem)
 raise SystemExit(0 if ok else 1)") || echo "!! See the message above."

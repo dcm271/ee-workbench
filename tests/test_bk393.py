@@ -4,14 +4,14 @@ import time
 
 import pytest
 
-from ee_workbench import config
-from ee_workbench.instruments import make_driver, model_for, resolve_model
-from ee_workbench.instruments.bk393 import (BK393, BK393B, OVERLOAD, appa_frame,
+from otterbench import config
+from otterbench.instruments import make_driver, model_for, resolve_model
+from otterbench.instruments.bk393 import (BK393, BK393B, OVERLOAD, appa_frame,
                                             decode_393, decode_display, parse_393,
                                             parse_appa, split_unit)
-from ee_workbench.signals import signals_of
-from ee_workbench.sim.sbk393 import SimBK393, SimBK393B, frame393, line
-from ee_workbench.transport import describe, serial_path
+from otterbench.signals import signals_of
+from otterbench.sim.sbk393 import SimBK393, SimBK393B, frame393, line
+from otterbench.transport import describe, serial_path
 
 
 def dec(hexs):
@@ -165,7 +165,7 @@ def test_resource_routing(monkeypatch):
 
 def test_parse_target():
     pytest.importorskip("PyQt6")
-    from ee_workbench.gui.main_window import parse_target
+    from otterbench.gui.main_window import parse_target
     assert parse_target("393A@/dev/ttyUSB0") == ("BK393", "BK393::/dev/ttyUSB0")
     assert parse_target("393B@/dev/ttyUSB0") == ("BK393B", "BK393B::/dev/ttyUSB0")
     assert parse_target("bk393b@ASRL/dev/ttyUSB0::INSTR") == ("BK393B", "BK393B::/dev/ttyUSB0")
@@ -173,7 +173,7 @@ def test_parse_target():
 
 
 def test_serial_settings(monkeypatch):
-    from ee_workbench import transport
+    from otterbench import transport
     seen = []
     monkeypatch.setattr(transport, "SerialStream", lambda p, baud: seen.append((p, baud)))
     transport.open_transport("BK393::/dev/ttyUSB0")
@@ -197,9 +197,9 @@ def test_panel(res, tmp_path, monkeypatch):
     qt = pytest.importorskip("PyQt6.QtWidgets")
     app = qt.QApplication.instance() or qt.QApplication([])
     _APP.append(app)
-    from ee_workbench.config import Config
-    from ee_workbench.gui.dmm_panel import HandheldDmmPanel
-    from ee_workbench.gui.main_window import MainWindow
+    from otterbench.config import Config
+    from otterbench.gui.dmm_panel import HandheldDmmPanel
+    from otterbench.gui.main_window import MainWindow
     win = MainWindow([("auto", res)], Config(), None)
     try:
         p = win.panels()[0]

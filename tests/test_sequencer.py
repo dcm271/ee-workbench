@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from ee_workbench.sequencer import (Bench, Inst, Plan, SequenceError, Step, Stopped, run_plan,
+from otterbench.sequencer import (Bench, Inst, Plan, SequenceError, Step, Stopped, run_plan,
                                     run_script, value_of)
 
 
