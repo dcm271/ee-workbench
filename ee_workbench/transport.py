@@ -38,33 +38,21 @@ _GPIB_STATE: tuple[bool, str] | None = None    # (loaded, problem description)
 
 
 def load_gpib_lib() -> tuple[bool, str]:
-    """Load linux-gpib's libgpib for gpib_ctypes (and so for pyvisa-py).
+    """Load linux-gpib's libgpib and have pyvisa-py use it (linux_gpib.py).
 
-    gpib_ctypes only tries the bare name "libgpib.so.0" and reports any
-    failure as "not found". Search the usual install locations, and if the
-    library exists but won't load (e.g. it was built on an x86 PC and copied
-    to a Pi), say so. Must run before pyvisa-py imports its GPIB support.
-    Returns (ok, problem).
+    Searches the usual install locations, and if the library exists but won't
+    load (e.g. it was built on an x86 PC and copied to a Pi), says so. Must run
+    before pyvisa-py is imported, whatever the first instrument is: it looks
+    for GPIB support once. Returns (ok, problem).
     """
     global _GPIB_STATE
     with _GPIB_LOCK:
         if _GPIB_STATE is not None:
             return _GPIB_STATE
-        import ctypes
         import glob
-        import warnings
 
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
-            try:
-                from gpib_ctypes.gpib import gpib as g
-            except ImportError:
-                _GPIB_STATE = (False, "The gpib-ctypes Python package is missing: "
-                                      ".venv/bin/pip install gpib-ctypes")
-                return _GPIB_STATE
-        if isinstance(g._lib, ctypes.CDLL):
-            _GPIB_STATE = (True, "")
-            return _GPIB_STATE
+        from . import linux_gpib
+
         env = os.environ.get("EEWB_GPIB_LIB")
         names = ([env] if env else []) + ["libgpib.so.0", "/usr/local/lib/libgpib.so.0",
                                           "/usr/lib/libgpib.so.0"]
@@ -74,16 +62,14 @@ def load_gpib_lib() -> tuple[bool, str]:
         errors = []
         for name in dict.fromkeys(names):
             try:
-                ctypes.CDLL(name)
-            except OSError as e:
+                linux_gpib.load(name)
+            except (OSError, AttributeError) as e:
                 if os.path.exists(name):
                     errors.append(str(e) if name in str(e) else f"{name}: {e}")
                 continue
-            with warnings.catch_warnings():
-                warnings.simplefilter("ignore")
-                if g._load_lib(name):
-                    _GPIB_STATE = (True, "")
-                    return _GPIB_STATE
+            linux_gpib.install()
+            _GPIB_STATE = (True, "")
+            return _GPIB_STATE
         fix = "Run scripts/install-gpib-driver.sh (Pi: scripts/setup-pi.sh) to build it on this machine."
         if errors:
             hint = (" It was probably built on another computer (wrong CPU type)."
@@ -104,9 +90,9 @@ def scan_gpib(board: int = 0) -> list[int]:
     """
     if not load_gpib_lib()[0]:
         return []
-    try:
-        from gpib_ctypes import gpib
+    from . import linux_gpib as gpib
 
+    try:
         return [pad for pad in range(1, 31) if gpib.listener(board, pad)]
     except Exception:
         return []
@@ -116,9 +102,9 @@ def gpib_ready(board: int = 0) -> bool:
     """True once the adapter's device node exists and the board answers."""
     if not os.path.exists(f"/dev/gpib{board}") or not load_gpib_lib()[0]:
         return False
-    try:
-        from gpib_ctypes import gpib
+    from . import linux_gpib as gpib
 
+    try:
         gpib.listener(board, 30)
         return True
     except Exception:
@@ -426,13 +412,17 @@ class VisaTransport:
         import pyvisa
         from pyvisa import constants
 
-        if resource.upper().startswith("GPIB") and _visa_library() == "@py":
+        if _visa_library() == "@py":
+            # First for any resource: pyvisa-py looks for GPIB support once.
             ok, problem = load_gpib_lib()
-            if not ok:
+            if not ok and resource.upper().startswith("GPIB"):
                 raise TransportError(problem)
         self._pyvisa = pyvisa
         self.resource = resource
         self.rm = pyvisa.ResourceManager(_visa_library())
+        from .linux_gpib import finish
+
+        finish()
         try:
             self.inst = self.rm.open_resource(resource)
         except Exception as e:  # pragma: no cover - hardware dependent

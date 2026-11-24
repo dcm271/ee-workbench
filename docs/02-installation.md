@@ -63,7 +63,6 @@ python3 -m venv --system-site-packages .venv
 | PyQt6 | GUI toolkit |
 | pyqtgraph, numpy | fast real-time plots and data buffers |
 | pyvisa, pyvisa-py | instrument I/O (pure-Python VISA) |
-| gpib-ctypes | lets pyvisa-py reach linux-gpib's `libgpib.so` |
 | pyserial | the Nordic PPK2, and instruments on RS-232 |
 | pyusb | USB-TMC instruments (function generators) through pyvisa-py |
 | pytest | the test suite |

@@ -16,7 +16,7 @@ MainWindow
  ├─ SupplyPanel (66321D) ── worker thread ── Agilent663xx ──┐
  ├─ SupplyPanel (6632A)  ── worker thread ── HP6632A ───────┼─ VisaTransport
  └─ DmmPanel    (3456A)  ── worker thread ── HP3456A ───────┘       │
-                                                       pyvisa-py ─ gpib-ctypes
+                                                       pyvisa-py ─ linux_gpib.py
                                                                     │
                                               libgpib ─ ni_usb_gpib (kernel)
 
@@ -43,6 +43,7 @@ MainWindow
 
 | Module | Contents |
 |---|---|
+| `linux_gpib.py` | linux-gpib's C library through ctypes, as the `gpib` / `Gpib` modules pyvisa-py looks for |
 | `instruments/base.py` | Data types: `SupplyCaps`, `Setpoints`, `SupplyReading`, `DmmConfig`, `DmmReading` |
 | `instruments/agilent663xx.py` | 66311B/66321B/66321D SCPI driver |
 | `instruments/hp6632a.py` | 6632A/33A/34A driver (HP's pre-SCPI command language) |
@@ -734,6 +735,6 @@ The visible name is `APP_NAME` in `about.py`. The package `ee_workbench`, `~/.co
 
 OtterBench itself is under the GNU GPL, version 3 only (`LICENSE`); contributions follow `CONTRIBUTING.md`. What it uses:
 
-- **linux-gpib** (GPL): built from `vendor/linux-gpib` (not committed; fetched by the install script).
-- **pyvisa, pyvisa-py** (MIT), **pyqtgraph** (MIT), **PyQt6** (GPL v3), **gpib-ctypes** (GPL v2, with no "or later"; installed separately by the user, and needed for GPIB only), **pyserial** (BSD), **pyusb** (BSD), **libgpiod** Python bindings (LGPL), **WeasyPrint** (BSD; optional), **sigrok-cli** (GPL; run as a separate program), **logic2-automation** (Apache 2.0; optional).
+- **linux-gpib** (the C library: GPL v2 or later, reached through our own `linux_gpib.py`): built from `vendor/linux-gpib` (not committed; fetched by the install script).
+- **pyvisa, pyvisa-py** (MIT), **pyqtgraph** (MIT), **PyQt6** (GPL v3), **pyserial** (BSD), **pyusb** (BSD), **libgpiod** Python bindings (LGPL), **WeasyPrint** (BSD; optional), **sigrok-cli** (GPL; run as a separate program), **logic2-automation** (Apache 2.0; optional).
 - **PPK2 protocol and calibration:** our own implementation, following the behaviour of Nordic's open-source nRF Connect Power Profiler (`pc-nrfconnect-ppk`); no code is copied from it.

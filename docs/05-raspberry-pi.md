@@ -35,7 +35,7 @@ The SSH clone needs a GitHub key on the Pi. For read-only use, `https://github.c
 The script is safe to re-run. It does the following:
 
 1. Installs the system packages. PyQt6 and numpy come from apt, because building them with pip on a Pi takes hours. It also installs `qt6-wayland` for the Bookworm desktop, plus `sigrok-cli` and the fx2lafw firmware for USB logic analyzers. Saleae's Logic 2 doesn't run on ARM, so on the Pi a sigrok analyzer takes its place. It adds you to `dialout` (PPK2) and `plugdev` (logic analyzers).
-2. Creates `.venv` and installs `requirements.txt` into it (pyqtgraph, pyvisa-py, gpib-ctypes, …).
+2. Creates `.venv` and installs `requirements.txt` into it (pyqtgraph, pyvisa-py, …).
 3. Runs the test suite against the simulators.
 4. Builds the GPIB driver with `scripts/install-gpib-driver.sh`. It uses the Pi's `linux-headers-$(uname -r)` package, and skips the kernel-module build if the running kernel already provides `ni_usb_gpib`.
 5. Adds **OtterBench** to the application menu and to `~/.config/autostart`, so it starts full screen at every login. The autostart entry also uses `--restart-on-crash`, so the screen never stays on an empty desktop (see [below](#start-again-after-a-crash)).
@@ -203,7 +203,7 @@ The touch layout needs about 1180×460 pixels. Smaller screens (an 800×480 pane
 | `qt.qpa.plugin: Could not load the Qt platform plugin "wayland"` | `sudo apt install qt6-wayland`, or run with `QT_QPA_PLATFORM=xcb`. |
 | Touches land in the wrong place | Use the Pi's **Screen Configuration → Touchscreen** to map the touch device to the right display. |
 | `cannot execute binary file: Exec format error` | Something built on a PC (x86) was copied to the Pi. Re-run `./scripts/setup-pi.sh`: it detects and rebuilds a copied `.venv` and GPIB build. Cloning with git instead of copying the folder avoids this. |
-| "gpib_ctypes … could not locate the gpib library", or "GPIB library is installed but can't be loaded" | The linux-gpib library is missing, or is an x86 copy from a PC. Run `rm -rf vendor && ./scripts/install-gpib-driver.sh`; its last step checks that the library loads. |
+| "The linux-gpib library (libgpib.so.0) is not installed", or "GPIB library is installed but can't be loaded" | The linux-gpib library is missing, or is an x86 copy from a PC. Run `rm -rf vendor && ./scripts/install-gpib-driver.sh`; its last step checks that the library loads. |
 | GPIO tab: "No GPIO chip found" | `python3-libgpiod` missing or no `/dev/gpiochip*` (not a Pi?). `ls /dev/gpiochip*`; re-run `setup-pi.sh`. |
 | GPIO: "Permission denied" | Log out and back in after setup, for the `gpio` group. |
 | GPIO: a pin is "busy" | I²C, SPI, the serial console, 1-Wire or a HAT's overlay uses it (`gpioinfo` shows the owner). Pick another pin or turn that interface off in `raspi-config`. |
