@@ -71,6 +71,9 @@ class Streaming393(sadapters._Link):
     (9600, sbk393.SimBK393B, "BK393B", "BK393B::/dev/ttyUSB0"),
     (115200, lambda: sxdm.SimXDM("XDM1041", True), "XDM", "XDM::/dev/ttyUSB0"),
     (115200, sadapters.SimRiden, "SCPI:RD60XX", "RD60XX::/dev/ttyUSB0"),
+    (115200, sadapters.SimSpm, "SCPI:DC310PRO", "DC310PRO::/dev/ttyUSB0"),
+    (115200, lambda: sadapters.SimSpm("KIPRIM,DC605Pro,1,FV:V2.1.0"), "SCPI:DC605PRO",
+     "DC605PRO::/dev/ttyUSB0"),
     (9600, sadapters.SimKorad, "SCPI:KA3005P", "KA3005P::/dev/ttyUSB0"),
     (9600, sadapters.SimPx100, "SCPI:PX100", "PX100::/dev/ttyUSB0"),
     (9600, sadapters.SimCenter, "SCPI:CENTER309", "CENTER309::/dev/ttyUSB0"),
@@ -99,7 +102,7 @@ def test_streaming_devices_are_sent_nothing():
 def test_silent_port_and_only_questions_are_sent():
     port = At(0, None)
     assert idn.identify_port("/dev/ttyUSB0", port, quick=0.02) is None
-    allowed = {b"*IDN?", b"\r\n", b"*IDN?\r\n", b"A", bytes.fromhex("b1b2110000b6"),
+    allowed = {b"*IDN?", b"\r\n", b"*IDN?\r\n", b"*IDN?\n", b"A", bytes.fromhex("b1b2110000b6"),
                idn.appa_frame(idn.CMD_INFO)}
     assert {s for s in port.sent if not s.startswith(b"\x01\x03")} <= allowed
     assert {s[1] for s in port.sent if s.startswith(b"\x01\x03")} == {3}     # Modbus: read

@@ -111,11 +111,11 @@ def test_ports_of_real_definitions():
                   measure_names=[r.name for r in d.readings])
     got = {(f.text, f.role) for f in roles.ports(
         [inst("SCPI:" + k) for k in ("DP832", "DL3021", "SDL1020", "K2380", "PX100", "RD60XX",
-                                     "KA3005P", "E36312A", "SPD3303X", "SCPI-SUPPLY",
+                                     "KA3005P", "DC310PRO", "E36312A", "SPD3303X", "SCPI-SUPPLY",
                                      "34461A")])}
     assert {("DP832 output 1", "source"), ("DP832 output 3", "source"), ("DL3021", "load"),
             ("SDL1020", "load"), ("K2380", "load"), ("PX100", "load"), ("RD60XX", "source"),
-            ("KA3005P", "source"), ("E36312A output 2", "source"),
+            ("KA3005P", "source"), ("DC310PRO", "source"), ("E36312A output 2", "source"),
             ("SPD3303X output 1", "source"), ("SCPI-SUPPLY", "source")} <= got
     assert not any(t.startswith("34461A") for t, _ in got)
 

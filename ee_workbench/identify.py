@@ -164,7 +164,8 @@ def identify_port(path: str, open_link=None, progress=None, stop=None,
 
     def fast(link):
         say("*IDN? at 115200 baud…")
-        idn = ask_idn(link)
+        # some (OWON) take a line feed alone, and refuse the question otherwise
+        idn = ask_idn(link) or ask_idn(link, b"*IDN?\n")
         if idn:
             return by_idn(idn, path, 115200)
         say("Modbus (Riden) at 115200 baud…")

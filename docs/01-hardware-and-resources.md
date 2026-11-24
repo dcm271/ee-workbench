@@ -89,6 +89,8 @@ The following don't speak SCPI over VISA; an adapter (`instruments/adapters.py`)
 | Riden RD6006, RD6012, RD6018, RD6024, RK6006 (USB, 115200 baud) | `RD60XX::/dev/ttyUSB0` | voltage, current, power, vin, ah, wh, temp, cc, prot | vset, iset, ovp, ocp, out | `SIM::RD60XX` |
 | Korad KA3005P, KD3005P, Tenma 72-2540 / 72-2535 / 72-2710, RND 320, Velleman PS3005D | `KA3005P::/dev/ttyACM0` | voltage, current, cv | vset, iset, ovp_on, ocp_on, out | `SIM::KA3005P` |
 | Korad KA6003P, KD6005P, Tenma 72-2550 (60 V) | `KA6003P::/dev/ttyACM0` | as above | as above | `SIM::KA6003P` |
+| Kiprim DC310Pro (supply + multimeter), OWON SPM3103, Multicomp Pro MP711134 (USB, 115200 baud) | `DC310PRO::/dev/ttyUSB0` | voltage, current, power, dmm, prot, mode | vset, iset, ovp, ocp, function (multimeter), out | `SIM::DC310PRO` |
+| Kiprim DC605Pro (supply + multimeter), OWON SPM6053 | `DC605PRO::/dev/ttyUSB0` | as above | as above | `SIM::DC605PRO` |
 | Atorch PX-100, and DL24 units whose firmware answers its protocol (not all do) | `PX100::/dev/ttyUSB0` | voltage, current, power, ah, wh, temp | cc, cutoff, input | `SIM::PX100` |
 | Center 309, Voltcraft K204 (4 thermocouples) | `CENTER309::/dev/ttyUSB0` | t1–t4 | | `SIM::CENTER309` |
 | DS18B20 (Pi 1-Wire, or any Linux 1-Wire bus) | `W1::` | one per sensor | | `SIM::W1` |
@@ -197,6 +199,16 @@ Both are **read-only**: function and range are set with the meter's knob and but
 - The driver only ever sends the 393B's read commands. The same protocol can write calibration and firmware, so the Console refuses everything else.
 - B&K publishes no protocol for either. The 393 follows B&K's AK393 software (serial settings, frame, scale table, status bits) and [dstahlke's Linux driver](https://gist.github.com/dstahlke/d0621a061eb8839e2f5f). The 393B follows libsigrok's [appa-dmm](https://github.com/Cymaphore/libsigrok) driver; B&K's own software for it is APPA's WinDMM500, whose function, unit and status tables match. Older meters that use APPA's earlier frames are detected automatically.
 - There is no 393A in B&K's catalogue; `393A` is accepted as another name for the 393.
+
+### Kiprim DC310Pro and DC605Pro
+
+A supply and a multimeter in one, over USB (a serial port, 115200 baud). Choose *DC310PRO* or *DC605PRO* as the model, or use **Identify…**. `voltage` and `current` are what the supply's output delivers; `dmm` is what the multimeter's jacks see, so the two can be measured at once (for example the rail at the board with `dmm`, and the supply's own current).
+
+- No programming manual for these two was found. The commands are those of OWON's SPM series, whose ratings match (DC310Pro / SPM3103, DC605Pro / SPM6053), as used by [multicomp-mcp](https://github.com/cameroncoats/multicomp-mcp), [OpenBench](https://github.com/VlasovLabTech/OpenBench-lab-control) and [owon-psu](https://github.com/robbederks/owon-psu-control) on real SPM units. **Not yet confirmed on a Kiprim**: try it first with nothing connected to the output.
+- Switching off is repeated until the supply answers that its output is off.
+- Changing the multimeter's function takes about a second. When it is changed at the front panel, the app follows with the next reading.
+- Not supported: the multimeter's ranges (it auto-ranges), hold and relative; the supply's list mode, which has no remote commands.
+- `*RST` in the Console is a factory reset.
 
 ### OWON XDM1041, XDM1241 and XDM2041
 

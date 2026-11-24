@@ -1,0 +1,114 @@
+# Kiprim DC310Pro supply with a multimeter: OWON SPM commands over USB (instruments/adapters.py).
+id = "DC310PRO"
+name = "Kiprim DC310Pro, OWON SPM3103, Multicomp Pro MP711134 (30 V 10 A + multimeter)"
+maker = "Kiprim"
+type = "supply"
+protocol = "owon-spm"
+idn = ["DC310PRO", "SPM3103", "MP711134"]
+error_query = ""
+off = ["OUTP OFF"]
+poll_ms = 300
+notes = "Taken to speak the commands of OWON's SPM series, which it resembles; not yet confirmed on a Kiprim. `voltage` and `current` are the supply's output, `dmm` is the multimeter's jacks. Don't send *RST: it is a factory reset."
+
+[[reading]]
+name = "voltage"
+label = "Voltage"
+query = "ALL?"
+field = 0
+unit = "V"
+
+[[reading]]
+name = "current"
+label = "Current"
+query = "ALL?"
+field = 1
+unit = "A"
+
+[[reading]]
+name = "power"
+label = "Power"
+query = "ALL?"
+field = 2
+unit = "W"
+
+[[reading]]
+name = "dmm"
+label = "Multimeter"
+query = "DMM?"
+unit_from = "function"
+
+[[reading]]
+name = "prot"
+label = "Protection (1 OVP, 2 OCP, 3 OTP)"
+query = "ALL?"
+field = 3
+plot = "-"
+
+[[reading]]
+name = "mode"
+label = "Mode (1 CV, 2 CC, 3 failure)"
+query = "ALL?"
+field = 4
+plot = "-"
+
+[[setting]]
+name = "vset"
+label = "Voltage"
+kind = "number"
+unit = "V"
+min = 0
+max = 30
+set = "VOLT {value}"
+query = "VOLT?"
+
+[[setting]]
+name = "iset"
+label = "Current limit"
+kind = "number"
+unit = "A"
+min = 0
+max = 10
+set = "CURR {value}"
+query = "CURR?"
+
+[[setting]]
+name = "ovp"
+label = "OVP level"
+kind = "number"
+unit = "V"
+min = 0
+set = "VOLT:LIM {value}"
+query = "VOLT:LIM?"
+
+[[setting]]
+name = "ocp"
+label = "OCP level"
+kind = "number"
+unit = "A"
+min = 0
+set = "CURR:LIM {value}"
+query = "CURR:LIM?"
+
+[[setting]]
+name = "function"
+label = "Multimeter"
+kind = "choice"
+query = "FUNC?"
+options = [
+  {label = "DC V", set = "FUNC:VOLT:DC", reply = "^VOLT:DC$", unit = "V"},
+  {label = "AC V", set = "FUNC:VOLT:AC", reply = "^VOLT:AC$", unit = "V"},
+  {label = "DC A", set = "FUNC:CURR:DC", reply = "^CURR:DC$", unit = "A"},
+  {label = "AC A", set = "FUNC:CURR:AC", reply = "^CURR:AC$", unit = "A"},
+  {label = "Ω", set = "FUNC:RES", reply = "^RES$", unit = "Ω"},
+  {label = "Capacitance", set = "FUNC:CAP", reply = "^CAP$", unit = "F"},
+  {label = "Diode", set = "FUNC:DIOD", reply = "^DIOD$", unit = "V"},
+  {label = "Continuity", set = "FUNC:CONT", reply = "^CONT$", unit = "Ω"},
+]
+
+[[setting]]
+name = "out"
+label = "Output"
+kind = "bool"
+set = "OUTP {on_off}"
+query = "OUTP?"
+output = true

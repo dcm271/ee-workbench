@@ -259,6 +259,102 @@ def test_et44_acknowledges_sets():
         d.t.write("FOOBAR 42")
 
 
+# ---- OWON SPM / Kiprim Pro ----------------------------------------------------
+def spm(**kw):
+    sim = sadapters.SimSpm()
+    for k, v in kw.items():
+        setattr(sim, k, v)
+    a = ad.OwonSpmAdapter(sim, definition_for("DC310PRO"))
+    a.GAP = a.SETTLE = 0
+    a.REPLY_S = a.ERR_S = 0.02
+    return sim, g.ScpiDriver(a, definition_for("DC310PRO"))
+
+
+def test_spm_supply_and_multimeter():
+    sim, d = spm()
+    assert "DC310PRO" in d.identify().idn
+    d.set("vset", 6.0), d.set("iset", 0.05), d.set("out", True)
+    r = d.poll(0)
+    assert r.values["voltage"] == pytest.approx(2.5) and r.values["current"] == 0.05
+    assert r.values["mode"] == 2 and r.values["prot"] == 0
+    assert r.values["dmm"] == 4.9987 and r.units["dmm"] == "V"
+    for name, value, unit in (("Ω", 10021, "Ω"), ("Capacitance", 101.2e-9, "F"),
+                              ("DC A", 12.34e-3, "A"), ("AC A", 0.12e-6, "A")):
+        d.set("function", name)
+        r = d.poll(0)
+        assert r.values["dmm"] == pytest.approx(value) and r.units["dmm"] == unit
+    d.set("function", "Continuity")
+    assert math.isnan(d.poll(0).values["dmm"])               # OL
+    d.set("ovp", 1.0)
+    assert d.poll(0).values["prot"] == 1 and d.read_setting(d.d.setting("out")) is False
+
+
+def test_spm_refusals_and_limits():
+    sim, d = spm(vmax=20.0)
+    d.identify()
+    with pytest.raises(ValueError, match="must be 0 … 30"):
+        d.set("vset", 31)
+    with pytest.raises(ValueError, match="rejected"):        # the instrument's own ERR
+        d.set("vset", 25)
+    with pytest.raises(ValueError, match="rejected"):
+        d.query("NONSENSE?")
+
+
+def test_spm_asks_again_and_makes_sure_it_is_off():
+    sim, d = spm()
+    d.identify()
+    sim.drop = 2
+    assert d.query("VOLT?") == "5.000"
+    d.set("out", True)
+    sim.drop = 1                                             # the OFF itself is lost
+    d.set_output(False)
+    assert sim.out is False
+    d.set("out", True)
+    sim.drop = 10 ** 6
+    with pytest.raises(TransportError, match="could not be switched off"):
+        d.set_output(False)
+
+
+def test_spm_function_changed_at_the_front_panel():
+    sim, d = spm()
+    d.identify()
+    sim.func = "RES"
+    r = d.poll(0)                        # not ohms shown as volts
+    assert math.isnan(r.values["dmm"])
+    r = d.poll(0)
+    assert r.values["dmm"] == pytest.approx(10021) and r.units["dmm"] == "Ω"
+    assert d.values["function"] == "Ω"
+
+
+def test_spm_firmware_without_the_combined_queries():
+    sim, d = spm(old=True, binary_outp=True)
+    d.identify()
+    d.set("out", True)
+    r = d.poll(0)
+    assert d.values["out"] is True and r.values["voltage"] == pytest.approx(5.0)
+    assert r.values["power"] == pytest.approx(0.5) and math.isnan(r.values["mode"])
+    assert r.values["dmm"] == pytest.approx(4.9987)
+    for _ in range(4):
+        d.poll(0)
+    sim.sent.clear()
+    d.poll(0)
+    assert b"MEAS:ALL:INFO?\n" not in sim.sent               # stops asking
+
+    sim, d = spm(old=True)               # one refusal isn't a verdict
+    d.poll(0)
+    sim.old = False
+    assert d.poll(0).values["mode"] == 0
+
+
+@pytest.mark.parametrize("text,value", [("+0.0007V", 0.0007), ("-12.5mV", -0.0125),
+                                        ("2.4nF", 2.4e-9), ("1.5\xb5A", 1.5e-6),
+                                        ("1.5\xc2\xb5A", 1.5e-6), ("1.2MOhm", 1.2e6),
+                                        ("+000.26Ohm", 0.26), ("+1.0E-04", 1e-4)])
+def test_spm_values(text, value):
+    assert float(ad.OwonSpmAdapter.value(text)) == pytest.approx(value)
+    assert ad.OwonSpmAdapter.value("OL") == ad.OwonSpmAdapter.value("----") == ad.BAD
+
+
 def test_one_answer_per_poll_and_second_unit():
     d = drv("SIM::E4980A")
     asked = []

@@ -50,7 +50,7 @@ MainWindow
 | `instruments/hp3456a.py` | 3456A driver (program codes) |
 | `instruments/bk393.py` | B&K 393 (streamed frames) and 393B (APPA 500-series packets), read-only |
 | `instruments/xdm.py` | OWON XDM1041 / XDM1241 / XDM2041 (flat ASCII commands over serial) |
-| `instruments/adapters.py` | Riden (Modbus), Korad, PX-100, Center 309, 1-Wire, MAX31855/65 and ET44 spoken behind the generic tab; `open_adapter`, `parse_resource` |
+| `instruments/adapters.py` | Riden (Modbus), Korad, PX-100, Center 309, 1-Wire, MAX31855/65, ET44 and OWON SPM / Kiprim Pro spoken behind the generic tab; `open_adapter`, `parse_resource` |
 | `instruments/uart.py`, `gui/uart_panel.py` | Serial console: lines, patterns, `send` / `match` |
 | `identify.py`, `gui/identify_dialog.py` | Read-only probes of one serial port |
 | `roles.py` | Sources, loads and the sinking 66321D, whatever the model (no Qt) |

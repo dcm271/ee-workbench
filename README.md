@@ -18,6 +18,7 @@ A Linux desktop app (PyQt6) for controlling, logging and automating a bench of t
 | Raspberry Pi GPIO header | Name pins, drive relays and resets, pulse a DUT's buttons, read "done" pins, log levels |
 | Bench multimeters (SCPI) | Keysight 34401A/344xxA, Keithley 2000-series and DMM6500/7510, Rigol DM3058/3068, Siglent SDM3000X, any SCPI meter: function, NPLC, readings with their unit |
 | Electronic loads (SCPI) | Rigol DL3021/3031, Siglent SDL1020X/1030X, Keithley 2380 / B&K 8600: CC/CV/CR/CP mode and levels, input, V/I/P readings |
+| Kiprim DC310Pro / DC605Pro, OWON SPM3103 / SPM6053 | Supply with a built-in multimeter: both at once, over USB |
 | Riden RD60xx / RK6006, Korad KA3005P / Tenma 72-2540, Atorch PX-100 / DL24 | Cheap USB supplies and loads, over their own protocols: setpoints, protection, output, readings |
 | Thermometers | Center 309 / Voltcraft K204 loggers (USB); on a Pi: DS18B20, MAX31855 and MAX31865 boards. For the watchdog, the sequencer and battery tests |
 | LCR meters | East Tester ET44/ET45, Keysight E4980A/AL: both parameters, frequency, level, model |

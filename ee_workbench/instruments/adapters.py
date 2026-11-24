@@ -683,8 +683,9 @@ class ScpiAckAdapter(Adapter):
 
     REPLY_S = 2.0
 
-    def _line(self) -> str:
-        end = time.monotonic() + max(self.REPLY_S, self.timeout_s)
+    def _line(self, seconds: float | None = None) -> str:
+        end = time.monotonic() + (max(self.REPLY_S, self.timeout_s) if seconds is None
+                                  else seconds)
         buf = b""
         while time.monotonic() < end:
             chunk = self.link.read_available()
@@ -710,10 +711,151 @@ class ScpiAckAdapter(Adapter):
         return r if "?" in cmd else None
 
 
+# ---------------------------------------------------------------- OWON SPM
+class OwonSpmAdapter(ScpiAckAdapter):
+    """OWON SPM supply + multimeter (Kiprim DC310Pro / DC605Pro): SCPI with
+    silent sets and a bare "ERR" for a refused command. It sometimes drops a
+    query right after a change, and hangs for seconds when commands come without
+    a gap. Besides its own commands:
+
+    ALL?   volts, amps, watts, protection (1 OVP, 2 OCP, 3 OTP), mode
+           (0 standby, 1 CV, 2 CC, 3 failure), from MEAS:ALL:INFO?
+    DMM?   the multimeter's value in V, A, ohm or F, from CONF:ALL?
+    """
+
+    BAUD = 115200
+    REPLY_S = 0.6
+    ERR_S = 0.15                # how long a refusal may take to come
+    GAP = 0.02
+    SETTLE = 0.9                # changing the multimeter's function
+    TRIES = 3
+
+    def __init__(self, link, definition=None):
+        super().__init__(link, definition)
+        self.func = ""          # the multimeter's function, as last asked for
+        self.stale = False      # it was changed at the front panel since
+        self.no_info = self.no_all = 0      # refusals in a row: firmware without it
+
+    def _send(self, cmd: str):
+        time.sleep(self.GAP)
+        self.link.reset_input()
+        self.link.write(cmd.encode("latin1") + b"\n")
+
+    def ask(self, cmd: str) -> str:
+        for _ in range(self.TRIES):
+            self._send(cmd)
+            try:
+                r = self._line(self.REPLY_S)
+            except TransportTimeout:
+                continue
+            if r.upper() == "ERR":
+                raise ValueError(f"the instrument rejected {cmd!r}")
+            return r
+        raise TransportTimeout(f"No reply to {cmd!r}")
+
+    def put(self, cmd: str):
+        self._send(cmd)
+        try:
+            r = self._line(self.ERR_S)
+        except TransportTimeout:
+            return
+        if r.upper() == "ERR":
+            raise ValueError(f"the instrument rejected {cmd!r}")
+
+    def off(self):
+        """Until it says it is off."""
+        why = "it still says ON"
+        for _ in range(4):
+            try:
+                self.put("OUTP OFF")
+                if self.ask("OUTP?").upper() in ("OFF", "0"):
+                    return
+            except (TransportTimeout, ValueError) as e:
+                why = str(e)
+        raise TransportError(f"The output could not be switched off ({why})")
+
+    def set_function(self, cmd: str):
+        want = cmd[5:].strip().upper()
+        self.put(cmd)
+        end = time.monotonic() + 2 * self.SETTLE + 0.5
+        time.sleep(self.SETTLE)
+        while True:
+            self.func = self.ask("FUNC?").strip('"').upper()
+            if self.func == want:
+                self.stale = False
+                return
+            if time.monotonic() > end:
+                raise ValueError(f"the multimeter stayed in {self.func}")
+            time.sleep(0.1)
+
+    def info(self) -> str:
+        if self.no_info < 3:
+            try:
+                f = [x.strip() for x in self.ask("MEAS:ALL:INFO?").split(",")]
+                if len(f) >= 7:
+                    trips = [x.upper() in ("ON", "1") for x in f[3:6]]
+                    prot = trips.index(True) + 1 if any(trips) else 0
+                    self.no_info = 0
+                    return ",".join([*f[:3], str(prot), f[6]])
+                raise ValueError("a short answer")
+            except ValueError:
+                self.no_info += 1
+        v, i = float(self.ask("MEAS:VOLT?")), float(self.ask("MEAS:CURR?"))
+        return f"{v},{i},{v * i:.6g},{BAD},{BAD}"
+
+    @staticmethod
+    def value(text: str) -> str:
+        """'+0.0007V', '2.4nF', '+000.26kOhm', 'OL' -> a number in V, A, ohm, F."""
+        m = re.match(r"^([+-]?\d*\.?\d+(?:[eE][+-]?\d+)?)\s*(.*)$", text.strip())
+        if not m:
+            return BAD                    # OL, Open, ----
+        unit = m.group(2).replace("\xc2", "")       # UTF-8's lead byte of the micro sign
+        k = {"p": -12, "n": -9, "u": -6, "\xb5": -6, "m": -3, "k": 3, "K": 3,
+             "M": 6, "G": 9}.get(unit[:1], 0) if len(unit) > 1 else 0
+        return f"{float(m.group(1)) * 10 ** k:.9g}"
+
+    def meter(self) -> str:
+        func = value = None
+        if self.no_all < 3:
+            try:
+                f = self.ask("CONF:ALL?").split(",")
+                func, value = f[0], f[1]
+                self.no_all = 0
+            except (ValueError, IndexError):
+                self.no_all += 1
+        if value is None:
+            func, _, value = self.ask("CONF?").partition(" ")
+        func = func.strip().strip('"').upper()
+        if self.func and func != self.func:
+            # changed at the front panel: the unit isn't what the caller thinks
+            self.stale = True
+            return BAD
+        return self.value(value)
+
+    def handle(self, cmd):
+        up = cmd.upper()
+        if up == "ALL?":
+            return self.info()
+        if up == "DMM?":
+            return self.meter()
+        if up == "FUNC?":
+            self.func = self.ask(cmd).strip('"').upper()
+            self.stale = False
+            return self.func
+        if "?" in cmd:
+            return self.ask(cmd)
+        if up.startswith("FUNC:"):
+            return self.set_function(cmd)
+        if up in ("OUTP OFF", "OUTP 0"):
+            return self.off()
+        return self.put(cmd)
+
+
 ADAPTERS = {"riden": RidenAdapter, "korad": KoradAdapter, "px100": Px100Adapter,
             "center": CenterAdapter, "w1": W1Adapter, "max31855": Max31855Adapter,
-            "max31865": Max31865Adapter, "scpi-ack": ScpiAckAdapter}
-SERIAL = {"riden", "korad", "px100", "center", "scpi-ack"}
+            "max31865": Max31865Adapter, "scpi-ack": ScpiAckAdapter,
+            "owon-spm": OwonSpmAdapter}
+SERIAL = {"riden", "korad", "px100", "center", "scpi-ack", "owon-spm"}
 SPI = {"max31855", "max31865"}
 
 

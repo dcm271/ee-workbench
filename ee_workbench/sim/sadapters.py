@@ -256,6 +256,78 @@ class SimAck(_Link):
                 self._out += b"exec success\r\n"
 
 
+class SimSpm(_Link):
+    """OWON SPM / Kiprim Pro: a supply on 50 ohm, and a multimeter."""
+    LOAD = 50.0
+    DMM = {"VOLT:DC": "+4.9987V", "VOLT:AC": "+0.0012V", "CURR:DC": "+12.34mA",
+           "CURR:AC": "+0.12uA", "RES": "+10.021kOhm", "CAP": "101.2nF", "DIOD": "+0.6123V",
+           "CONT": "OL"}
+
+    def __init__(self, idn="KIPRIM,DC310PRO,25010001,FV:V2.1.0", vmax=32.0, imax=10.2):
+        super().__init__()
+        self.idn, self.vmax, self.imax = idn, vmax, imax
+        self.v, self.i, self.ovp, self.ocp, self.out = 5.0, 1.0, vmax, imax, False
+        self.func, self.trip = "VOLT:DC", ""
+        self.drop = 0            # ignore this many lines
+        self.old = False         # firmware without the combined queries
+        self.binary_outp = False
+
+    def _num(self, text, hi):
+        x = float(text)
+        if not 0 <= x <= hi:
+            raise ValueError
+        return x
+
+    def _line(self, c):
+        i = min(self.v / self.LOAD, self.i) if self.out else 0.0
+        v = i * self.LOAD
+        if self.out and v > self.ovp:
+            self.out, self.trip, v, i = False, "OVP", 0.0, 0.0
+        cc = self.out and self.v / self.LOAD > self.i
+        mode = 3 if self.trip else 0 if not self.out else 2 if cc else 1
+        trips = ",".join("ON" if self.trip == t else "OFF" for t in ("OVP", "OCP", "OTP"))
+        head, _, arg = c.partition(" ")
+        q = {"*IDN?": self.idn, "VOLT?": f"{self.v:.3f}", "CURR?": f"{self.i:.3f}",
+             "VOLT:LIM?": f"{self.ovp:.3f}", "CURR:LIM?": f"{self.ocp:.3f}",
+             "OUTP?": ("01"[self.out] if self.binary_outp else "ON" if self.out else "OFF"),
+             "MEAS:VOLT?": f"{v:.3f}", "MEAS:CURR?": f"{i:.3f}", "FUNC?": self.func,
+             "CONF?": f"{self.func} +4.9987E+00"}
+        if not self.old:
+            q["MEAS:ALL:INFO?"] = f"{v:.3f},{i:.3f},{v * i:.3f},{trips},{mode}"
+            q["CONF:ALL?"] = f"{self.func},{self.DMM[self.func]},AUTO,20V"
+        if c in q:
+            return q[c]
+        if head == "VOLT":
+            self.v = self._num(arg, self.vmax)
+        elif head == "CURR":
+            self.i = self._num(arg, self.imax)
+        elif head == "VOLT:LIM":
+            self.ovp = self._num(arg, self.vmax)
+        elif head == "CURR:LIM":
+            self.ocp = self._num(arg, self.imax)
+        elif c in ("OUTP ON", "OUTP OFF"):
+            self.out, self.trip = c == "OUTP ON", ""
+        elif head.startswith("FUNC:") and head[5:] in self.DMM:
+            self.func = head[5:]
+        else:
+            raise ValueError
+        return None
+
+    def on_bytes(self, data):
+        for c in data.decode().split("\n"):
+            if not c:
+                continue
+            if self.drop:
+                self.drop -= 1
+                continue
+            try:
+                r = self._line(c)
+            except ValueError:
+                r = "ERR"
+            if r is not None:
+                self._out += r.encode() + b"\n"
+
+
 def sim_link(d):
     p = d.protocol
     if p == "riden":
@@ -272,4 +344,7 @@ def sim_link(d):
         return SimSpi(p, d.probes)
     if p == "scpi-ack":
         return SimAck(d)
+    if p == "owon-spm":
+        return SimSpm() if d.id == "DC310PRO" else \
+            SimSpm("KIPRIM,DC605PRO,25010001,FV:V2.1.0", 62.0, 5.1)
     raise ValueError(f"no simulator for {p}")

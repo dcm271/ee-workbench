@@ -40,7 +40,7 @@ A definition says what to send and how to read the answer:
 
 Instruments that don't speak SCPI have two more keys, see adapters.py:
 
-    protocol = "riden"                 # riden, korad, px100, center, w1, max31855, …
+    protocol = "riden"                 # riden, korad, px100, owon-spm, center, w1, …
     baud = 115200                      # serial speed (default: the protocol's usual one)
 
 Built-in definitions are in instruments/scpi_defs/; your own go in
@@ -579,6 +579,9 @@ class ScpiDriver:
                     raise ValueError(f"{q}: no field {r.field} in {','.join(answers[q])!r}")
                 out.values[r.name] = parse_number(answers[q][r.field])
             out.units[r.name] = self.unit(r)
+        if getattr(self.t, "stale", False):
+            # a setting was changed at the front panel: units follow from here on
+            self.read_settings()
         return out
 
     def close(self):
