@@ -24,6 +24,13 @@ ROOT = Path(__file__).resolve().parent.parent
 BRANDING = Path(__file__).resolve().parent / "gui" / "branding"
 
 
+def safe_output():
+    """print() never fails on a terminal that can't show a character (Latin-1 locale)."""
+    for f in (sys.stdout, sys.stderr):
+        if hasattr(f, "reconfigure"):
+            f.reconfigure(errors="replace")
+
+
 def revision() -> str:
     """The git commit this copy is at, "+" when it has changes ("" unknown)."""
     if not (ROOT / ".git").exists():
@@ -31,7 +38,8 @@ def revision() -> str:
     try:
         def git(*a):
             return subprocess.run(["git", "-C", str(ROOT), *a], capture_output=True, text=True,
-                                  timeout=2, check=True).stdout.strip()
+                                  timeout=2, check=True, encoding="utf-8",
+                                  errors="replace").stdout.strip()
         return git("rev-parse", "--short", "HEAD") + ("+" if git("status", "--porcelain") else "")
     except (OSError, subprocess.SubprocessError):
         return ""

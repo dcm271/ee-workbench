@@ -115,9 +115,9 @@ def test_crash_marker(cfgdir):
     safety.write_marker([{"resource": "SIM::66321D", "model": "auto"}])
     assert safety.previous_run() is None             # our own process: not a crash
     p = safety.marker_path()
-    d = json.loads(p.read_text())
+    d = json.loads(p.read_text(encoding="utf-8"))
     d["pid"] = 2 ** 22 + 12345                      # a process that isn't running
-    p.write_text(json.dumps(d))
+    p.write_text(json.dumps(d), encoding="utf-8")
     prev = safety.previous_run()
     assert prev["open"][0]["resource"] == "SIM::66321D"
     safety.clear_marker()
@@ -126,7 +126,7 @@ def test_crash_marker(cfgdir):
 
 def test_damaged_marker_counts_as_a_crash(cfgdir):
     safety.marker_path().parent.mkdir(parents=True)
-    safety.marker_path().write_text("{nope")
+    safety.marker_path().write_text("{nope", encoding="utf-8")
     assert safety.previous_run()["damaged"]
 
 
@@ -160,7 +160,7 @@ def test_results_db_history_and_yield(tmp_path):
     assert db.products() == ["Board", "Other"]
     out = tmp_path / "r.csv"
     assert db.export_csv(str(out)) == 4
-    assert out.read_text().splitlines()[0].startswith("id,serial,product")
+    assert out.read_text(encoding="utf-8").splitlines()[0].startswith("id,serial,product")
     with pytest.raises(ValueError):
         db.add("x", "", "", t, "MAYBE")
 
@@ -235,7 +235,7 @@ def test_gui_outputs_off_on_quit_and_marker(qapp, cfgdir):
     win = MainWindow([("auto", "SIM::DL3021")], Config(), None)
     p = win.panels()[0]
     assert _wait(qapp, lambda: p.connected)
-    assert json.loads(safety.marker_path().read_text())["open"][0]["resource"] == "SIM::DL3021"
+    assert json.loads(safety.marker_path().read_text(encoding="utf-8"))["open"][0]["resource"] == "SIM::DL3021"
     sent = []
     real = ScpiDriver.set_output
     ScpiDriver.set_output = lambda self, on: (sent.append(on), real(self, on))[1]
@@ -257,8 +257,8 @@ def test_gui_off_after_crash(qapp, cfgdir):
     safety.marker_path().parent.mkdir(parents=True, exist_ok=True)
     safety.marker_path().write_text(json.dumps({"pid": 2 ** 22 + 999, "started": "x",
                                                 "open": [{"resource": "SIM::E36312A",
-                                                          "model": "SCPI:E36312A"}]}))
-    (cfgdir / "bench.json").write_text(json.dumps({"safety": {"off_after_crash": True}}))
+                                                          "model": "SCPI:E36312A"}]}), encoding="utf-8")
+    (cfgdir / "bench.json").write_text(json.dumps({"safety": {"off_after_crash": True}}), encoding="utf-8")
     from otterbench.instruments.scpi_generic import ScpiDriver
     sent = []
     real = ScpiDriver.set_output

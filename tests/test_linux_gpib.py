@@ -26,7 +26,7 @@ def run(code, lib):
     env = dict(os.environ, OTTERBENCH_GPIB_LIB=lib, PYTHONPATH=str(HERE.parent))
     env.pop("OTTERBENCH_VISA_LIB", None)
     r = subprocess.run([sys.executable, "-W", "ignore", "-c", code], env=env, timeout=60,
-                       capture_output=True, text=True)
+                       capture_output=True, text=True, encoding="utf-8", errors="replace")
     assert r.returncode == 0, r.stderr
     return r.stdout.split()
 

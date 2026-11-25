@@ -72,7 +72,7 @@ def write_checkpoint(path, plan: dict, next_pass: int, total: int):
     try:
         tmp = path.with_suffix(".tmp")
         tmp.write_text(json.dumps({"plan": plan, "next_pass": next_pass, "total": total,
-                                   "saved": time.strftime("%Y-%m-%dT%H:%M:%S")}))
+                                   "saved": time.strftime("%Y-%m-%dT%H:%M:%S")}), encoding="utf-8")
         os.replace(tmp, path)
     except OSError:
         pass
@@ -81,7 +81,7 @@ def write_checkpoint(path, plan: dict, next_pass: int, total: int):
 def read_checkpoint(path) -> dict | None:
     import json
     try:
-        d = json.loads(path.read_text())
+        d = json.loads(path.read_text(encoding="utf-8"))
         if isinstance(d, dict) and isinstance(d.get("plan"), dict) \
                 and int(d.get("next_pass", -1)) >= 0:
             return d
@@ -569,7 +569,7 @@ class SequencerWindow(QMainWindow):
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
         tmp = path.with_name(path.name + ".tmp")
-        with open(tmp, "w") as fh:
+        with open(tmp, "w", encoding="utf-8") as fh:
             json.dump(self._state(), fh, indent=1)
         tmp.replace(path)            # atomic: a crash mid-write can't leave half a file
 
@@ -577,7 +577,7 @@ class SequencerWindow(QMainWindow):
         """quiet: the remembered sequence at start-up; a missing or damaged
         one just gives an empty table (a damaged file is kept as .bad)."""
         try:
-            with open(path) as fh:
+            with open(path, encoding="utf-8") as fh:
                 d = json.load(fh)
             if not isinstance(d, dict):
                 raise ValueError("not a sequence (expected a JSON object)")
@@ -617,7 +617,7 @@ class SequencerWindow(QMainWindow):
             self, "Save results", time.strftime("sequence_%Y%m%d_%H%M%S.csv"), "CSV (*.csv)")
         if path:
             try:
-                with open(path, "w", newline="") as fh:
+                with open(path, "w", newline="", encoding="utf-8") as fh:
                     w = csv.DictWriter(fh, self.columns, extrasaction="ignore")
                     w.writeheader()
                     w.writerows(self.rows)

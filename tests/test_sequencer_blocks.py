@@ -205,8 +205,8 @@ def test_command_takes_its_children_along(tmp_path):
                       lambda s: None)
     assert "not finished" in res.problem
     time.sleep(0.2)
-    stat = f"/proc/{pid.read_text().strip()}/stat"
-    assert not os.path.exists(stat) or open(stat).read().split()[2] == "Z"
+    stat = f"/proc/{pid.read_text(encoding="utf-8").strip()}/stat"
+    assert not os.path.exists(stat) or open(stat, encoding="utf-8").read().split()[2] == "Z"
 
 
 def test_command_isnt_in_the_remote_api():

@@ -152,7 +152,7 @@ class SimSigrokCli:
         if "-i" in args and "-O" in args:
             rate, names, data = read_sr(args[args.index("-i") + 1])
             path = args[args.index("-o") + 1]
-            with open(path, "w") as fh:
+            with open(path, "w", encoding="utf-8") as fh:
                 fh.write("time," + ",".join(names[b] for b in sorted(names)) + "\n")
                 for i, v in enumerate(data):
                     fh.write(f"{i / rate:.9f}," + ",".join(str((int(v) >> b) & 1)

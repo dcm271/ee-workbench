@@ -577,13 +577,13 @@ class CaptureTab(QWidget):
             ImageExporter(self.plot.getPlotItem()).export(path)
         else:
             unit = "current_A" if spec.what == "CURR" else "voltage_V"
-            with open(path, "w", newline="") as fh:
+            with open(path, "w", newline="", encoding="utf-8") as fh:
                 w = csv.writer(fh)
                 w.writerow(["t_s", "segment", unit])
                 for k, seg in enumerate(self.segments):
                     for t, val in zip(self.seg_x, seg):
                         w.writerow([f"{t:.7e}", k + 1, f"{val:.6e}"])
-            with open(path, "a") as fh:
+            with open(path, "a", encoding="utf-8") as fh:
                 fh.write(f"# trigger={spec.trigger} points={spec.points} interval_s={spec.tint}"
                          f" pre={spec.pre} level={spec.level} slope={spec.slope}\n")
         self.p.message.emit(f"Saved {path}")
@@ -594,7 +594,7 @@ class CaptureTab(QWidget):
             return
         try:
             rows = []
-            with open(path, newline="") as fh:
+            with open(path, newline="", encoding="utf-8", errors="replace") as fh:
                 rd = csv.reader(fh)
                 header = next(rd)
                 for r in rd:

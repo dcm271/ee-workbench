@@ -426,7 +426,7 @@ class SystemTab(QWidget):
 
     def _read_presets(self) -> dict:
         try:
-            return json.loads(self._preset_path().read_text())
+            return json.loads(self._preset_path().read_text(encoding="utf-8"))
         except Exception:
             return {}
 
@@ -447,7 +447,7 @@ class SystemTab(QWidget):
         path = self._preset_path()
         path.parent.mkdir(parents=True, exist_ok=True)
         tmp = path.with_suffix(".tmp")
-        tmp.write_text(json.dumps(data, indent=2))
+        tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
         tmp.replace(path)
         self._load_presets()
         select(self.preset, name.strip())
@@ -459,7 +459,7 @@ class SystemTab(QWidget):
             return
         data = self._read_presets()
         data.pop(name, None)
-        self._preset_path().write_text(json.dumps(data, indent=2))
+        self._preset_path().write_text(json.dumps(data, indent=2), encoding="utf-8")
         self._load_presets()
 
     def _apply_preset(self):

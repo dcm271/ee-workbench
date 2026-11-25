@@ -280,7 +280,7 @@ class ProductionWindow(QMainWindow):
                                    seq.logbox.toPlainText(), getattr(seq, "run_insts", []),
                                    outcome, self.started,
                                    images=getattr(seq.bench, "images", None))
-            (folder / name).write_text(html)
+            (folder / name).write_text(html, encoding="utf-8")
             return str(folder / name)
         except OSError as e:
             self.main.status.showMessage(f"Couldn't save the unit report: {e}", 15000)

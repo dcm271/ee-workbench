@@ -79,7 +79,7 @@ def current() -> Wiring:
     global _current
     if _current is None:
         try:
-            _current = Wiring.from_dict(json.loads(path().read_text()))
+            _current = Wiring.from_dict(json.loads(path().read_text(encoding="utf-8")))
         except (OSError, ValueError):
             _current = Wiring()
     return _current
@@ -96,5 +96,5 @@ def set_current(w: Wiring):
     if not old.empty and p.exists():
         os.replace(p, p.with_suffix(".json.old"))
     tmp = p.with_suffix(".tmp")
-    tmp.write_text(json.dumps(w.to_dict()))
+    tmp.write_text(json.dumps(w.to_dict()), encoding="utf-8")
     os.replace(tmp, p)

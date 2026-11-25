@@ -141,11 +141,11 @@ def test_serial_number_is_hidden(tmp_path):
                           "detail": "RIGOL,DP832,DP8A123456,00.01"}])
     p = tmp_path / "a.tape"
     tape.save(tp, str(p))
-    assert "DP8A123456" not in p.read_text()
+    assert "DP8A123456" not in p.read_text(encoding="utf-8")
     back = tape.load(str(p))
     assert back.events[0][2] == "RIGOL,DP832,XXXXXXXXXX,00.01" and back.events[2] == ev[2]
     tape.save(tp, str(p), hide_serial=False)
-    assert "DP8A123456" in p.read_text()
+    assert "DP8A123456" in p.read_text(encoding="utf-8")
 
 
 def test_serial_number_in_a_byte_stream():
@@ -183,7 +183,7 @@ def test_replay_answers_by_command():
                                   '{"otterbench_tape": 1}\n{"x": 1}', '{"otterbench_tape": 1}\n["r'])
 def test_damaged_tapes_are_refused(text, tmp_path):
     p = tmp_path / "bad.tape"
-    p.write_text(text)
+    p.write_text(text, encoding="utf-8")
     with pytest.raises(tape.TapeError):
         tape.load(str(p))
 
@@ -204,16 +204,16 @@ def test_tap_is_off_and_bounded(monkeypatch):
 
 
 def test_mark_tested(tmp_path):
-    src = (builtin_dir() / "DP832.toml").read_text()
+    src = (builtin_dir() / "DP832.toml").read_text(encoding="utf-8")
     p = tmp_path / "DP832.toml"
-    p.write_text(src)
+    p.write_text(src, encoding="utf-8")
     text = hwcheck.tested_text("RIGOL,DP832,DP8A1,00.01.16", "output", "2026-11-24")
     assert text == "DP832 fw 00.01.16, 2026-11-24, output"
     import tomllib
     for txt in (text, "again"):
         hwcheck.mark_tested(str(p), txt)
-        d = parse_definition(tomllib.loads(p.read_text()), str(p))
-        assert d.tested == txt and p.read_text().count("\ntested =") == 1
+        d = parse_definition(tomllib.loads(p.read_text(encoding="utf-8")), str(p))
+        assert d.tested == txt and p.read_text(encoding="utf-8").count("\ntested =") == 1
     assert len(d.settings) == len(definitions()["DP832"].settings)
     with pytest.raises(ValueError):
         hwcheck.mark_tested(str(p), 'a"b')

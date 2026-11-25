@@ -5,7 +5,7 @@ from otterbench.config import (Entry, Session, config_dir, load_config, migrate_
 def test_first_run_writes_commented_template(tmp_path):
     path = tmp_path / "config.toml"
     cfg = load_config(path)
-    assert path.exists() and "[startup]" in path.read_text()
+    assert path.exists() and "[startup]" in path.read_text(encoding="utf-8")
     assert cfg.open == "last" and cfg.instruments == [] and not cfg.warning
     # the template itself parses to the same defaults
     assert load_config(path).open == "last"
@@ -27,7 +27,7 @@ resource = "GPIB0::22::INSTR"
 model = "3456A"
 name = "E3610A output"
 function = "DCV"
-''')
+''', encoding="utf-8")
     cfg = load_config(path)
     assert cfg.open == "list" and cfg.wait_for_gpib == 5
     plan = startup_entries(cfg, Session(tmp_path / "s.json"))
@@ -38,10 +38,10 @@ function = "DCV"
 
 def test_bad_config_falls_back(tmp_path):
     path = tmp_path / "config.toml"
-    path.write_text("[startup\nopen = ")
+    path.write_text("[startup\nopen = ", encoding="utf-8")
     cfg = load_config(path)
     assert cfg.open == "last" and cfg.warning
-    path.write_text('[startup]\nopen = "everything"\n')
+    path.write_text('[startup]\nopen = "everything"\n', encoding="utf-8")
     cfg = load_config(path)
     assert cfg.open == "last" and "everything" in cfg.warning
 
@@ -73,7 +73,7 @@ def test_scan_uses_remembered_models(tmp_path):
 
 
 def test_corrupt_session_is_ignored(tmp_path):
-    (tmp_path / "last-session.json").write_text("{not json")
+    (tmp_path / "last-session.json").write_text("{not json", encoding="utf-8")
     assert Session(tmp_path / "last-session.json").open == []
 
 
@@ -81,9 +81,9 @@ def _old_dir(tmp_path, monkeypatch):
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
     old = tmp_path / "ee-workbench"
     (old / "setups").mkdir(parents=True)
-    (old / "setups" / "a.json").write_text("{}")
-    (old / "config.toml").write_text("[startup]\nopen = 'none'\n")
-    (old / "crash.log").write_text("old")
+    (old / "setups" / "a.json").write_text("{}", encoding="utf-8")
+    (old / "config.toml").write_text("[startup]\nopen = 'none'\n", encoding="utf-8")
+    (old / "crash.log").write_text("old", encoding="utf-8")
     return old
 
 
@@ -99,17 +99,17 @@ def test_settings_from_the_old_name_are_moved(tmp_path, monkeypatch):
 def test_migration_keeps_newer_files(tmp_path, monkeypatch):
     old = _old_dir(tmp_path, monkeypatch)
     config_dir().mkdir()                 # e.g. run.sh logged a crash first
-    (config_dir() / "crash.log").write_text("new")
+    (config_dir() / "crash.log").write_text("new", encoding="utf-8")
     assert migrate_old_dir() == ""
-    assert (config_dir() / "crash.log").read_text() == "new"
-    assert (old / "crash.log").read_text() == "old"
+    assert (config_dir() / "crash.log").read_text(encoding="utf-8") == "new"
+    assert (old / "crash.log").read_text(encoding="utf-8") == "old"
     assert (config_dir() / "config.toml").exists()
 
 
 def test_migration_happens_once(tmp_path, monkeypatch):
     old = _old_dir(tmp_path, monkeypatch)
     config_dir().mkdir()
-    (config_dir() / "config.toml").write_text("")
+    (config_dir() / "config.toml").write_text("", encoding="utf-8")
     assert migrate_old_dir() == ""
     assert (old / "config.toml").exists() and not (config_dir() / "setups").exists()
 

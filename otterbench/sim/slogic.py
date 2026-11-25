@@ -234,7 +234,7 @@ class SimLogic2:
     def export_csv(self, directory, digital, analog):
         cap = self._need()
         cfg, sh = cap["cfg"], self._shift
-        with open(os.path.join(directory, "digital.csv"), "w", newline="") as fh:
+        with open(os.path.join(directory, "digital.csv"), "w", newline="", encoding="utf-8") as fh:
             w = csv.writer(fh)
             w.writerow(["Time [s]"] + [f"Channel {c}" for c in digital])
             chans = [channel_edges(c, cap["a"], cap["b"], cfg.digital_rate, self._app0)
@@ -269,14 +269,14 @@ class SimLogic2:
                     rows.append([label, "data", f"{t - self._shift:.9f}",
                                  f"{10 / UART_BAUD:.9f}", f"0x{byte:02X}", ""])
         rows.sort(key=lambda r: float(r[2]))
-        with open(path, "w", newline="") as fh:
+        with open(path, "w", newline="", encoding="utf-8") as fh:
             w = csv.writer(fh)
             w.writerow(["name", "type", "start_time", "duration", "data", "error"])
             w.writerows(rows)
 
     def save(self, path):
         self._need()
-        with open(path, "w") as fh:
+        with open(path, "w", encoding="utf-8") as fh:
             fh.write("Simulated Saleae capture: there is nothing for Logic 2 to open.\n")
 
     def clear(self):

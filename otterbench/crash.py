@@ -125,7 +125,7 @@ def install():
             p.parent.mkdir(parents=True, exist_ok=True)
             if p.exists() and p.stat().st_size > MAX_LOG:
                 os.replace(p, p.with_name(p.name + ".1"))
-            _fault_fh = open(p, "a", buffering=1)
+            _fault_fh = open(p, "a", buffering=1, encoding="utf-8")
             _fault_fh.write(f"---- {time.strftime('%Y-%m-%d %H:%M:%S')}  pid {os.getpid()} "
                             "started\n")
             faulthandler.enable(_fault_fh, all_threads=True)

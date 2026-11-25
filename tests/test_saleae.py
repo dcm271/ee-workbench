@@ -59,7 +59,7 @@ def test_bad_files():
 def test_read_export_ignores_other_files(tmp_path):
     write_digital(tmp_path / "digital_1.bin", 0, 0, 1, np.array([0.5]), 1e6)
     write_analog(tmp_path / "analog_2.bin", 0, 1000, 1, np.zeros(10))
-    (tmp_path / "notes.txt").write_text("x")
+    (tmp_path / "notes.txt").write_text("x", encoding="utf-8")
     d, a = read_export(str(tmp_path))
     assert list(d) == [1] and list(a) == [2]
 
@@ -244,7 +244,7 @@ def test_save_and_csv(drv, tmp_path):
     drv.save(str(tmp_path / "x.sal"))
     drv.export_csv(str(tmp_path))
     assert (tmp_path / "x.sal").exists()
-    lines = (tmp_path / "digital.csv").read_text().splitlines()
+    lines = (tmp_path / "digital.csv").read_text(encoding="utf-8").splitlines()
     assert lines[0] == "Time [s],Channel 0,Channel 2" and len(lines) > 100
 
 

@@ -497,8 +497,8 @@ class W1Link:
         try:
             f = self.base / name / "temperature"
             if f.exists():
-                return float(f.read_text()) / 1000
-            text = (self.base / name / "w1_slave").read_text()
+                return float(f.read_text(encoding="utf-8")) / 1000
+            text = (self.base / name / "w1_slave").read_text(encoding="utf-8")
         except (OSError, ValueError):
             return math.nan
         m = re.search(r"t=(-?\d+)", text)

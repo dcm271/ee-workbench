@@ -209,14 +209,15 @@ class SigrokLink:
 
     def run(self, args: list[str], timeout: float | None = None) -> tuple[int, str, str]:
         p = subprocess.run([self.exe] + args, capture_output=True, text=True,
-                           timeout=timeout or self.timeout_s)
+                           timeout=timeout or self.timeout_s, encoding="utf-8", errors="replace")
         return p.returncode, p.stdout, p.stderr
 
     def spawn(self, args: list[str]) -> subprocess.Popen:
         # stdin must stay open: a continuous capture ends at once when it reads
         # end-of-file there (as it would from /dev/null under a desktop launcher).
         return subprocess.Popen([self.exe] + args, stdin=subprocess.PIPE,
-                                stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
+                                stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True,
+                                encoding="utf-8", errors="replace")
 
     # what the worker expects of every transport
     def clear(self):
@@ -240,7 +241,7 @@ def find_sigrok(drivers: list[str] | None = None) -> list[str]:
     def scan(drv):
         try:
             p = subprocess.run([exe, "-d", drv, "--scan"], capture_output=True, text=True,
-                               timeout=5)
+                               timeout=5, encoding="utf-8", errors="replace")
             found[drv] = [d["spec"] for d in parse_scan(p.stdout)]
         except Exception:
             found[drv] = []

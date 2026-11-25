@@ -159,7 +159,7 @@ class MainWindow(QMainWindow):
         bench.json loses only the damaged entries, never the start-up."""
         import json
         try:
-            d = json.loads(self._bench_file().read_text())
+            d = json.loads(self._bench_file().read_text(encoding="utf-8"))
             if not isinstance(d, dict):
                 raise ValueError("not a JSON object")
         except FileNotFoundError:
@@ -190,7 +190,7 @@ class MainWindow(QMainWindow):
         try:
             p.parent.mkdir(parents=True, exist_ok=True)
             tmp = p.with_suffix(".tmp")
-            tmp.write_text(json.dumps(d, indent=1, default=json_default))
+            tmp.write_text(json.dumps(d, indent=1, default=json_default), encoding="utf-8")
             os.replace(tmp, p)
         except (OSError, TypeError, ValueError) as e:
             crash.write_log(f"Couldn't save {p}: {e}")

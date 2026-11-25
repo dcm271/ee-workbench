@@ -63,14 +63,14 @@ def test_definition_files(tmp_path):
             'accuracy="%s"\n[[setting]]\nname="f"\nkind="choice"\noptions=[{label="DC V",'
             'set="X",accuracy="%s"}]\n')
     p = tmp_path / "t.toml"
-    p.write_text(text % ("1% + 1m", "0.1%"))
-    d = sg.parse_definition(tomllib.loads(p.read_text()), str(p))
+    p.write_text(text % ("1% + 1m", "0.1%"), encoding="utf-8")
+    d = sg.parse_definition(tomllib.loads(p.read_text(encoding="utf-8")), str(p))
     assert d.readings[0].accuracy == "1% + 1m"
     assert d.settings[0].options[0].accuracy == "0.1%"
     for bad in (("1 parsec", "0.1%"), ("1%", "0.1 parsec")):
-        p.write_text(text % bad)
+        p.write_text(text % bad, encoding="utf-8")
         with pytest.raises(sg.DefinitionError, match="accuracy"):
-            sg.parse_definition(tomllib.loads(p.read_text()), str(p))
+            sg.parse_definition(tomllib.loads(p.read_text(encoding="utf-8")), str(p))
 
 
 def test_entries_keep_it(tmp_path):
@@ -79,9 +79,9 @@ def test_entries_keep_it(tmp_path):
     e.accuracy = {"DC V": "0.1%"}
     log.save()
     assert cal.Log(tmp_path / "c.json").entries[0].accuracy == {"DC V": "0.1%"}
-    d = json.loads((tmp_path / "c.json").read_text())
+    d = json.loads((tmp_path / "c.json").read_text(encoding="utf-8"))
     d["instruments"][0]["accuracy"] = "nonsense"
-    (tmp_path / "c.json").write_text(json.dumps(d))
+    (tmp_path / "c.json").write_text(json.dumps(d), encoding="utf-8")
     assert cal.Log(tmp_path / "c.json").entries[0].accuracy == {}
 
 

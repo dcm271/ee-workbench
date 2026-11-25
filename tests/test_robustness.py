@@ -36,7 +36,7 @@ def test_crash_report_logs_once_per_minute(cfgdir, monkeypatch):
     finally:
         crash.set_notifier(None)
     assert seen == ["ZeroDivisionError: division by zero"]
-    log = crash.log_path().read_text()
+    log = crash.log_path().read_text(encoding="utf-8")
     assert log.count("ZeroDivisionError") == 1
 
 
@@ -45,7 +45,7 @@ def test_crash_log_rotates(cfgdir, monkeypatch):
     crash.write_log("x" * 200)
     crash.write_log("second")
     assert crash.log_path().with_name("crash.log.1").exists()
-    assert "second" in crash.log_path().read_text()
+    assert "second" in crash.log_path().read_text(encoding="utf-8")
 
 
 # ---------------------------------------------------------------- start-up files
@@ -53,7 +53,7 @@ def test_damaged_last_session_keeps_good_entries(tmp_path):
     p = tmp_path / "last-session.json"
     p.write_text(json.dumps({"open": [{"model": "3456A"}, "junk",
                                       {"resource": "SIM::PPK2", "settings": [1, 2]}],
-                             "known": {"x": None, "SIM::6632A": {"resource": "SIM::6632A"}}}))
+                             "known": {"x": None, "SIM::6632A": {"resource": "SIM::6632A"}}}), encoding="utf-8")
     s = config.Session(p)
     assert [e.resource for e in s.open] == ["SIM::PPK2"]
     assert s.open[0].settings == {}
@@ -63,7 +63,7 @@ def test_damaged_last_session_keeps_good_entries(tmp_path):
 @pytest.mark.parametrize("text", ["[1, 2]", "not json", '{"open": 5, "known": []}'])
 def test_unreadable_last_session_is_empty(tmp_path, text):
     p = tmp_path / "last-session.json"
-    p.write_text(text)
+    p.write_text(text, encoding="utf-8")
     s = config.Session(p)
     assert s.open == [] and s.known == {}
 
@@ -71,13 +71,13 @@ def test_unreadable_last_session_is_empty(tmp_path, text):
 def test_session_save_handles_numpy(tmp_path):
     s = config.Session(tmp_path / "ls.json")
     s.save([config.Entry("SIM::PPK2", "PPK2", {"v": np.float64(3.3), "n": np.int32(4)})])
-    d = json.loads((tmp_path / "ls.json").read_text())
+    d = json.loads((tmp_path / "ls.json").read_text(encoding="utf-8"))
     assert d["open"][0]["settings"] == {"v": 3.3, "n": 4}
 
 
 def test_config_startup_not_a_table(tmp_path):
     p = tmp_path / "config.toml"
-    p.write_text('startup = 1\ninstrument = "x"\n')
+    p.write_text('startup = 1\ninstrument = "x"\n', encoding="utf-8")
     cfg = config.load_config(p)
     assert cfg.open == "last" and cfg.instruments == []
     assert "table" in cfg.warning
@@ -144,7 +144,7 @@ def test_session_reader_rejects_foreign_file(tmp_path):
     db.close()
     with pytest.raises(ValueError):
         SessionReader(str(p))
-    p.write_text("not a database")
+    p.write_text("not a database", encoding="utf-8")
     with pytest.raises(sqlite3.DatabaseError):
         SessionReader(str(p))
 
@@ -161,7 +161,7 @@ def test_damaged_setup_rejected_before_anything_closes(cfgdir):
         {"resource": "SIM::PPK2", "model": "auto", "settings": {}}]
     p = setups._file("broken")
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text("[1, 2]")
+    p.write_text("[1, 2]", encoding="utf-8")
     with pytest.raises(ValueError):
         setups.load_setup("broken")
 

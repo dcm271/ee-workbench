@@ -127,7 +127,7 @@ class Log:
     def load(self):
         self.entries, self.error = [], ""
         try:
-            d = json.loads(self.path.read_text())
+            d = json.loads(self.path.read_text(encoding="utf-8"))
             for x in d["instruments"]:
                 try:
                     self.entries.append(Entry.from_dict(x))
@@ -148,7 +148,7 @@ class Log:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         tmp = self.path.with_suffix(".tmp")
         tmp.write_text(json.dumps({"instruments": [asdict(e) for e in self.entries]}, indent=1,
-                                  ensure_ascii=False))
+                                  ensure_ascii=False), encoding="utf-8")
         os.replace(tmp, self.path)
         from .accuracy import forget
         forget()

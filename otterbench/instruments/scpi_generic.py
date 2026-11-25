@@ -339,7 +339,7 @@ def definitions(reload: bool = False) -> dict[str, Definition]:
             files = []
         for f in files:
             try:
-                d = parse_definition(tomllib.loads(f.read_text()), str(f), builtin)
+                d = parse_definition(tomllib.loads(f.read_text(encoding="utf-8")), str(f), builtin)
             except (OSError, tomllib.TOMLDecodeError, DefinitionError, TypeError,
                     ValueError) as e:
                 PROBLEMS.append(f"{f}: {e}" if str(f) not in str(e) else str(e))

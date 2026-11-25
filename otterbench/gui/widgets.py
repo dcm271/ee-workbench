@@ -261,7 +261,7 @@ class CsvRecorder:
         if not path:
             return False
         try:
-            fh = open(path, "w", newline="")
+            fh = open(path, "w", newline="", encoding="utf-8")
             w = csv.writer(fh)
             w.writerow(header)
         except OSError as e:

@@ -91,7 +91,7 @@ def test_mask_files(tmp_path):
     assert list(m) == [2] and m[2].name == "x" and m[2].check(t, t)[0] == 0
     for bad in ("[]", "{}", '{"a": {}}', '{"1": {"otterbench_mask": 1}}',
                 '{"1": {"otterbench_mask": 1, "t": [0, 1], "lo": [2, 2], "hi": [1, 1]}}'):
-        open(p, "w").write(bad)
+        open(p, "w", encoding="utf-8").write(bad)
         with pytest.raises(ValueError):
             mask.load(p)
 
@@ -123,17 +123,17 @@ def test_wave():
 
 def test_wave_from_csv(tmp_path):
     p = tmp_path / "w.csv"
-    p.write_text("t_s,ch1_V,ch2_V\n0,0,5\n0.001,1,6\n0.002,0,5\n")
+    p.write_text("t_s,ch1_V,ch2_V\n0,0,5\n0.001,1,6\n0.002,0,5\n", encoding="utf-8")
     w = arb.from_csv(str(p))
     assert w.seconds == pytest.approx(0.003) and w.amplitude == pytest.approx(1, rel=0.1)
     assert arb.from_csv(str(p), 2).offset == pytest.approx(5.5, rel=0.02)
-    p.write_text("1\n2\n3\n")
+    p.write_text("1\n2\n3\n", encoding="utf-8")
     assert arb.from_csv(str(p), rate=1000).seconds == pytest.approx(0.003)
     for text in ("", "a,b\n", "0,1\nx,y\n", "1\n2\n"):
-        p.write_text(text)
+        p.write_text(text, encoding="utf-8")
         with pytest.raises(ValueError):
             arb.from_csv(str(p))
-    p.write_text("0,1\n1,2\n")
+    p.write_text("0,1\n1,2\n", encoding="utf-8")
     with pytest.raises(ValueError):
         arb.from_csv(str(p), 5)
 

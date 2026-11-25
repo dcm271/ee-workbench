@@ -37,7 +37,7 @@ def test_remembered_and_backed_up():
     wiring._current = None
     assert wiring.current() == w
     wiring.set_current(wiring.Wiring("C → D"))
-    assert json.loads(wiring.path().with_suffix(".json.old").read_text())["text"] == "A → B"
+    assert json.loads(wiring.path().with_suffix(".json.old").read_text(encoding="utf-8"))["text"] == "A → B"
 
 
 @pytest.mark.parametrize("d", [None, [], "x", {"text": 5}, {"photo": "!!"}, {"photo": 3},

@@ -66,7 +66,7 @@ class GpioReading:
 
 def is_raspberry_pi() -> bool:
     try:
-        with open("/proc/device-tree/model") as fh:
+        with open("/proc/device-tree/model", encoding="utf-8") as fh:
             return "raspberry pi" in fh.read().lower()
     except OSError:
         return False
@@ -74,7 +74,7 @@ def is_raspberry_pi() -> bool:
 
 def pi_model() -> str:
     try:
-        with open("/proc/device-tree/model") as fh:
+        with open("/proc/device-tree/model", encoding="utf-8") as fh:
             return fh.read().strip("\x00\n ")
     except OSError:
         return ""
@@ -95,7 +95,7 @@ def chip_label(path: str) -> str:
     name = os.path.basename(path)
     for p in (f"/sys/bus/gpio/devices/{name}/label", f"/sys/class/gpio/{name}/label"):
         try:
-            with open(p) as fh:
+            with open(p, encoding="utf-8") as fh:
                 return fh.read().strip()
         except OSError:
             pass

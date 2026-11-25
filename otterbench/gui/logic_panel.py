@@ -852,7 +852,7 @@ class LogicPanel(PanelBase):
             self, "Save decoded data", time.strftime("decoded_%Y%m%d_%H%M%S.csv"), "CSV (*.csv)")
         if not path:
             return
-        with open(path, "w", newline="") as fh:
+        with open(path, "w", newline="", encoding="utf-8") as fh:
             w = csv.writer(fh)
             w.writerow(self.capture.table_header)
             w.writerows(self.capture.table_rows)

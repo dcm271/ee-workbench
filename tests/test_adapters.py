@@ -192,11 +192,11 @@ def test_center_packet():
 def test_w1_files(tmp_path):
     for name, text in (("28-0000000000aa", "23125\n"), ("28-0000000000bb", "-1500\n")):
         (tmp_path / name).mkdir()
-        (tmp_path / name / "temperature").write_text(text)
+        (tmp_path / name / "temperature").write_text(text, encoding="utf-8")
     (tmp_path / "w1_bus_master1").mkdir()
     old = tmp_path / "28-0000000000cc"
     old.mkdir()
-    (old / "w1_slave").write_text("2d 00 4b 46 ff ff 02 10 19 : crc=19 NO\n2d 00 t=22500\n")
+    (old / "w1_slave").write_text("2d 00 4b 46 ff ff 02 10 19 : crc=19 NO\n2d 00 t=22500\n", encoding="utf-8")
     link = ad.W1Link(str(tmp_path))
     assert link.sensors() == ["28-0000000000aa", "28-0000000000bb", "28-0000000000cc"]
     assert link.read("28-0000000000aa") == 23.125 and link.read("28-0000000000bb") == -1.5

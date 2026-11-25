@@ -167,7 +167,7 @@ class ResultsDB:
             "SELECT id, serial, product, operator, station, started, finished, seconds, "
             f"result, failures, outcome, report, data FROM units{where} ORDER BY id", args)
         rows = cur.fetchall()
-        with open(path, "w", newline="") as fh:
+        with open(path, "w", newline="", encoding="utf-8") as fh:
             w = csv.writer(fh)
             w.writerow([d[0] for d in cur.description])
             w.writerows(rows)

@@ -130,7 +130,7 @@ def test_profile_parse_and_points():
 
 def test_profile_csv(tmp_path):
     f = tmp_path / "p.csv"
-    f.write_text("time_s,volts\n# comment\n1,3.0\n1.5,3.3\n3,3.6\n")
+    f.write_text("time_s,volts\n# comment\n1,3.0\n1.5,3.3\n3,3.6\n", encoding="utf-8")
     t, v = profile.parse(f"csv {f}").points()
     assert list(t) == [0, 0.5, 2] and list(v) == [3.0, 3.3, 3.6]
 
@@ -414,7 +414,7 @@ def test_api_roundtrip(tmp_path, monkeypatch, bench):
     srv = ApiServer(lambda: bench, port=0)
     srv.start()
     try:
-        info = json.loads((tmp_path / "otterbench" / "api.json").read_text())
+        info = json.loads((tmp_path / "otterbench" / "api.json").read_text(encoding="utf-8"))
         assert (tmp_path / "otterbench" / "api.json").stat().st_mode & 0o777 == 0o600
         b = connect()
         assert b.instruments() == ["66321D", "GPIO", "33522B"]

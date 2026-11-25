@@ -104,7 +104,7 @@ class Profile:
 def read_csv(path: str) -> tuple[np.ndarray, np.ndarray]:
     t, v = [], []
     try:
-        with open(path, newline="") as fh:
+        with open(path, newline="", encoding="utf-8", errors="replace") as fh:
             for row in csv.reader(fh):
                 if len(row) < 2 or row[0].strip().startswith("#"):
                     continue

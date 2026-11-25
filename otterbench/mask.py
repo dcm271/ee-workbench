@@ -80,12 +80,12 @@ def _sliding_max(v: np.ndarray, k: int) -> np.ndarray:
 
 
 def save(masks: dict, path: str):
-    with open(path, "w") as fh:
+    with open(path, "w", encoding="utf-8") as fh:
         json.dump({str(ch): m.to_dict() for ch, m in masks.items()}, fh)
 
 
 def load(path: str) -> dict:
-    with open(path) as fh:
+    with open(path, encoding="utf-8") as fh:
         d = json.load(fh)
     if not isinstance(d, dict) or not d:
         raise ValueError("not a mask file")

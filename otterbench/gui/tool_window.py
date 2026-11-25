@@ -205,7 +205,7 @@ class ToolWindow(QMainWindow):
         if not path:
             return
         try:
-            with open(path, "w", newline="") as fh:
+            with open(path, "w", newline="", encoding="utf-8") as fh:
                 w = csv.writer(fh)
                 w.writerow(header)
                 w.writerows(rows)

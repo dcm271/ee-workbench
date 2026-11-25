@@ -6,6 +6,8 @@ warnings.filterwarnings("ignore", module=r"pyvisa_py(\..*)?")
 
 
 def run() -> int:
+    from .about import safe_output
+    safe_output()
     from .gui import main
     return main()
 

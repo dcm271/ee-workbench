@@ -33,7 +33,7 @@ def list_setups() -> list[tuple[str, float, str]]:
     out = []
     for p in setups_dir().glob("*.json"):
         try:
-            d = json.loads(p.read_text())
+            d = json.loads(p.read_text(encoding="utf-8"))
             out.append((str(d.get("name", p.stem)), p.stat().st_mtime,
                         str(d.get("description", ""))))
         except (OSError, ValueError, AttributeError):
@@ -48,7 +48,7 @@ def save_setup(name: str, data: dict, description: str = "") -> Path:
     p.parent.mkdir(parents=True, exist_ok=True)
     tmp = p.with_suffix(".tmp")
     from .config import json_default
-    tmp.write_text(json.dumps(d, indent=1, default=json_default))
+    tmp.write_text(json.dumps(d, indent=1, default=json_default), encoding="utf-8")
     os.replace(tmp, p)
     return p
 
@@ -56,7 +56,7 @@ def save_setup(name: str, data: dict, description: str = "") -> Path:
 def load_setup(name: str) -> dict:
     p = _file(name)
     try:
-        d = json.loads(p.read_text())
+        d = json.loads(p.read_text(encoding="utf-8"))
     except OSError as e:
         raise ValueError(f"No setup called '{name}'") from e
     except ValueError as e:
@@ -75,11 +75,11 @@ def delete_setup(name: str):
 
 
 def export_setup(name: str, path: str):
-    Path(path).write_text(_file(name).read_text())
+    Path(path).write_text(_file(name).read_text(encoding="utf-8"), encoding="utf-8")
 
 
 def import_setup(path: str) -> str:
-    d = json.loads(Path(path).read_text())
+    d = json.loads(Path(path).read_text(encoding="utf-8"))
     if not isinstance(d, dict):
         raise ValueError("not a setup file (expected a JSON object)")
     name = str(d.get("name") or Path(path).stem)

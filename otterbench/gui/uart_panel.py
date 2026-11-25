@@ -302,7 +302,7 @@ class UartPanel(PanelBase):
             self, "Save console", time.strftime("console_%Y%m%d_%H%M%S.txt"), "Text (*.txt)")
         if path:
             try:
-                with open(path, "w") as fh:
+                with open(path, "w", encoding="utf-8") as fh:
                     fh.write(self.log_view.toPlainText() + "\n")
             except OSError as e:
                 QMessageBox.warning(self, "Save console", f"Can't write {path}:\n{e}")

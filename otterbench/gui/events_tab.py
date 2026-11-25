@@ -256,7 +256,7 @@ class EventsTab(QWidget):
             self, "Save events", time.strftime("PPK2_events_%Y%m%d_%H%M%S.csv"), "CSV (*.csv)")
         if not path:
             return
-        with open(path, "w", newline="") as fh:
+        with open(path, "w", newline="", encoding="utf-8") as fh:
             w = csv.writer(fh)
             w.writerow(["start_s", "duration_s", "peak_A", "mean_A", "charge_C", "bus"])
             for e in self.events:

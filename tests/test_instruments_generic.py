@@ -111,8 +111,8 @@ def test_user_definition_overrides_and_bad_file_is_reported(cfgdir):
     folder.mkdir(parents=True)
     (folder / "mine.toml").write_text(
         'id = "MYMETER"\nname = "My meter"\ntype = "meter"\nidn = ["MYM-1"]\n'
-        '[[reading]]\nname = "value"\nquery = "MEAS?"\nunit = "V"\nsim = "2.5"\n')
-    (folder / "broken.toml").write_text("id = \n")
+        '[[reading]]\nname = "value"\nquery = "MEAS?"\nunit = "V"\nsim = "2.5"\n', encoding="utf-8")
+    (folder / "broken.toml").write_text("id = \n", encoding="utf-8")
     defs = g.definitions(reload=True)
     assert "MYMETER" in defs and not defs["MYMETER"].builtin
     assert any("broken.toml" in p for p in g.PROBLEMS)
@@ -336,7 +336,7 @@ def test_self_test_finds_overlapping_replies(tmp_path):
 def test_check_instruments_cli(tmp_path, capsys):
     from otterbench.check_instruments import main
     bad = tmp_path / "bad.toml"
-    bad.write_text('id = "B"\ntype = "meter"\n')
+    bad.write_text('id = "B"\ntype = "meter"\n', encoding="utf-8")
     assert main([str(bad)]) == 1
     assert "at least one [[reading]]" in capsys.readouterr().out
     good = g.builtin_dir() / "DP832.toml"

@@ -156,7 +156,7 @@ def test_abort_and_save(drv, tmp_path):
     drv.save(str(tmp_path / "c.sr"))
     assert read_sr(str(tmp_path / "c.sr"))[1] == {0: "D0", 3: "D3"}
     drv.export_csv(str(tmp_path))
-    assert (tmp_path / "digital.csv").read_text().startswith("time,D0,D3")
+    assert (tmp_path / "digital.csv").read_text(encoding="utf-8").startswith("time,D0,D3")
 
 
 # ---------------------------------------------------------------- the real program
@@ -181,6 +181,6 @@ def test_real_sigrok_demo(tmp_path):
         header, rows = d.decode([{"name": "UART", "settings": {"rx": 0, "baudrate": 9600}}])
         assert header[2] == "start_time"
         d.export_csv(str(tmp_path))
-        assert "D0" in (tmp_path / "digital.csv").read_text()[:400]
+        assert "D0" in (tmp_path / "digital.csv").read_text(encoding="utf-8")[:400]
     finally:
         d.close()

@@ -92,7 +92,7 @@ def previous_run() -> dict | None:
     whose process is still alive (a second copy running) isn't a crash."""
     p = marker_path()
     try:
-        d = json.loads(p.read_text())
+        d = json.loads(p.read_text(encoding="utf-8"))
     except FileNotFoundError:
         return None
     except (OSError, ValueError):
@@ -111,7 +111,7 @@ def previous_run() -> dict | None:
 
 def other_instance_running() -> bool:
     try:
-        d = json.loads(marker_path().read_text())
+        d = json.loads(marker_path().read_text(encoding="utf-8"))
         return _alive(int(d.get("pid", 0)))
     except (OSError, ValueError, TypeError, AttributeError):
         return False
@@ -127,7 +127,7 @@ def write_marker(open_tabs: list[dict], sequence: bool = False):
         tmp.write_text(json.dumps({"pid": os.getpid(), "started": _STARTED,
                                    "updated": time.strftime("%Y-%m-%dT%H:%M:%S"),
                                    "open": open_tabs, "sequence": bool(sequence)},
-                                  default=str))
+                                  default=str), encoding="utf-8")
         os.replace(tmp, p)
     except OSError:
         pass
@@ -136,7 +136,7 @@ def write_marker(open_tabs: list[dict], sequence: bool = False):
 def clear_marker():
     """A normal quit."""
     try:
-        d = json.loads(marker_path().read_text())
+        d = json.loads(marker_path().read_text(encoding="utf-8"))
         pid = int(d.get("pid", 0))
         if pid != os.getpid() and _alive(pid):
             return                    # another copy that is still running

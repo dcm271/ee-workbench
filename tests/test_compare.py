@@ -134,12 +134,12 @@ def test_command_line(pair, tmp_path, capsys):
                      "--csv", table]) == 1
     out = capsys.readouterr().out
     assert "FAIL" in out and "voltage" not in out
-    assert "FAIL" in open(html).read() and I in open(table).read()
+    assert "FAIL" in open(html, encoding="utf-8").read() and I in open(table, encoding="utf-8").read()
     assert cmp.main([a, b, "--check", "dmm.value mean +5%"]) == 1
     assert "not in the base" in capsys.readouterr().out
     assert cmp.main([a, b, "--check", "x y z"]) == 2
     assert cmp.main([a, str(tmp_path / "none.otter")]) == 2
-    (tmp_path / "x.otter").write_text("hello")
+    (tmp_path / "x.otter").write_text("hello", encoding="utf-8")
     assert cmp.main([a, str(tmp_path / "x.otter")]) == 2
 
 

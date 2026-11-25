@@ -604,7 +604,7 @@ class SessionViewer(QMainWindow):
             return
         a, b = self._view_range()
         streams = {st.id: st for st in self.s.streams + self.math_streams}
-        with open(path, "w", newline="") as fh:
+        with open(path, "w", newline="", encoding="utf-8") as fh:
             w = csv.writer(fh)
             w.writerow(["t_s", "time", "stream", "column", "value"])
             for sid, col in self._checked():

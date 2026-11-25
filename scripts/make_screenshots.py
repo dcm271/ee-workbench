@@ -30,7 +30,7 @@ dark_palette(app)
 if TOUCH:
     touch_mode.detect(app, True)
     app.setStyleSheet(app.styleSheet() + touch_mode.TOUCH_STYLE)
-    exec(open(Path(__file__).with_name("touch_screenshots.py")).read())
+    exec(open(Path(__file__).with_name("touch_screenshots.py"), encoding="utf-8").read())
     sys.exit(0)
 empty = MainWindow()
 empty.resize(1280, 720)

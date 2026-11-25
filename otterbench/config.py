@@ -152,13 +152,13 @@ def load_config(path: Path | None = None) -> Config:
     if not path.exists():
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(TEMPLATE)
+            path.write_text(TEMPLATE, encoding="utf-8")
         except OSError:
             pass
         return cfg
     try:
-        data = tomllib.loads(path.read_text())
-    except (OSError, tomllib.TOMLDecodeError) as e:
+        data = tomllib.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as e:       # ValueError: not TOML, or not UTF-8
         cfg.warning = f"{path}: {e}. Using defaults."
         return cfg
     st = data.get("startup", {})
@@ -198,7 +198,7 @@ class Session:
         self.open: list[Entry] = []
         self.known: dict[str, Entry] = {}
         try:
-            data = json.loads(self.path.read_text())
+            data = json.loads(self.path.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             return
         if not isinstance(data, dict):
@@ -236,7 +236,7 @@ class Session:
         try:
             self.path.parent.mkdir(parents=True, exist_ok=True)
             tmp = self.path.with_suffix(".tmp")
-            tmp.write_text(json.dumps(data, indent=2, default=json_default))
+            tmp.write_text(json.dumps(data, indent=2, default=json_default), encoding="utf-8")
             os.replace(tmp, self.path)       # atomic: survives a power cut mid-write
         except (OSError, TypeError, ValueError):
             pass

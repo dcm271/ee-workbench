@@ -620,7 +620,7 @@ class Ppk2Panel(PanelBase):
             "CSV (*.csv)")
         if not path:
             return
-        with open(path, "w") as fh:
+        with open(path, "w", encoding="utf-8") as fh:
             fh.write("t_s,current_A,logic\n")
             np.savetxt(fh, np.column_stack((t, i, lg)), fmt=("%.5f", "%.6e", "%d"),
                        delimiter=",")

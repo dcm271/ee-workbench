@@ -60,13 +60,13 @@ def test_log_round_trip_and_history(tmp_path):
 
 def test_damaged_log_is_never_overwritten(tmp_path):
     p = tmp_path / "c.json"
-    p.write_text("{oops")
+    p.write_text("{oops", encoding="utf-8")
     log = cal.Log(p)
     assert "damaged" in log.error and log.entries == []
     log.get(IDN, "USB::1")
     log.save()
-    assert (tmp_path / "c.json.damaged").read_text() == "{oops"
-    assert len(json.loads(p.read_text())["instruments"]) == 1
+    assert (tmp_path / "c.json.damaged").read_text(encoding="utf-8") == "{oops"
+    assert len(json.loads(p.read_text(encoding="utf-8"))["instruments"]) == 1
 
 
 def test_judge():

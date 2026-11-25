@@ -24,6 +24,7 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
+from .about import safe_output
 from .session import SessionReader
 from .signals import slug
 
@@ -293,13 +294,14 @@ def table(c: Comparison, keys=None) -> list[tuple]:
 
 
 def save_csv(c: Comparison, path: str, keys=None):
-    with open(path, "w", newline="") as fh:
+    with open(path, "w", newline="", encoding="utf-8") as fh:
         w = csv.writer(fh)
         w.writerow(TABLE)
         w.writerows(table(c, keys))
 
 
 def main(argv=None) -> int:
+    safe_output()
     ap = argparse.ArgumentParser(prog="otterbench-compare",
                                  description="Compare two recorded sessions (.otter).")
     ap.add_argument("base")

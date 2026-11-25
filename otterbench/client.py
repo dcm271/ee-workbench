@@ -75,7 +75,7 @@ def connect(url: str | None = None, token: str | None = None, timeout: float = 6
     ~/.config/otterbench/api.json when the API was switched on."""
     if url is None or token is None:
         try:
-            d = json.loads(_api_file().read_text())
+            d = json.loads(_api_file().read_text(encoding="utf-8"))
         except (OSError, ValueError):
             raise BenchError("OtterBench's remote API isn't on (no "
                              f"{_api_file()}). Switch it on: Tools ▾ → Remote API.") from None

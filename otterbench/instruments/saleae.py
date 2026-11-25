@@ -183,7 +183,7 @@ def read_export(directory: str) -> tuple[dict[int, DigitalTrace], dict[int, Anal
 def read_table(path: str) -> tuple[list[str], list[list[str]]]:
     if not os.path.exists(path):
         return [], []
-    with open(path, newline="") as fh:
+    with open(path, newline="", encoding="utf-8") as fh:
         rows = list(csv.reader(fh))
     return (rows[0], rows[1:]) if rows else ([], [])
 

@@ -11,9 +11,11 @@ from __future__ import annotations
 import sys
 
 from . import hwcheck, tape
+from .about import safe_output
 
 
 def main(argv=None) -> int:
+    safe_output()
     args = list(sys.argv[1:] if argv is None else argv)
     if not args or args[0] in ("-h", "--help"):
         print(__doc__)

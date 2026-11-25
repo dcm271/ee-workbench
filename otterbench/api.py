@@ -138,7 +138,7 @@ class ApiServer:
             p = api_file()
             p.parent.mkdir(parents=True, exist_ok=True)
             fd = os.open(p, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-            with os.fdopen(fd, "w") as fh:
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
                 json.dump({"url": f"http://127.0.0.1:{self.port}", "port": self.port,
                            "token": self.token, "pid": os.getpid()}, fh)
         except OSError:
@@ -174,7 +174,7 @@ class ApiServer:
             except OSError:
                 pass
         try:
-            d = json.loads(api_file().read_text())
+            d = json.loads(api_file().read_text(encoding="utf-8"))
             if d.get("pid") == os.getpid():
                 api_file().unlink()
         except (OSError, ValueError):

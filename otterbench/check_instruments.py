@@ -16,6 +16,7 @@ import sys
 import tomllib
 from pathlib import Path
 
+from .about import safe_output
 from .config import migrate_old_dir
 from .instruments.scpi_generic import (PROBLEMS, DefinitionError, definitions,
                                        describe_definition, parse_definition, self_test,
@@ -37,6 +38,7 @@ def _report(d, where: str) -> bool:
 
 
 def main(argv=None) -> int:
+    safe_output()
     args = list(sys.argv[1:] if argv is None else argv)
     if args and args[0] in ("-h", "--help"):
         print(__doc__)
@@ -54,7 +56,7 @@ def main(argv=None) -> int:
         return 0 if ok else 1
     for a in args:
         try:
-            d = parse_definition(tomllib.loads(Path(a).read_text()), a, False)
+            d = parse_definition(tomllib.loads(Path(a).read_text(encoding="utf-8")), a, False)
         except (OSError, tomllib.TOMLDecodeError, DefinitionError, TypeError, ValueError) as e:
             print(f"FAIL {a}\n     {e}")
             ok = False

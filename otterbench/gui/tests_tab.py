@@ -258,7 +258,7 @@ class TestsTab(QWidget):
         path, _ = QFileDialog.getSaveFileName(self, "Save sequence", "sequence.json",
                                               "JSON (*.json)")
         if path:
-            with open(path, "w") as fh:
+            with open(path, "w", encoding="utf-8") as fh:
                 json.dump({"repeat": self.seq_rep.value(),
                            "steps": [dict(zip(("volts", "amps", "hold_s", "ramp_s"), s))
                                      for s in steps]}, fh, indent=2)
@@ -268,7 +268,7 @@ class TestsTab(QWidget):
         if not path:
             return
         try:
-            with open(path) as fh:
+            with open(path, encoding="utf-8") as fh:
                 data = json.load(fh)
             steps = [[float(s["volts"]), float(s["amps"]), float(s.get("hold_s", 1)),
                       float(s.get("ramp_s", 0))] for s in data["steps"]]
@@ -658,7 +658,7 @@ class TestsTab(QWidget):
         name = time.strftime(f"{self.p.caps.model or 'supply'}_{self.key()}_%Y%m%d_%H%M%S.csv")
         path, _ = QFileDialog.getSaveFileName(self, "Save test data", name, "CSV (*.csv)")
         if path:
-            with open(path, "w", newline="") as fh:
+            with open(path, "w", newline="", encoding="utf-8") as fh:
                 w = csv.writer(fh)
                 w.writerow(self.header)
                 w.writerows([["" if x is None else x for x in r] for r in self.rows])

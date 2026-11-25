@@ -68,7 +68,7 @@ def parse_front_matter(text: str) -> tuple[dict, str]:
 
 
 def render(md_path: Path) -> tuple[str, str]:
-    meta, body = parse_front_matter(md_path.read_text())
+    meta, body = parse_front_matter(md_path.read_text(encoding="utf-8"))
     html = markdown.markdown(body, extensions=["tables", "fenced_code", "sane_lists", "attr_list"])
     title = meta.get("title", md_path.stem)
     cover = (f'<div class="cover"><div class="kicker">OtterBench</div>'
