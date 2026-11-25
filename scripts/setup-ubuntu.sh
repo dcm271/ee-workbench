@@ -55,6 +55,7 @@ PKGS=(
   git
   python3-venv python3-pip
   python3-pyqt6 python3-numpy python3-serial  # the GUI toolkit and numerics, from apt
+  pyqt6-dev-tools                             # PyQt6.uic, which pyqtgraph imports
   qt6-wayland libxcb-cursor0                  # Qt on Wayland and on X11 desktops
   fonts-dejavu-core
 )

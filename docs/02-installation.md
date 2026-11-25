@@ -98,7 +98,7 @@ otterbench/
 PyQt6 comes from the distribution; everything else goes into a project virtualenv.
 
 ```bash
-sudo apt install python3-pyqt6 python3-numpy python3-venv python3-serial libxcb-cursor0
+sudo apt install python3-pyqt6 pyqt6-dev-tools python3-numpy python3-venv python3-serial libxcb-cursor0
 cd ~/Dev/otterbench
 python3 -m venv --system-site-packages .venv
 .venv/bin/pip install -r requirements.txt
