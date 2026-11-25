@@ -138,6 +138,7 @@ class Readout(QWidget):
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(0)
+        self.pm: QLabel | None = None
         self.caption = QLabel(label.upper())
         self.caption.setStyleSheet(f"color:{C_MUTED}; font-size:10px; letter-spacing:1px;")
         self.value = QLabel("—")
@@ -152,6 +153,19 @@ class Readout(QWidget):
 
     def set(self, text: str):
         self.value.setText(text)
+
+    def set_pm(self, text: str):
+        """The ± under the value; the label appears when there first is one."""
+        if self.pm is None:
+            if not text:
+                return
+            self.pm = QLabel()
+            self.pm.setStyleSheet(f"color:{C_MUTED};")
+            self.pm.setAlignment(Qt.AlignmentFlag.AlignRight)
+            self.pm.setToolTip("From its accuracy specification (calibration log or definition "
+                               "file)")
+            self.layout().addWidget(self.pm)
+        self.pm.setText(text)
 
 
 class TraceBuffer:

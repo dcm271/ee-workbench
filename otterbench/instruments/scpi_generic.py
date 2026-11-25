@@ -77,6 +77,7 @@ class Option:
     unit2: str = ""              # unit of readings with unit_index = 1
     read: str = ""               # reading query for this option (query_from)
     sim: str = ""                # what the simulator answers to the query
+    accuracy: str = ""           # of the readings with this option (accuracy.py)
 
     def matches(self, answer: str) -> bool:
         if self.reply:
@@ -117,6 +118,7 @@ class Reading:
     plot: str = ""               # axes shared with the other readings naming it
     ch: int = 0
     sim: str = "0"               # simulator: expression in the settings, t, noise()
+    accuracy: str = ""           # e.g. "0.0035% + 50u" (accuracy.py)
 
 
 @dataclass
@@ -214,9 +216,18 @@ def parse_definition(data: dict, path: str = "", builtin: bool = True) -> Defini
              f"`{key}` must be a list of strings")
         return v
 
+    def check_accuracy(d, where):
+        from ..accuracy import AccuracyError, parse
+        if d.get("accuracy"):
+            try:
+                parse(str(d["accuracy"]))
+            except AccuracyError as e:
+                need(False, f"{where}: `accuracy`: {e}")
+
     def make_option(o):
         need(isinstance(o, dict) and o.get("label"), "every option needs a `label`")
-        extra = set(o) - {"label", "set", "reply", "unit", "unit2", "read", "sim"}
+        extra = set(o) - {"label", "set", "reply", "unit", "unit2", "read", "sim",
+                          "accuracy"}
         need(not extra, f"option {o.get('label')}: unknown key(s) {', '.join(sorted(extra))}")
         if o.get("reply"):
             try:
@@ -224,6 +235,7 @@ def parse_definition(data: dict, path: str = "", builtin: bool = True) -> Defini
             except re.error as e:
                 raise DefinitionError(f"{path}: option {o['label']}: bad `reply` regex: {e}") \
                     from None
+        check_accuracy(o, f"option {o['label']}")
         return Option(**{k: str(v) for k, v in o.items()})
 
     def make_setting(d):
@@ -250,10 +262,11 @@ def parse_definition(data: dict, path: str = "", builtin: bool = True) -> Defini
         need(isinstance(d, dict) and _IDENT.match(str(d.get("name", ""))),
              "every [[reading]] needs a `name` (letters, digits, _)")
         extra = set(d) - {"name", "label", "query", "unit", "unit_from", "query_from", "sim",
-                          "field", "unit_index", "plot"}
+                          "field", "unit_index", "plot", "accuracy"}
         need(not extra, f"reading {d['name']}: unknown key(s) {', '.join(sorted(extra))}")
         need(d.get("query") or d.get("query_from"),
              f"reading {d['name']}: needs `query` (or `query_from`)")
+        check_accuracy(d, f"reading {d['name']}")
         fld, ui = d.get("field", -1), d.get("unit_index", 0)
         need(type(fld) is int and -1 <= fld < 100 and ui in (0, 1),
              f"reading {d['name']}: `field` counts from 0; `unit_index` is 0 or 1")
@@ -261,7 +274,8 @@ def parse_definition(data: dict, path: str = "", builtin: bool = True) -> Defini
                        unit_index=int(ui), plot=str(d.get("plot", "")),
                        query=str(d.get("query", "")), unit=str(d.get("unit", "")),
                        unit_from=str(d.get("unit_from", "")),
-                       query_from=str(d.get("query_from", "")), sim=str(d.get("sim", "0")))
+                       query_from=str(d.get("query_from", "")), sim=str(d.get("sim", "0")),
+                       accuracy=str(d.get("accuracy", "")))
 
     rd, st = data.get("reading", []), data.get("setting", [])
     need(isinstance(rd, list) and isinstance(st, list),

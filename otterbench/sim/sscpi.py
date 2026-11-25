@@ -15,6 +15,7 @@ import re
 import time
 
 from ..instruments.scpi_generic import Definition, fill, parse_bool
+from . import shared
 from .base import SimBase
 
 _VALUE = r"(?P<value>[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?|MIN|MAX|DEF)"
@@ -103,6 +104,11 @@ class SimScpi(SimBase):
         return f"{float(v):.6g}"
 
     def write(self, cmd: str):
+        self._do(cmd)
+        if "cc" in self.values and "input" in self.values:      # an electronic load
+            shared.load_is(self.values["cc"] if self.values["input"] else 0.0)
+
+    def _do(self, cmd: str):
         cmd = cmd.strip()
         if not cmd:
             return

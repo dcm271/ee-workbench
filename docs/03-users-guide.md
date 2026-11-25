@@ -311,12 +311,14 @@ Bench function generators reached over LAN, USB-TMC or GPIB (`FGEN`; see [Hardwa
 | Control | What it does |
 |---|---|
 | **CH1 / CH2** | Which channel the controls below show and set. A **●** marks a channel whose output is on. Single-channel generators show only CH1. |
-| **Waveform** | Sine, Square, Ramp, Pulse, Noise or DC. |
+| **Waveform** | Sine, Square, Ramp, Pulse, Noise, DC, or Arbitrary (the waveform loaded last). |
 | **Frequency** | Hz. Type a value and press Enter (or leave the box). |
 | **Amplitude** | Volts peak-to-peak **into the load set on the generator** (usually 50 Ω): into a high-impedance input the voltage is up to twice what it says. Change the generator's output-load setting to High Z if that's your case. |
 | **Offset** | DC offset, V. |
 | **Duty (square)** | %, for square and pulse waveforms. |
 | **CH*n* output** | Switches the shown channel's output (two taps on a touch screen). Red while on. **Esc** turns every channel of every generator off. |
+
+**Arbitrary tab.** Loads a waveform of your own: **From CSV…** (time in seconds and volts, with or without a heading line) or **From a scope tab…** (a capture, to replay it). The plot shows what will be sent: resampled to 16 – 8192 points, with its period, amplitude and offset. **Load into generator** sends it to the selected channel and selects it; the channel's output must be off, and stays off. The generator repeats the waveform. Untried on hardware so far, and only the Rigol and Siglent commands were compared with the makers' documentation: look at the output on a scope before connecting it to anything.
 
 **Profile tab.** Sweeps frequency, amplitude, offset or duty of the selected channel over time; see [Profiles](#profiles-varying-a-setpoint-over-time). `logsteps 10..100000 n=41 dwell=0.5` is a 41-point logarithmic frequency sweep, half a second per point.
 
@@ -397,6 +399,12 @@ A [supported scope](01-hardware-and-resources.md#oscilloscope-compatibility) (Ri
 
 The **Waveforms** tab plots each fetched channel in volts against time from the trigger, in the channel's colour. The table under it gives, per channel, **Vpp, Max, Min, Mean, RMS, Freq, Period, Duty, Rise, Fall** (10–90 %), worked out from the fetched samples, so every brand gives the same numbers. **Save CSV…** writes the samples, a time and a voltage column per channel (`t1_s, ch1_V, t2_s, ch2_V, …`).
 
+**Screenshot…** saves the scope's own screen as a PNG, and puts it into the session when one is being recorded. Rigol, Keysight and Siglent; not Tektronix.
+
+### Mask test
+
+**Mask ▾ → Make from this capture…** takes the waveform shown as the good one and puts a band around it: so many volts up and down, so many µs to either side. Every later capture is compared with it; samples outside are marked, and the bar says **Mask PASS** or **Mask FAIL** with their number. Save masks to a file, and **Load…** them another day. In the sequencer, **Measure** `mask1` gives the number of samples outside on CH1: use **Max** `0`. The scope's settings must be the same as when the mask was made; a trace elsewhere in time isn't judged.
+
 A capture goes into the [session](#sessions-everything-in-one-file) being recorded, like a logic-analyzer capture, so it shows up in the session viewer at the moment it was taken. The **sequencer** can capture (a **Capture** step on the scope tab; its result is the number of samples fetched) and measure (**Measure** `vpp1`, `freq2`, `duty1`, `rise3`, …: from the waveform on screen now), and set anything on the panel (**Set** `timebase`, `trigger_level`, `ch1_scale`, `acquire` `single`, …). A [watchdog](#watchdog) rule can make it capture when something happens.
 
 ## Several of the same instrument
@@ -464,14 +472,17 @@ The search ends events with 10 % hysteresis, so a burst that dips just under the
 
 | Action | Instrument | Setting / quantity / pin | Value |
 |---|---|---|---|
-| **Set** | supply, PPK2, function generator, GPIO, SCPI meter / load / supply, scope | supply: `voltage`, `current` (limit), `output`, `ovp`, `sense_protect` (open-sense detection on / off; 66321D family only). PPK2: `voltage`, `output` (DUT power). Generator: `function`, `frequency`, `amplitude`, `offset`, `duty`, `output`. GPIO: a pin's name. SCPI instrument: its definition's settings (`vset1`, `out1`, `function`, `cc`, `input`, …). Scope: `acquire` (`run` / `stop` / `single`), `timebase`, `position`, `trigger_source`, `trigger_level`, `trigger_slope`, `sweep`, `ch1_on`, `ch1_scale`, `ch1_offset`, … | the value, or `on` / `off`. Generator `function`: `sine`, `square`, `ramp`, `pulse`, `noise`, `dc`. GPIO: `on`, `off` or `pulse 0.1` (seconds). |
+| **Set** | supply, PPK2, DMM, function generator, GPIO, SCPI meter / load / supply, scope | supply: `voltage`, `current` (limit), `output`, `ovp`, `ocp` (on / off), `clear_protection`, `sense_protect` (open-sense detection on / off; 66321D family only). PPK2: `voltage`, `output` (DUT power). DMM (3456A, XDM): its own settings, e.g. `function`, `range`, `rate`. Generator: `function`, `frequency`, `amplitude`, `offset`, `duty`, `output`. GPIO: a pin's name. SCPI instrument: its definition's settings (`vset1`, `out1`, `function`, `cc`, `input`, …). Scope: `acquire` (`run` / `stop` / `single`), `timebase`, `position`, `trigger_source`, `trigger_level`, `trigger_slope`, `sweep`, `ch1_on`, `ch1_scale`, `ch1_offset`, … | the value, or `on` / `off`. Generator `function`: `sine`, `square`, `ramp`, `pulse`, `noise`, `dc`, `arb`. GPIO: `on`, `off` or `pulse 0.1` (seconds). |
 | **Wait** | | | seconds |
-| **Measure** | supply, DMM, PPK2, GPIO, SCPI instrument, scope | supply: `voltage` `current` `power` `dvm`. DMM: `value`. PPK2: `current` (mean), `peak`, `charge`. GPIO: a pin (0 / 1). SCPI instrument: its readings (`value`, `voltage2`, `power`, …). Scope: `vpp1`, `vmax1`, `vmin1`, `vavg1`, `vrms1`, `freq1`, `period1`, `duty1`, `rise1`, `fall1` (the digit is the channel), from the waveform on screen. | seconds to average over (blank: one fresh reading) |
+| **Measure** | supply, DMM, PPK2, GPIO, SCPI instrument, scope | supply: `voltage` `current` `power` `dvm`. DMM: `value`. PPK2: `current` (mean), `peak`, `charge`. GPIO: a pin (0 / 1). SCPI instrument: its readings (`value`, `voltage2`, `power`, …). Scope: `vpp1`, `vmax1`, `vmin1`, `vavg1`, `vrms1`, `freq1`, `period1`, `duty1`, `rise1`, `fall1`, and `mask1` with a [mask](#mask-test) (the digit is the channel), from the waveform on screen. | seconds to average over (blank: one fresh reading) |
 | **Capture** | logic analyzer, scope | | (uses that tab's settings and decoders); the column is the number of decoded rows (a scope: samples fetched) |
 | **Profile** | supply, PPK2, function generator | what to vary: `voltage`, `current`; generator `frequency` … | a [profile](#profiles-varying-a-setpoint-over-time), e.g. `ramp 3.0..3.6 for=10`. The step ends when the profile does. |
 | **Wait for** | GPIO | an input pin | the level: `1` / `0` / `high` / `low`, optionally `timeout=10` (default 60 s). Fails if the pin doesn't get there in time. With a **Results column**, records how long it took. |
 | **Wait for** | serial console | | a regular expression, optionally `timeout=2` (default 10 s), e.g. `adc=(\d+) timeout=2`. Looks at what came in since the last **Send**. The **Results column** gets the number (or text) in the parentheses; **Min** / **Max** judge it. No answer in time fails the pass and the sequence goes on. |
 | **Send** | serial console, SCPI tab | | a line of text (a SCPI command on a SCPI tab); `{x}`, `{i}` and, in a production test, `{serial}` are filled in |
+| **Command** | | a regular expression to look for in the output (optional) | a program and its arguments, e.g. `esptool --port /dev/ttyUSB0 write_flash 0 app.bin timeout=120` (default 60 s). See [Commands and flashing](#commands-and-flashing). |
+| **Screenshot** | scope | | the scope's own screen, kept for the report and in the session |
+| **For**, **Repeat**, **Retry**, **If**, **Else**, **End** | | | see [Blocks](#blocks-loops-retries-conditions) |
 | **Note** | | | text; `{x}`, `{i}` and, in a [production test](#production-test), `{serial}`, `{product}` and `{operator}` are filled in. It goes into the session being recorded. |
 
 **Run once**, **Repeat** N times, or **Sweep x** from / to / step. Values can be expressions in `x` (the sweep value), `i` (the pass, from 0), `n` and math functions, e.g. `x`, `x / 2`, `3.3 + 0.1 * i`, `10 ** x` (a log sweep: x from 1 to 5 is 10 Hz to 100 kHz). Each pass adds one row to **Results**: the measured values (named by **Results column**, or automatically). Plot any column against another, and **Save CSV…**.
@@ -481,6 +492,27 @@ The search ends events with 10 % hysteresis, so a burst that dips just under the
 Give a **Measure**, **Capture** or **Wait for** step a **Min** and/or a **Max** (either may be blank; expressions in `x` work, e.g. `x * 0.95`). A pass whose values are all within their limits is **PASS**; otherwise it's **FAIL**, and the failing value is listed in a `failures` column (e.g. `I_sleep=1.23e-05 (want ≤ 1e-05)`). Failing rows are shaded red with the failing cell darker; the status line counts them (**5 PASS, 2 FAIL**). With **Stop on first fail** ticked, the run ends at the first failing pass (and outputs go off if **Outputs off at the end** is ticked). Rows without limits have no verdict.
 
 Typical limits: sleep current `Max 10e-6`; regulator output `Min 3.234 Max 3.366` (3.3 V ±2 %); boot time with **Wait for** done `Max 0.5`; "the DUT answered on the UART" as **Capture** with `Min 1`.
+
+**Readings near a limit.** When an instrument's [accuracy](#accuracy) is known, each reading gets a second column with its ±. The list beside **Stop on first fail** says what happens to a reading that passes but is within its ± of a limit: *as they are* (nothing), *mark* (the row passes, the reading is shaded and listed in a `marginal` column), or *FAIL* (a strict guard band). A reading outside its limits always fails. Without a known accuracy the limits are taken as they are.
+
+### Blocks: loops, retries, conditions
+
+A block starts with one of these steps and ends with **End**; the steps between are indented. Blocks can be nested.
+
+| Step | Fields | |
+|---|---|---|
+| **For** | Setting: a name, e.g. `vin`. Value: `3.0, 3.3, 3.6`, or `4.5 … 16 step 0.5`, or `0..2 x 11` | Repeats its steps with the name set to each value, for use in expressions. Each round that measured something makes its own row, with a column for the name. Nest two for a grid. |
+| **Repeat** | Value: `10 wait=1`, or `until vout < 0.1 max=100 wait=1` | So many times, or until a condition holds. Not reached in `max` rounds (default 1000): the row fails. |
+| **Retry** | Value: `3 wait=1` | Again while a limit inside it fails, at most 3 times; only the last try counts. With a **Results column**, records how many it took. |
+| **If** … **Else** | Value: a condition, e.g. `vout > 3.2 and i == 0` | **Else** is optional. |
+
+A measured column can be used by its name in later values and conditions: `Vout (V)` is `vout`, `I sleep` is `i_sleep`. A sequence whose blocks don't match is refused before it starts.
+
+### Commands and flashing
+
+**Command** runs a program on this computer: a flasher (OpenOCD, esptool, nrfjprog), a build, your own script. It fails the row when the exit status isn't 0, when it takes longer than `timeout=`, or when its output doesn't contain the regular expression given under **Setting**. A group in that expression goes into the **Results column** (`flash (\d+) bytes`), where **Min** / **Max** can judge it. The output goes into the log.
+
+There is no shell: quotes work; `|`, `*`, `>` and `$VAR` don't (write a script for those). `{x}`, `{i}`, a **For** name and, in a production test, `{serial}` are filled in, always as one argument, so a scanned text can't become a command. **■ Stop** ends the program and everything it started. Sequences can run programs, so only load sequence files you trust. The Remote API can't run commands.
 
 ### Running
 
@@ -621,6 +653,23 @@ The load is off whenever the input changes. An output above **Stop above** switc
 
 For efficiency, voltage drop in the leads counts: use remote sense on both instruments, or choose meters at the board's terminals. **Limits** give PASS / FAIL; a point that couldn't be measured properly (current limit, output low, more power out than in) never passes. **Report…** has the curves, regulation tables and every point.
 
+## Load transient test
+
+**Tools ▾ → Load transient test…** steps an electronic load between two currents and looks at the output voltage on an oscilloscope, both ways, as often as you say.
+
+1. Probe the output at its capacitor, with a short ground. Set the channel's volts/division and offset so that the dip and the peak fit on the screen. AC coupling is fine. The test leaves the vertical settings alone; it sets the timebase and the trigger, and puts them back afterwards.
+2. **Trigger on** the output itself, at so many mV from its resting level (more than the ripple, less than the dip), or another channel: a current probe, or the load's trigger output.
+3. Choose the currents and the time to show. The *load's* slew rate decides how fast the step is; set it on the load.
+
+| Result | |
+|---|---|
+| **deviation** | the dip (load up) or peak (load down), from the level before |
+| **rebound** | how far it swings past its new level, the other way |
+| **recovery** | from leaving the old level until it stays within **Recovered within ±** of the new one. Not given when the trace is noisier than that band, or hasn't settled on the screen |
+| **shift** | the new level against the old one (load regulation) |
+
+**Limits** judge the worst of each direction. Something that couldn't be measured never passes. An output above **Stop above** or below half its nominal value (the load's reading) ends the test; however it ends, the load goes off, then the supply.
+
 ## Battery tester
 
 **Tools ▾ → Battery tester…** charges, rests and discharges a battery, one or many times, and gives capacity, energy, coulombic efficiency and internal resistance per cycle. Leave the charger or the load out to do only the other.
@@ -635,7 +684,37 @@ For efficiency, voltage drop in the leads counts: use remote sense on both instr
 
 **Tools ▾ → Calibration…** keeps when each instrument was calibrated and when it is due. **Add open instruments**, then **New calibration…** for each: date, interval, who, certificate. Earlier ones stay in its history. An instrument is recognised by its serial number, or by its resource when it reports none. Sequence, session, regulator, battery and Bode reports then state each instrument's status.
 
+### Accuracy
+
+**Details… → Accuracy** takes an instrument's accuracy from its datasheet or certificate, one line per function or reading:
+
+```
+DC V = 0.1: 0.005% + 3.5u; 1: 0.004% + 7u; 10: 0.0035% + 50u
+DC I = 0.05% + 5u
+voltage = 0.03% + 3m
+```
+
+Each is a part of the reading (`%` or `ppm`) plus a fixed part in the reading's unit (`50u` = 50 µV). `end of range:` in front makes it one range of several. "0.001 % of range" has to be worked out: on a 10 V range that is `100u`. The name is the meter's function as its tab shows it, or the reading's name as in the sequencer (`value`, `voltage`, `current2`). [Definition files](04-technical-reference.md#reading-polled-values) can carry an accuracy too; the calibration log's counts first.
+
+The ± then appears under the reading, in the sequencer's results (with a [guard band](#limits-pass--fail) if you want one) and in reports. A check against a reference says when the reference isn't four times better than the tolerance.
+
+OtterBench has no accuracy figures of its own: without one, nothing is shown. It is the datasheet's limit at the conditions the datasheet names, not a full uncertainty budget: leads, probes, temperature and noise aren't in it.
+
 **Check against a reference** reads one instrument beside a better one, at the levels a supply gives or at one point as it is. Connect voltmeters in parallel, ammeters in series. The reference is read before and after, so slow drift cancels. **Keep in log** stores the result with the instrument; it doesn't change its calibration date. This is a record and a cross-check, not a calibration.
+
+## Hardware check
+
+**Tools ▾ → Hardware check…** goes through an instrument step by step and says what its driver got right. Most drivers here were written from manuals, so this is the thing to do first with a new model.
+
+| How far | What it does |
+|---|---|
+| **Read only** | Identity, settings, readings, error queue, timing. Changes no setting. |
+| **Settings (outputs off)** | Changes each setting, reads it back, and puts it back. |
+| **Output on (nothing connected)** | Switches a supply's output on at a low voltage and checks the reading. **Nothing may be connected.** |
+
+If an output is on, the check stops before it sends anything. **■ Stop** switches outputs off and puts settings back.
+
+**Report…** and **Copy summary** are for a bug report; **Mark as tested…** writes the model and firmware into your definition file. **Save tape…** keeps everything that was said between the driver and the instrument. A tape can be opened like an instrument (`REPLAY::/path/file.tape`) and played back through the driver: `python -m otterbench.replay file.tape` lists every step that no longer comes out the same. See [the test suite's tapes](04-technical-reference.md#tapes-tapepy). The serial number is taken out where possible; the window says when it couldn't be.
 
 ## Identify port
 
@@ -717,14 +796,19 @@ Choose a **GPIO tab** and an **output pin** on it (set it up as an output on tha
 
 - which instruments are open, and each tab's settings (names, DMM function and range, decoders and alignment, PPK2 mode, GPIO pin modes and names …),
 - the sequence (steps, limits, sweep, script),
-- the watchdog rules, and
-- the math channels.
+- the watchdog rules,
+- the math channels, and
+- the [wiring notes](#wiring-notes).
 
 **Save current as…** asks for a name and an optional description. **Recall** (or double-click) closes the open tabs and opens the setup's. **Export… / Import…** move a setup to another computer as a JSON file. Setups live in `~/.config/otterbench/setups/`.
 
 A recall **never switches an output on** and doesn't send supply setpoints (they're read from the supply, as always): put the setpoints in the sequence's first steps.
 
 A setup file is checked before anything is closed: if it is damaged (say, a hand-edited export with a missing resource), Recall says why and leaves the open tabs alone. A smaller problem inside an otherwise good setup (one bad watchdog rule, one tab's unreadable settings) is skipped, and listed once the rest has been recalled.
+
+### Wiring notes
+
+**Tools ▾ → Wiring notes…** holds a text and a photo of what is connected to what. They are saved with the setup and shown when it is recalled, so the bench is wired the same way next time. They also go into sessions and reports. Keep anything private out of the photo if you share those.
 
 ## Remote API: Python and Jupyter
 
@@ -801,6 +885,14 @@ The buttons above the table:
 - **Export CSV…** writes every ticked signal over the **stretch shown** (zoom first) as `t_s, time, stream, column, value`.
 - **Save PNG…** saves the plots as you see them.
 - **Report…** makes an [HTML / PDF report](#reports) of the stretch shown, with the ticked signals.
+
+### Comparing two sessions
+
+**Tools ▾ → Compare sessions…** lays a **Base** and a **New** recording over each other: the same tabs' signals overlaid, the difference under them, and mean, min, max, p-p, std, integral (charge, energy) and duration of both, with the change. Use it to see what a firmware change did to the current.
+
+**0 s is** the start of each session, a note's moment (press **✎ Note** at the same point of both), or the moment a signal crosses a level. **Move new by** shifts the new one; **Only from … to** limits the stretch that is compared. Sequencer results are compared row by row. The mean is over time, and gaps are left out.
+
+**Checks**, one a line, give a verdict: `ppk2.current_A mean +5%` (may rise by 5 %), `ppk2.current_A max +0.02 -0.02` (in its unit), `ppk2.current_A integral ±3%`. The same works [from the command line](06-howtos.md#fail-a-build-when-the-current-goes-up), with an exit status for CI.
 
 ## Workflows
 

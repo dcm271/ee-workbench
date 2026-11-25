@@ -4,7 +4,7 @@ Tektronix or Siglent command dialect (instruments/scopes.py).
   CH1  1 kHz 0-3.3 V square wave (trigger source; a rising edge at t = 0)
   CH2  1 kHz 1 V-peak sine
   CH3  500 Hz 0-2 V triangle
-  CH4  1.2 V DC with noise
+  CH4  1.2 V DC with noise; with a simulated load, a regulator's output (shared.py)
 CH1 and CH2 are shown at start. While a simulated function generator drives a
 sine, CH1 is that sine and CH2 the same through a 10 kHz low-pass (for the
 Bode window). Waveforms are encoded with each maker's
@@ -49,7 +49,7 @@ def signal(ch: int, t: np.ndarray) -> np.ndarray:
         ph = np.mod(t, 2e-3) / 2e-3
         v = 2.0 * (1 - np.abs(2 * ph - 1))
     else:
-        v = np.full_like(t, 1.2)
+        return np.full_like(t, 1.2 - 0.004 * shared.LOAD[0]) + rng.normal(0, 5e-4, t.size)
     return v + rng.normal(0, 0.01, t.size)
 
 
@@ -66,6 +66,7 @@ class SimScope(SimBase):
         self.sweep = "AUTO"
         self.running = True
         self.single_at: float | None = None
+        self.stepped = False
         self.src = 1
         self.errors: list[str] = []
 
@@ -74,6 +75,14 @@ class SimScope(SimBase):
         if self.single_at is not None:
             if time.monotonic() - self.single_at < 0.15:
                 return "wait"
+            if self.trig_src == 4:              # waits for a load step that way
+                now_a, was, when = shared.LOAD
+                want = "NEG" if now_a > was else "POS"
+                if when < self.single_at or self.trig_slope[:3] not in (want, "FAL"
+                                                                        if want == "NEG" else
+                                                                        "RIS"):
+                    return "wait"
+                self.stepped = True
             self.single_at = None
             self.running = False
         return "run" if self.running else "stop"
@@ -84,6 +93,8 @@ class SimScope(SimBase):
         dt = span / n
         t0 = -span / 2 - self.tpos
         t = t0 + np.arange(n) * dt
+        if ch == 4 and self.stepped and not self.running:
+            return t0, dt, shared.regulator_out(t + dt)
         return t0, dt, signal(ch, t)
 
     # ---- command handling --------------------------------------------------------
@@ -99,9 +110,31 @@ class SimScope(SimBase):
             return self._out.append(IDN[self.dialect])
         if u in ("*CLS", "*RST", "CHDR SHORT"):
             return self.errors.clear() if u == "*CLS" else None
+        if u in {"keysight": ("DISP:DATA? PNG",), "rigol": ("DISP:DATA? ON,OFF,PNG",),
+                 "siglent": ("SCDP",)}.get(self.dialect, ()):
+            self._bin = self._screen()
+            return None
         h = getattr(self, "_" + self.dialect)
         if h(u) is False:
             self.errors.append('-113,"Undefined header"')
+
+    @staticmethod
+    def _screen(w: int = 320, h: int = 200) -> bytes:
+        """A PNG: a sine on a dark screen."""
+        import struct
+        import zlib
+        px = np.zeros((h, w), np.uint8) + 20
+        px[::h // 8, :] = px[:, ::w // 10] = 70
+        x = np.arange(w)
+        px[(h / 2 + h / 3 * np.sin(x / w * 12.6)).astype(int), x] = 255
+        raw = b"".join(b"\0" + r.tobytes() for r in px)
+
+        def chunk(kind, data):
+            return struct.pack(">I", len(data)) + kind + data + struct.pack(
+                ">I", zlib.crc32(kind + data))
+        return b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(
+            ">IIBBBBB", w, h, 8, 0, 0, 0, 0)) + chunk(b"IDAT", zlib.compress(raw)) + chunk(
+            b"IEND", b"")
 
     def _err(self):
         self._out.append(self.errors.pop(0) if self.errors else '0,"No error"')
@@ -166,7 +199,7 @@ class SimScope(SimBase):
             self.running, self.single_at = False, None
             return None
         if u in ("SING", "SINGLE"):
-            self.running, self.single_at = True, time.monotonic()
+            self.running, self.single_at, self.stepped = True, time.monotonic(), False
             return None
         if u in ("SYST:ERR?", "SYSTEM:ERROR?"):
             return self._err()
@@ -265,6 +298,7 @@ class SimScope(SimBase):
         if u == "ACQ:STATE RUN":
             self.running = True
             self.single_at = time.monotonic() if getattr(self, "_seq", False) else None
+            self.stepped = False
             return None
         if u == "ACQ:STATE STOP":
             self.running, self.single_at = False, None
@@ -338,6 +372,7 @@ class SimScope(SimBase):
             mode = m.group(2)
             if mode == "SINGLE":
                 self.single_at = time.monotonic()
+                self.stepped = False
                 self.running = True
             else:
                 self.sweep = mode[:4]

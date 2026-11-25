@@ -12,7 +12,7 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (QDialog, QFileDialog, QHBoxLayout, QInputDialog, QLabel,
                              QListWidget, QListWidgetItem, QMessageBox, QPushButton, QVBoxLayout)
 
-from .. import setups
+from .. import setups, wiring
 from ..config import norm_model
 from ..mathchannels import Channel
 from .hub import hub
@@ -27,7 +27,8 @@ def capture_bench(main) -> dict:
             "sequence": seq.state(),
             "watchdog": hub.watchdog.to_list(),
             "watchdog_armed": hub.watchdog.armed,
-            "math": [c.to_dict() for c in hub.math.channels]}
+            "math": [c.to_dict() for c in hub.math.channels],
+            "wiring": wiring.current().to_dict()}
 
 
 def check_bench(d) -> list[dict]:
@@ -84,6 +85,10 @@ def apply_bench(main, d: dict) -> list[str]:
     if hub.math.channels:
         from .math_window import MathWindow
         main.math_win = MathWindow(main)     # records math into sessions while hidden
+    try:             # a setup from before wiring notes: whatever was noted isn't its wiring
+        wiring.set_current(wiring.Wiring.from_dict(d.get("wiring")))
+    except OSError as ex:
+        problems.append(f"wiring notes: {ex}")
     main.save_bench_state()
     return problems
 
@@ -171,6 +176,9 @@ class SetupsDialog(QDialog):
             QMessageBox.warning(self, "Recall setup", f"'{name}' was recalled, but some parts "
                                 "were damaged and skipped:\n\n" + "\n".join(problems))
         self.accept()
+        if not wiring.current().empty:
+            from .wiring_dialog import WiringDialog
+            WiringDialog(self.main, f"Wiring of '{name}'").exec()
 
     def delete(self):
         name = self._current()

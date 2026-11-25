@@ -135,7 +135,7 @@ Any number of instruments of any kind can be open at once, including several of 
 
 The GPIB-USB-HS is the system controller for the bus. On Linux it is driven by the open-source **linux-gpib** project (kernel module `ni_usb_gpib`).
 
-Ubuntu builds its kernel with `CONFIG_GPIB` turned off, so the module has to be built from source. `scripts/install-gpib-driver.sh` does this for you; see the **Installation** guide.
+Ubuntu builds its kernel with `CONFIG_GPIB` turned off, so the module has to be built from source: by the [GPIB packages](02-installation.md#gpib-packages), which do it again for each new kernel, or by hand. `scripts/install-gpib-driver.sh` does this for you; see the **Installation** guide.
 
 Other controllers supported by linux-gpib also work, such as the Agilent 82357A/B or a PCI-GPIB card. Edit `board_type` in `/etc/gpib.conf` to match yours. Prologix-style serial adapters are *not* supported, because the app expects a real GPIB board.
 

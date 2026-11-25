@@ -2,6 +2,8 @@
 
 Bug reports, instrument definitions, fixes and features are welcome. Run the tests first (`.venv/bin/python -m pytest tests`); no hardware is needed.
 
+If you have an instrument on your bench, a tape of its [hardware check](docs/03-users-guide.md#hardware-check) is as useful as code: see [tests/tapes](tests/tapes/README.md).
+
 ## Contributor terms
 
 OtterBench is released under the [GNU GPL version 3](LICENSE). Daniel McCall ("the maintainer") wants to stay able to change its license later, or to offer it under other terms as well. So that this stays possible, contributions are accepted only under these terms:

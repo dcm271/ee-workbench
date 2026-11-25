@@ -245,18 +245,26 @@ class MainWindow(QMainWindow):
                        self.show_bode)
         menu.addAction("Regulator test…  (efficiency, line and load regulation)",
                        self.show_regulator)
+        menu.addAction("Load transient test…  (droop, overshoot and recovery on a scope)",
+                       self.show_transient)
         menu.addAction("Battery tester…  (charge / discharge cycles, capacity, resistance)",
                        self.show_battery)
         menu.addAction("Calibration…  (due dates, check against a reference)",
                        self.show_calibration)
+        menu.addAction("Hardware check…  (is the driver right about this instrument?)",
+                       self.show_hwcheck)
         menu.addAction("Production test…  (serial numbers, PASS / FAIL, yield)",
                        self.show_production)
         menu.addAction("Safety…  (outputs off on quit / crash, heartbeat, reconnect)",
                        self.show_safety)
         menu.addSeparator()
         menu.addAction("Setups…  (save / recall the whole bench by name)", self.show_setups)
+        menu.addAction("Wiring notes…  (what is connected to what, with a photo)",
+                       self.show_wiring)
         menu.addAction("Open session…  (view a recording, cursors, report)",
                        lambda: open_viewer(self))
+        menu.addAction("Compare sessions…  (before / after, differences, limits)",
+                       self.show_compare)
         menu.addAction("Session report…  (HTML / PDF of a recording)", self.session_report)
         menu.addSeparator()
         self.api_action = menu.addAction("Remote API  (drive the bench from Python / Jupyter)")
@@ -380,6 +388,10 @@ class MainWindow(QMainWindow):
         from .regulator_window import RegulatorWindow
         return self._tool("reg_win", lambda: RegulatorWindow(self))
 
+    def show_transient(self):
+        from .transient_window import TransientWindow
+        return self._tool("trans_win", lambda: TransientWindow(self))
+
     def show_battery(self):
         from .battery_window import BatteryWindow
         return self._tool("bat_win", lambda: BatteryWindow(self))
@@ -387,6 +399,19 @@ class MainWindow(QMainWindow):
     def show_calibration(self):
         from .calibration_window import CalibrationWindow
         return self._tool("cal_win", lambda: CalibrationWindow(self))
+
+    def show_hwcheck(self):
+        from .hwcheck_window import HwCheckWindow
+        return self._tool("hw_win", lambda: HwCheckWindow(self))
+
+    def show_compare(self):
+        from .compare_window import CompareWindow
+        return self._tool("cmp_win", lambda: CompareWindow(self))
+
+    def show_wiring(self):
+        from .wiring_dialog import WiringDialog
+        if WiringDialog(self).exec() and session.active:
+            session.wiring_changed()
 
     def _tool(self, attr, factory):
         w = self._show(attr, factory)
@@ -1103,6 +1128,8 @@ class MainWindow(QMainWindow):
 
 def parse_target(s: str) -> tuple[str, str]:
     """'GPIB0::22::INSTR' or '3456A@GPIB0::22::INSTR' -> (model, resource)."""
+    if s.upper().startswith("REPLAY::"):
+        return "auto", s                   # a tape's path may hold an '@'
     if s.upper().startswith("SALEAE::"):
         return "SALEAE", s                 # its own '@host:port' is not MODEL@
     if s.upper().startswith("SIGROK::"):

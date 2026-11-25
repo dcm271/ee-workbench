@@ -16,6 +16,7 @@ from pathlib import Path
 
 import numpy as np
 
+from . import wiring
 from .about import APP_NAME
 
 PALETTE = ["#1f77b4", "#d6542b", "#2a9d5c", "#8e5bd6", "#c2185b", "#00838f", "#9e7b00"]
@@ -216,7 +217,8 @@ def failing_columns(row: dict) -> list[str]:
 
 def sequence_report(title: str, rows: list[dict], columns: list[str], plan: dict | None,
                     log: str, instruments: list[tuple[str, str]], outcome: str,
-                    started: float | None = None, x_col: str = "", y_cols=None) -> str:
+                    started: float | None = None, x_col: str = "", y_cols=None,
+                    images: list | None = None) -> str:
     started = started or time.time()
     passed = sum(1 for r in rows if r.get("result") == "PASS")
     failed = sum(1 for r in rows if r.get("result") == "FAIL")
@@ -233,7 +235,7 @@ def sequence_report(title: str, rows: list[dict], columns: list[str], plan: dict
             "<h2>Instruments</h2><table class='kv'>"]
     body = body[:-1] + _instruments(instruments)
     numeric = [c for c in columns if c not in ("t", "pass", "x", "result", "failures")
-               and any(isinstance(r.get(c), (int, float)) for r in rows)]
+               and not c.endswith(" ±") and any(isinstance(r.get(c), (int, float)) for r in rows)]
     xc = x_col or ("x" if "x" in columns else "pass")
     ys = y_cols or numeric[:4]
     if rows and ys:
@@ -257,11 +259,17 @@ def sequence_report(title: str, rows: list[dict], columns: list[str], plan: dict
         desc = {"once": "once", "repeat": f"{plan.get('count', 1)} times",
                 "sweep": f"sweep x from {plan.get('start')} to {plan.get('stop')} step "
                          f"{plan.get('step')}"}.get(loop, loop)
+        guard = {"marginal": "marked", "strict": "FAIL"}.get(plan.get("guard"), "not looked at")
         body.append(f"<p class='small'>Run {esc(desc)}; outputs off at the end: "
                     f"{'yes' if plan.get('off_at_end') else 'no'}; stop on first fail: "
-                    f"{'yes' if plan.get('stop_on_fail') else 'no'}.</p>")
+                    f"{'yes' if plan.get('stop_on_fail') else 'no'}; readings within their ± "
+                    f"of a limit: {guard}.</p>")
         if plan.get("use_script") and plan.get("script"):
             body.append(f"<pre>{esc(plan['script'])}</pre>")
+    if images:
+        body.append("<h2>Pictures</h2>")
+        for row, name, data in images:
+            body.append(f"<p>Row {row} · {esc(name)}</p>{_picture(data)}")
     if log.strip():
         body.append("<h2>Log</h2>")
         body.append(f"<pre>{esc(log[-30000:])}</pre>")
@@ -274,14 +282,27 @@ def _head(title: str, started: float | None = None) -> list[str]:
             f"<div class='sub'>{when} · {esc(platform.node())} · {APP_NAME}</div>"]
 
 
-def _instruments(instruments: list) -> list[str]:
-    """(name, identity) or (name, identity, calibration status) rows."""
+def _picture(data: bytes) -> str:
+    uri = wiring.data_uri(data)
+    return f"<p><img src='{uri}' style='max-width:100%; max-height:560px'></p>" if uri else ""
+
+
+def _instruments(instruments: list, wired=None) -> list[str]:
+    """(name, identity) or (name, identity, calibration status) rows, and how
+    they are connected (wired: a recording's own note; None: the bench's now)."""
     out = ["<h2>Instruments</h2><table class='kv'>"]
     for row in instruments:
         n, i, cal = (list(row) + [""])[:3]
         extra = f"<br><span class='small'>{esc(cal)}</span>" if cal else ""
         out.append(f"<tr><td>{esc(n)}</td><td>{esc(i)}{extra}</td></tr>")
-    return out + ["</table>"]
+    out.append("</table>")
+    w = wiring.current() if wired is None else wired
+    if not w.empty:
+        out.append("<h2>Wiring</h2>")
+        if w.text.strip():
+            out.append(f"<pre>{esc(w.text.strip())}</pre>")
+        out.append(_picture(w.image))
+    return out
 
 
 def _settings(pairs: dict) -> list[str]:
@@ -354,6 +375,28 @@ def regulator_report(title: str, rows: list[dict], a: dict, settings: dict, inst
     return _page(title, body)
 
 
+def transient_report(title: str, steps: list, a: dict, settings: dict, instruments: list,
+                     outcome: str) -> str:
+    from .transient import COLUMNS, UNITS
+    body = _head(title)
+    body.append(_badge(a.get("verdict", ""), f"{outcome} · {len(steps)} steps"))
+    if a["checks"]:
+        body.append("<ul>" + "".join(f"<li>{'✔' if ok else '✘'} {esc(t)}</li>"
+                                     for t, ok in a["checks"]) + "</ul>")
+    body += _instruments(instruments)
+    for up, name in ((True, "Load step up"), (False, "Load step down")):
+        g = [x for x in steps if x.up == up]
+        if g:
+            body.append(f"<h2>{name}</h2>")
+            body.append(svg_plot([(f"{x.n}", 1e6 * x.t, x.v) for x in g[:6]], "Time (µs)",
+                                 "Output (V)"))
+    body.append("<h2>Steps</h2>")
+    head = [f"{c} ({UNITS[c]})" if c in UNITS else c for c in COLUMNS]
+    body.append(_table(head, [{h: x.row()[c] for h, c in zip(head, COLUMNS)} for x in steps]))
+    body += _settings(settings)
+    return _page(title, body)
+
+
 def battery_report(title: str, samples: list[dict], cycles: list[dict], settings: dict,
                    instruments: list, outcome: str, log: str = "") -> str:
     body = _head(title)
@@ -409,6 +452,56 @@ def check_report(title: str, rows: list[dict], verdict: str, settings: dict,
     return _page(title, body)
 
 
+def hwcheck_report(title: str, rows: list[dict], verdict: str, text: str, settings: dict,
+                   instruments: list, summary: str) -> str:
+    body = _head(title)
+    body.append(_badge(verdict, text))
+    body += _instruments(instruments)
+    body.append("<h2>Steps</h2>")
+    body.append(_table(["step", "result", "detail", "ms"], rows))
+    body += _settings(settings)
+    body.append(f"<h2>Summary line</h2><pre>{esc(summary)}</pre>")
+    return _page(title, body)
+
+
+def compare_report(title: str, c, keys=None) -> str:
+    """c: a compare.Comparison; keys: the signals to show (None: all)."""
+    from pathlib import Path as P
+
+    from .compare import difference, table
+    body = _head(title)
+    if c.verdict:
+        body.append(_badge(c.verdict))
+        body.append("<ul>" + "".join(
+            f"<li>{'✔' if ok else '✘'} {esc(t)}{esc(f' ({why})' if why else '')}</li>"
+            for t, ok, why in c.checks) + "</ul>")
+    al = c.align
+    how = {"start": "the start of each session", "note": f"the note “{al.text}”",
+           "rise": f"{al.text} rising through {al.level:g}",
+           "fall": f"{al.text} falling through {al.level:g}"}[al.how]
+    body += _settings({"base": P(c.names[0]).name, "new": P(c.names[1]).name,
+                       "0 s is": how, "new moved by": f"{al.shift:g} s"})
+    for r in c.rows:
+        k = r.key
+        if keys is not None and k not in keys:
+            continue
+        a, b = c.base[k], c.new[k]
+        x = "Row" if a.rows else "Time (s)"
+        body.append(f"<h2>{esc(k)}</h2>")
+        body.append(svg_plot([("base", a.t, a.y), ("new", b.t, b.y)], x,
+                             f"{k} ({r.unit})" if r.unit else k))
+        t, d = difference(a, b)
+        if t.size > 1:
+            body.append(svg_plot([("new - base", t, d)], x, "difference", height=170))
+        head = ["", "unit", "base", "new", "difference", "%"]
+        body.append(_table(head, [dict(zip(head, row[1:])) for row in table(c, {k})]))
+    for text, only in zip(("base", "new"), c.only):
+        if only:
+            body.append(f"<p class='small'>Only in the {text} session: "
+                        f"{esc(', '.join(only))}</p>")
+    return _page(title, body)
+
+
 def calibration_report(entries: list) -> str:
     title = "Instrument calibration status"
     body = _head(title)
@@ -440,7 +533,7 @@ def session_report(path: str, title: str = "", t_range: tuple[float, float] | No
                 "<h2>Instruments</h2><table class='kv'>"]
         body = body[:-1] + _instruments(
             [(st.name, f"{st.model} · {st.resource} · {st.t.size} readings",
-              s.meta.get(f"cal:{st.id}", "")) for st in s.streams])
+              s.meta.get(f"cal:{st.id}", "")) for st in s.streams], s.wiring)
         notes = [(t - a, text) for t, text in s.notes if a <= t <= b]
         body.append("<h2>Plots</h2><p class='small'>Time is seconds from "
                     f"{esc(s.wall(a))}. Dashed lines are notes.</p>")
@@ -469,6 +562,11 @@ def session_report(path: str, title: str = "", t_range: tuple[float, float] | No
             body += [f"<tr><td class='num'>{t:.3f}</td><td>{esc(s.wall(t + a))}</td>"
                      f"<td>{esc(text)}</td></tr>" for t, text in notes]
             body.append("</table>")
+        shown = [(t, n, d) for t, n, d in s.images if a <= t <= b]
+        if shown:
+            body.append("<h2>Pictures</h2>")
+            for t, n, d in shown:
+                body.append(f"<p>{t - a:.3f} s · {esc(n)}</p>{_picture(d)}")
         if s.captures:
             body.append("<h2>Logic captures</h2><table><tr><th>t (s)</th><th>Capture</th>"
                         "<th>Decoded rows</th><th>Alignment</th></tr>")

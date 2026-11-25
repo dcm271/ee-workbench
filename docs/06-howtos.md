@@ -32,6 +32,9 @@ Each recipe is a complete job from start to finish. The [User's Guide](03-users-
 | [Catch a glitch with the scope](#catch-a-glitch-with-the-scope) | scope, watchdog capture, flight recorder |
 | [Measure two rails with two PPK2s](#measure-two-rails-with-two-ppk2s) | several PPK2s, alignment, math |
 | [Set up a production test station](#set-up-a-production-test-station) | production test, sequencer limits, barcode scanner |
+| [Check an instrument nobody has tried yet](#check-an-instrument-nobody-has-tried-yet) | hardware check, tapes |
+| [Flash a board, then test it](#flash-a-board-then-test-it) | sequencer commands, retries |
+| [Fail a build when the current goes up](#fail-a-build-when-the-current-goes-up) | compare, CI |
 | [Leave a test running overnight](#leave-a-test-running-overnight) | safety, In HW limits, flight recorder, resume |
 
 ---
@@ -493,6 +496,46 @@ Test a batch of boards with a barcode scanner, a PASS / FAIL banner and a record
 A failed board that is reworked is simply scanned again: the history keeps both results, *first-pass yield* counts the failure, *final yield* the pass.
 
 To stop a test (a board badly seated), press **■ Stop** or **Esc**: every output goes off and the unit is recorded as **ERROR**, not FAIL. On a Pi touch screen the window fills the screen; see [Raspberry Pi](05-raspberry-pi.md#production-test-station).
+
+---
+
+## Check an instrument nobody has tried yet
+
+1. Open it. Disconnect everything from its outputs, and a meter's test leads.
+2. **Tools ▾ → Hardware check…**, **Read only**, **▶ Run check**. Anything red: read its detail; the tab's **Console** shows what was sent.
+3. **Settings (outputs off)**, and for a supply **Output on (nothing connected)**.
+4. **Save tape…** as `MODEL-FIRMWARE.tape`. Look through it (it is text), then add it to `tests/tapes/`: from now on the tests replay it. Please also [report it](../README.md#reporting-what-works), with **Copy summary**.
+
+---
+
+## Flash a board, then test it
+
+| Action | Instrument | Setting | Value | Results column | Min | Max |
+|---|---|---|---|---|---|---|
+| Set | supply | `voltage` | `3.3` | | | |
+| Set | supply | `output` | `on` | | | |
+| Wait | | | `0.5` | | | |
+| Retry | | | `2 wait=1` | | | |
+| Command | | `Hash of data verified` | `esptool --port /dev/ttyUSB0 write_flash 0x0 app.bin timeout=120` | flash | | |
+| End | | | | | | |
+| Wait for | console | | `boot ok v(\S+) timeout=5` | firmware | | |
+| Measure | PPK2 | `current` | `2` | I sleep | | `10e-6` |
+
+Tick **Outputs off at the end**. In a [production test](03-users-guide.md#production-test), `{serial}` in the command writes the scanned number into the board. Any flasher that sets its exit status works the same way.
+
+---
+
+## Fail a build when the current goes up
+
+1. Record a session of the board running known-good firmware, from a test that does the same thing every time (a sequence, or a script over the [Remote API](#run-hardware-tests-from-pytest-or-ci)). Keep it as `base.otter`.
+2. In CI, flash the new firmware, record `new.otter` the same way, and compare:
+
+```bash
+otterbench-compare base.otter new.otter --align rise:ppk2.current_A:0.005 --from 0 --to 10 \
+    --check "ppk2.current_A mean +5%" --check "ppk2.current_A max +0.02" --report power.html
+```
+
+(`python -m otterbench.compare` from a source folder.) It exits with 1 when a check fails. Look at both first in **Tools ▾ → Compare sessions…**, which shows the signals' names and how much two runs of the *same* firmware differ: the limit must be wider than that.
 
 ---
 

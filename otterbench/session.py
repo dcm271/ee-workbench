@@ -100,6 +100,8 @@ class SessionWriter:
                 resource TEXT, columns TEXT, tbl TEXT);
             CREATE TABLE IF NOT EXISTS notes(t REAL, text TEXT);
             CREATE TABLE IF NOT EXISTS events(t REAL, t_from REAL, t_to REAL, why TEXT);
+            CREATE TABLE IF NOT EXISTS images(id INTEGER PRIMARY KEY, t REAL, name TEXT,
+                data BLOB);
             CREATE TABLE IF NOT EXISTS captures(id INTEGER PRIMARY KEY, t_app REAL, t0 REAL,
                 aligned INTEGER, name TEXT, cfg TEXT, data BLOB, table_header TEXT,
                 table_rows TEXT, note TEXT);
@@ -107,6 +109,8 @@ class SessionWriter:
         wall_t0 = time.time() - (time.monotonic() - APP_T0)
         meta = {"format": FORMAT, "created": time.strftime("%Y-%m-%dT%H:%M:%S"),
                 "wall_t0": f"{wall_t0:.6f}", "app": "OtterBench"}
+        from . import wiring
+        meta["wiring"] = json.dumps(wiring.current().to_dict())
         old = dict(db.execute("SELECT key, value FROM meta"))
         if "wall_t0" in old:   # appending to an earlier file: keep its t = 0
             meta.pop("wall_t0")
@@ -223,6 +227,20 @@ class SessionWriter:
             (res.t_app + self._shift, t0 + self._shift, int(aligned), name,
              json.dumps(asdict(res.cfg)), pack_traces(res), json.dumps(res.table_header),
              json.dumps(res.table_rows), res.offset_note))
+        self.db.commit()
+
+    def image(self, data: bytes, name: str, t: float | None = None):
+        """A picture (a scope's screen)."""
+        t = now() if t is None else t
+        self.trigger(t, f"picture: {name}")
+        self.db.execute("INSERT INTO images(t, name, data) VALUES (?, ?, ?)",
+                        (t + self._shift, name, sqlite3.Binary(data)))
+        self.db.commit()
+
+    def wiring_changed(self):
+        from . import wiring
+        self.db.execute("INSERT OR REPLACE INTO meta VALUES ('wiring', ?)",
+                        (json.dumps(wiring.current().to_dict()),))
         self.db.commit()
 
     def flush(self):
@@ -351,6 +369,16 @@ class SessionReader:
                 "SELECT t_from, t_to, why FROM events ORDER BY t")]
         except sqlite3.Error:     # files from before events existed
             self.events = []
+        from .wiring import Wiring
+        try:
+            self.wiring = Wiring.from_dict(json.loads(self.meta.get("wiring", "{}")))
+        except ValueError:
+            self.wiring = Wiring()
+        try:
+            self.images = [(float(t), name or "", bytes(data)) for t, name, data in
+                           self.db.execute("SELECT t, name, data FROM images ORDER BY t")]
+        except sqlite3.Error:     # files from before pictures existed
+            self.images = []
         self.captures = [SavedCapture(i, ta, t0, bool(al), name or "", note or "", self.db)
                          for i, ta, t0, al, name, note in self.db.execute(
                              "SELECT id, t_app, t0, aligned, name, note FROM captures "
@@ -360,6 +388,7 @@ class SessionReader:
         ts = [s.t[[0, -1]] for s in self.streams if s.t.size]
         ts += [np.array([t, t]) for t, _ in self.notes]
         ts += [np.array([c.t0, c.t_app]) for c in self.captures]
+        ts += [np.array([t, t]) for t, _, _ in self.images]
         if not ts:
             return 0.0, 1.0
         allt = np.concatenate(ts)

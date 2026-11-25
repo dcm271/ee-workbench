@@ -18,7 +18,7 @@ from ..instruments import xdm
 from ..instruments.hp3456a import FUNCTIONS, NPLC_CHOICES, ranges_for
 from . import touch
 from .panel_base import PanelBase
-from .widgets import (C_DMM, C_MUTED, C_WARN, MONO, Readout, TraceBuffer, fmt_fixed,
+from .widgets import (C_DMM, C_MUTED, C_WARN, MONO, Readout, TraceBuffer, fmt_fixed, fmt_si,
                       range_full_scale)
 
 NPLC_LABELS = {0.01: "0.01 PLC  (fastest, ~4½ digits)", 0.1: "0.1 PLC  (~5½ digits)",
@@ -288,11 +288,22 @@ class DmmPanel(PanelBase):
             self.readout.set(self._fmt(r.value, r.unit, sig))
             self.ovld_label.setText("")
             value = r.value
+        self._show_pm(value, r)
         self.buf.append([r.t, value])
         if self.recording:
             self.record([time.strftime("%Y-%m-%dT%H:%M:%S"), f"{r.t:.3f}",
                                self.name_edit.text(), self.cfg.function, value, r.unit,
                                int(r.overload)])
+
+    def accuracy_keys(self, what, r=None):
+        fn = getattr(r, "function", "") or getattr(self.cfg, "function", "")
+        return [fn, what]
+
+    def _show_pm(self, value, r):
+        if not self.pm_due():
+            return
+        u = None if value is None else self.uncertainty("value", value, r)
+        self.readout.set_pm("" if u is None else "± " + fmt_si(u, r.unit, 2))
 
     def csv_header(self):
         return ["timestamp", "t_s", "channel", "function", "value", "unit", "overload"]
@@ -334,11 +345,21 @@ class DmmPanel(PanelBase):
         for w in (self.span_combo, self.freeze_chk, self.trace_chk):
             w.setEnabled(True)
 
+    # what the sequencer can set
+    def set_names(self) -> list[str]:
+        return ["function", "range", "nplc", "autozero", "filter", "null"]
+
+    def setting_kinds(self) -> dict:
+        return {"function": "choice", "range": "choice"}
+
 
 class HandheldDmmPanel(DmmPanel):
     """B&K 393 / 393B: function and range are set on the meter; the tab shows
     and records whatever it reports."""
     HAS_NULL = False
+
+    def set_names(self) -> list[str]:
+        return []                          # its own knob chooses
 
     def __init__(self, resource: str, model: str, baud: int):
         self.TITLE = model.removeprefix("BK")
@@ -430,6 +451,7 @@ class HandheldDmmPanel(DmmPanel):
         self.info["Mode"].setText("  ".join(r.flags) or "—")
         self.info["Second display"].setText(r.secondary or "—")
         value = None if r.overload or r.text else r.value
+        self._show_pm(value, r)
         self.buf.append([r.t, value])
         if self.recording:
             self.record([time.strftime("%Y-%m-%dT%H:%M:%S"), f"{r.t:.3f}",
@@ -439,6 +461,12 @@ class HandheldDmmPanel(DmmPanel):
 class XdmPanel(HandheldDmmPanel):
     """OWON XDM1041 / XDM1241 / XDM2041: settable, and it follows the meter's
     own buttons (the settings come back with the readings)."""
+
+    def set_names(self) -> list[str]:
+        return ["function", "range", "rate", "dual"]
+
+    def setting_kinds(self) -> dict:
+        return {"function": "choice", "range": "choice", "rate": "choice"}
 
     def __init__(self, resource: str, model: str, baud: int):
         self._functions = [f for f in xdm.FUNCTIONS if f != "4W Ω"]

@@ -13,6 +13,7 @@ from PyQt6.QtWidgets import (QCheckBox, QComboBox, QFileDialog, QFormLayout, QFr
                              QPushButton, QScrollArea, QSpinBox, QSplitter, QTabWidget,
                              QVBoxLayout, QWidget)
 
+from ..analysis import trapezoid
 from ..instruments.base import SupplyCaps, SupplyPoll, SupplyReading, Setpoints
 from . import touch
 from .capture_tab import CaptureTab
@@ -596,7 +597,7 @@ class SupplyPanel(PanelBase):
         if self.p_d.isVisible():
             self.c_d.setData(t, dvm, connect="finite")
         t, v, i = w[:, 0], w[:, 1], w[:, 2]
-        charge = float(np.trapezoid(i, t)) / 3600 if t.size > 1 else float("nan")
+        charge = trapezoid(i, t) / 3600 if t.size > 1 else float("nan")
         vtxt = f"   V avg {np.nanmean(v):.4f} V" if np.isfinite(v).any() else ""
         self.trend_stats.setText(
             f"I avg {fmt_current(i.mean())}  min {fmt_current(i.min())}  "

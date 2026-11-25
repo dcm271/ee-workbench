@@ -126,6 +126,12 @@ def model_for(resource: str, model: str = "auto") -> str:
     """The model implied by the resource name, if any (simulators, PPK2 ports)."""
     if model != "auto":
         return model
+    if resource.upper().startswith("REPLAY::"):
+        from .. import tape
+        try:
+            return tape.load(tape.replay_path(resource)).model
+        except tape.TapeError:
+            return "auto"               # opening it says what is wrong
     if resource.upper().startswith("PPK2::"):
         return "PPK2"
     if resource.upper().startswith("SALEAE::"):

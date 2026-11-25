@@ -24,6 +24,47 @@ These steps take a fresh Ubuntu machine to OtterBench talking to your instrument
 >
 > **Raspberry Pi?** `scripts/setup-pi.sh` does the same for the Pi. See *Raspberry Pi & Touch Screen*.
 
+## Packages
+
+Instead of a source folder you can install a package. Each has the whole program except the GPIB kernel driver, which must be compiled for your kernel: with the [GPIB packages](#gpib-packages) below, or from the source folder ([section 3](#3-gpib-driver-linux-gpib)). A bench without GPIB needs nothing else.
+
+| | Build it with | Then |
+|---|---|---|
+| **.deb** (Ubuntu 24.04 or later, Debian 12 or later, Raspberry Pi OS bookworm or later) | `scripts/build-deb.sh` | `sudo apt install ./dist/otterbench_0.9.0_all.deb` |
+| **AppImage** (one file, x86_64 or 64-bit ARM) | `scripts/build-appimage.sh` | `./dist/OtterBench-0.9.0-x86_64.AppImage` |
+| **pip** | | `pip install .` in a virtual environment |
+
+The **.deb** is the one to prefer on Ubuntu and Debian: menu entry, icon, the Qt of your system, updates to its dependencies, and a udev rule that gives whoever sits at the screen access to USB instruments and the usual USB-serial chips (no group needed). Over SSH, or for an unattended station, join the groups: `sudo usermod -aG dialout,plugdev $USER`, then log in again. `apt` also installs sigrok-cli, GPIO support and WeasyPrint (PDF reports) as recommended packages; add `--no-install-recommends` to leave them out. The launcher is `otterbench`, with the options of `run.sh`.
+
+The **AppImage** can't set USB permissions: install the udev rule (from `scripts/setup-ubuntu.sh` or the .deb) or join the groups. On a system without FUSE 2, run it with `--appimage-extract-and-run`. It also has the tools: `./OtterBench-….AppImage check-instruments`, `replay FILE`, `compare BASE NEW`.
+
+### GPIB packages
+
+`scripts/build-gpib-deb.sh` makes two packages:
+
+| | |
+|---|---|
+| **otterbench-gpib-dkms** | The kernel driver as source. DKMS compiles it when it is installed, and again by itself for every new kernel. Adapters: NI GPIB-USB-B / HS / HS+, Agilent 82357A/B, and other USB ones; NI and Agilent PCI cards. |
+| **otterbench-libgpib** | The library and `gpib_config`, for distributions without them (Ubuntu 24.04, Debian 12 and 13). Built on your own system it may not run on older ones; `LIB_IMAGE=debian:12` builds it in Docker for all of them. |
+
+```bash
+LIB_IMAGE=debian:12 scripts/build-gpib-deb.sh
+# Ubuntu 26.04 or later (its own gpib-user-tools comes along):
+sudo apt install ./dist/otterbench-gpib-dkms_*_all.deb
+# Ubuntu 24.04, Debian 12 and 13:
+sudo apt install ./dist/otterbench-gpib-dkms_*_all.deb ./dist/otterbench-libgpib_*.deb
+```
+
+- **An `/etc/gpib.conf` of your own:** apt asks; keep yours (the default answer).
+- **Permissions:** whoever sits at the screen can use the adapter. Over SSH, join the group: `sudo usermod -aG gpib $USER`, then log in again.
+- **After `scripts/install-gpib-driver.sh`:** its copy in `/usr/local` goes on being used. `scripts/remove-local-gpib.sh` takes it out; unplug the adapter and plug it in again afterwards.
+- **A kernel it doesn't compile for:** the kernel's installation says so and goes on. GPIB is missing with that kernel; boot the previous one, or use a newer linux-gpib. `dkms status` shows which kernels have the driver.
+- **No headers:** `sudo apt install linux-headers-$(uname -r)`; the driver is then built. A panel PC with its maker's kernel and no headers package needs section 3.
+- **Secure Boot:** the driver loads only if DKMS's key is enrolled; the installation says how. Off: nothing to do.
+- **A kernel that has GPIB drivers itself** (`CONFIG_GPIB`): nothing is built.
+
+Tested by installing in clean containers of Ubuntu 24.04 and 26.04, Debian 12 and 13 (x86_64). Not tried yet: a Raspberry Pi.
+
 ## 1. Get the project
 
 The project lives in `~/Dev/otterbench`:
@@ -34,13 +75,18 @@ otterbench/
 ├── otterbench.desktop           launcher for the menu, desktop or autostart
 ├── otterbench/                  application source
 ├── scripts/
+│   ├── build-gpib-deb.sh        builds the GPIB driver packages
+│   ├── remove-local-gpib.sh     removes install-gpib-driver.sh's library from /usr/local
 │   ├── install-gpib-driver.sh   builds and installs linux-gpib
 │   ├── prepare-kernel-tree.sh   kernel tree for boards with no headers package (called by the above)
 │   ├── setup-ubuntu.sh          complete Ubuntu setup
 │   ├── setup-pi.sh              complete Raspberry Pi setup
+│   ├── build-deb.sh             builds a .deb package
+│   ├── build-appimage.sh        builds an AppImage
 │   ├── build-docs.sh            renders these docs to PDF (runs build_docs.py)
 │   ├── make_screenshots.py      regenerates the user-guide images (--touch: touch layout)
 │   └── touch_screenshots.py     the touch-layout part of make_screenshots.py --touch
+├── pyproject.toml               for pip install
 ├── requirements.txt             the Python packages for .venv
 ├── vendor/linux-gpib/           linux-gpib source (fetched from SourceForge)
 ├── docs/                        this documentation (Markdown and PDF)

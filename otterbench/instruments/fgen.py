@@ -21,11 +21,11 @@ from dataclasses import dataclass, field
 
 from ..transport import TransportTimeout
 
-FUNCS = ("sine", "square", "ramp", "pulse", "noise", "dc")
+FUNCS = ("sine", "square", "ramp", "pulse", "noise", "dc", "arb")
 SCPI_FUNC = {"sine": "SIN", "square": "SQU", "ramp": "RAMP", "pulse": "PULS", "noise": "NOIS",
-             "dc": "DC"}
+             "dc": "DC", "arb": "ARB"}
 SIGLENT_FUNC = {"sine": "SINE", "square": "SQUARE", "ramp": "RAMP", "pulse": "PULSE",
-                "noise": "NOISE", "dc": "DC"}
+                "noise": "NOISE", "dc": "DC", "arb": "ARB"}
 KNOWN = ("SDG", "DG8", "DG9", "DG1", "DG2", "DG4", "DG5", "33210", "33220", "33250", "33500",
          "33509", "33510", "33511", "33512", "33519", "33520", "33521", "33522", "33600",
          "33611", "33612", "33621", "33622", "AFG")
@@ -159,6 +159,8 @@ class FunctionGenerator:
             p = self._p(ch)
             back = {v: k for k, v in SCPI_FUNC.items()}
             f = self.query(p + "FUNC?").strip('"').upper()
+            if f.startswith("USER"):        # an arbitrary waveform on the older ones
+                f = "ARB"
             c.function = next((v for k, v in back.items() if f.startswith(k)), "sine")
             c.frequency = _num(self.query(p + "FREQ?"), c.frequency)
             c.amplitude = _num(self.query(p + "VOLT?"), c.amplitude)
@@ -191,7 +193,8 @@ class FunctionGenerator:
             if self.caps.dialect == "siglent":
                 self.write(f"C{ch}:BSWV WVTP,{SIGLENT_FUNC[f]}")
             else:
-                self.write(f"{self._p(ch)}FUNC {SCPI_FUNC[f]}")
+                word = "USER" if f == "arb" and self.arb_style() != "keysight" else SCPI_FUNC[f]
+                self.write(f"{self._p(ch)}FUNC {word}")
             c.function = f
         elif what in ("frequency", "amplitude", "offset", "duty"):
             v = float(value)
@@ -219,6 +222,67 @@ class FunctionGenerator:
             c.output = on
         else:
             raise ValueError(f"can't set '{what}'")
+
+    # ---- arbitrary waveforms -------------------------------------------------------
+    def arb_style(self) -> str:
+        """How this one takes a waveform: siglent | rigol | keysight | user."""
+        if self.caps.dialect == "siglent":
+            return "siglent"
+        u = self.caps.idn.upper()
+        if "RIGOL" in u:
+            return "rigol"
+        # 33500B / 33600A and their relatives; the 33210A … 33250A are older
+        return "keysight" if re.search(r"\b(335|336|EDU33)", u) else "user"
+
+    def upload(self, wave, ch: int | None = None):
+        """Load an arb.Wave and select it, with its amplitude, offset and
+        period. Refused while the output is on: the circuit would get whatever
+        comes in between. (Untried on hardware.)"""
+        ch = ch or self.ch
+        self.select(ch)
+        if self.read_channel(ch).output:
+            raise ValueError("switch the output off before loading a waveform")
+        style, p, freq = self.arb_style(), self._p(ch), 1.0 / wave.seconds
+        unit = wave.unit()
+        text = ",".join(f"{x:.5f}" for x in unit)
+        with self.t.temp_timeout(30.0):
+            if style == "siglent":
+                import struct
+                codes = [int(round(x * 32767)) for x in unit]
+                head = (f"C{ch}:WVDT WVNM,otter{ch},TYPE,8,FREQ,{freq:.10g},"
+                        f"AMPL,{wave.amplitude:.6g},OFST,{wave.offset:.6g},PHASE,0.0,WAVEDATA,")
+                if self.log:
+                    self.log(f"> {head}<{2 * len(codes)} bytes>")
+                self.t.write_bytes(head.encode() + struct.pack(f"<{len(codes)}h", *codes))
+                self.write(f"C{ch}:ARWV NAME,otter{ch}")
+                self.write(f"C{ch}:BSWV WVTP,ARB")
+                self.write(f"C{ch}:BSWV FRQ,{freq:.10g},AMP,{wave.amplitude:.6g},"
+                           f"OFST,{wave.offset:.6g}")
+            else:
+                if style == "keysight":
+                    self.write(f"{p}DATA:VOL:CLE")
+                    self.write(f"{p}DATA:ARB otter,{text}")
+                    self.write(f"{p}FUNC:ARB otter")
+                    self.write(f"{p}FUNC:ARB:SRAT {unit.size * freq:.10g}")
+                    self.write(f"{p}FUNC ARB")
+                else:
+                    if style == "rigol":
+                        self.write(f"{p}DATA VOLATILE,{text}")
+                    else:
+                        self.write(f"DATA VOLATILE,{text}")
+                        self.write(f"{p}FUNC:USER VOLATILE")
+                    self.write(f"{p}FUNC USER")
+                    self.write(f"{p}FREQ {freq:.10g}")
+                self.write(f"{p}VOLT {wave.amplitude:.6g}")
+                self.write(f"{p}VOLT:OFFS {wave.offset:.6g}")
+            try:                            # wait until it has digested the points
+                self.query("*OPC?")
+            except TransportTimeout:
+                self.t.clear()
+        errs = self.errors()
+        self.read_channel(ch)
+        if errs:
+            raise RuntimeError("the generator didn't take the waveform: " + "; ".join(errs))
 
     def set_output(self, on: bool):
         """All outputs off (Esc) or on: every channel."""

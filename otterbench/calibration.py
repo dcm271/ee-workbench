@@ -68,6 +68,7 @@ class Entry:
     notes: str = ""
     history: list = field(default_factory=list)      # earlier calibrations
     checks: list = field(default_factory=list)       # compared against a reference
+    accuracy: dict = field(default_factory=dict)     # function or reading -> spec (accuracy.py)
 
     @classmethod
     def from_dict(cls, d: dict) -> "Entry":
@@ -76,6 +77,8 @@ class Entry:
         e.key, e.months = str(e.key), int(e.months)
         e.history = [x for x in e.history if isinstance(x, dict)]
         e.checks = [x for x in e.checks if isinstance(x, dict)]
+        e.accuracy = {str(k): str(v) for k, v in e.accuracy.items()} \
+            if isinstance(e.accuracy, dict) else {}
         return e
 
     def due(self) -> date | None:
@@ -147,6 +150,8 @@ class Log:
         tmp.write_text(json.dumps({"instruments": [asdict(e) for e in self.entries]}, indent=1,
                                   ensure_ascii=False))
         os.replace(tmp, self.path)
+        from .accuracy import forget
+        forget()
 
     def find(self, idn: str, resource: str) -> Entry | None:
         k = key_of(idn, resource)
@@ -249,6 +254,10 @@ class Check:
                     bench.wait(s.settle)
                 # reference, instrument, reference: a slow drift cancels
                 a = bench.measure(names[1][0], names[1][2], s.average / 2)
+                u = bench.uncertainty(names[1][0], names[1][2], a)
+                if u is not None and 4 * u > abs(a) * s.percent / 100 + s.floor:
+                    bench.log(f"the reference is only good to ±{u:.3g} here: less than four "
+                              "times better than the tolerance")
                 d = bench.measure(names[0][0], names[0][2], s.average)
                 b = bench.measure(names[1][0], names[1][2], s.average / 2)
                 row = {"level": x if x is not None else (a + b) / 2, **judge((a + b) / 2, d, s)}

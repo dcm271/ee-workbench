@@ -9,6 +9,7 @@ import traceback
 from PyQt6.QtCore import QThread, pyqtSignal
 
 from .clock import APP_T0, now  # noqa: F401  (one time base for every instrument)
+from . import tape
 from .instruments import make_driver, model_for
 from .transport import open_transport
 
@@ -51,6 +52,9 @@ class InstrumentWorker(QThread):
         self._q: queue.Queue = queue.Queue()
         self._running = True
         self.drv = None
+        self.tap = None             # the link's recorder (tape.py), None: not recordable
+        self.connect_events: list = []      # what went over the link while connecting
+        self.tape_model = ""        # model key the driver was made with
         self.poll_cfg = None
         self.poll_enabled = True
         self.interval_s = 0.0
@@ -62,6 +66,19 @@ class InstrumentWorker(QThread):
     def submit(self, fn, *args, refresh=False):
         """Queue `fn(drv, *args)` to run on the I/O thread."""
         self._q.put((fn, args, refresh))
+
+    def taped(self, fn):
+        """fn(drv) -> the same, with its traffic added to the tape (run it on
+        the I/O thread, e.g. through submit)."""
+        def job(drv):
+            if self.tap is not None:
+                self.tap.tap_on = True
+            try:
+                return fn(drv)
+            finally:
+                if self.tap is not None:
+                    self.tap.tap_on = False
+        return job
 
     def set_trace(self, on: bool):
         self._trace = on
@@ -139,11 +156,22 @@ class InstrumentWorker(QThread):
             self.log.emit(f"Opening {self.resource} ...")
             t = open_transport(self.resource, self.baud,
                                model_for(self.resource, self.model))
-            drv = make_driver(self.model, t, self.resource)
+            model, tap = model_for(self.resource, self.model), None
+            if tape.tapeable(model):
+                t, tap = tape.wrap(t)
+            drv = make_driver(model, t, self.resource)
+            if tap is not None:
+                tap.tap_on = True       # not the guessing of auto-detect before it
             caps = drv.identify()
             self.drv = drv
+            self.tape_model = tape.model_of(drv, model)
             drv.log = self.log.emit if self._trace else None
             st = self._read_state()
+            if tap is not None:
+                tap.tap_on = False
+                self.connect_events = list(tap.tap_events)
+                tap.tap_clear()
+                self.tap = tap
             self.log.emit(f"Connected: {caps.idn}")
             self.connected.emit(drv.family, caps, st)
             return True

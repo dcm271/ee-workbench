@@ -162,6 +162,7 @@ class ScopeDriver:
         self.state = ScopeState()
         self.caps = ScopeCaps(dialect=dialect)
         self._armed: dict | None = None
+        self.masks: dict = {}        # channel -> mask.Mask (measure "mask1")
 
     # ---- plumbing --------------------------------------------------------------
     def _log(self, s):
@@ -499,6 +500,29 @@ class ScopeDriver:
         res.t_armed = armed["t_app"] if armed else None
         return res
 
+    def screenshot(self) -> bytes:
+        """The scope's screen as PNG or BMP. Untried on hardware; Tektronix
+        scopes differ too much between series and aren't supported."""
+        from ..wiring import image_type
+        d = self.dialect
+        with self.t.temp_timeout(20.0):
+            if d == "keysight":
+                data = self._raw(":DISP:DATA? PNG")
+            elif d == "rigol":
+                try:                        # DS1000Z; others take no parameters (BMP)
+                    data = self._raw(":DISP:DATA? ON,OFF,PNG")
+                except TransportTimeout:
+                    self.t.clear()
+                    data = self._raw(":DISP:DATA?")
+            elif d == "siglent":
+                self._log("> SCDP")
+                data = self.t.query_bytes("SCDP")
+            else:
+                raise RuntimeError("Screenshots aren't supported on Tektronix scopes")
+        if not image_type(data):
+            raise RuntimeError(f"The scope sent {len(data)} bytes that aren't a picture")
+        return data
+
     # ---- the worker's capture protocol (see worker.request_capture) ------------------
     def arm(self, _spec=None) -> float:
         """Single acquisition; capture_done() says when it triggered."""
@@ -528,6 +552,15 @@ class ScopeDriver:
     def measure(self, what: str) -> float:
         """'vpp1', 'freq2', … from the waveform on screen now."""
         m = re.match(r"^([a-z]+)(\d)$", what.lower())
+        if m and m.group(1) == "mask":
+            ch = int(m.group(2))
+            if ch not in self.masks:
+                raise ValueError(f"CH{ch} has no mask (make one on the Waveforms tab)")
+            tr = self.fetch_channel(ch)
+            bad, judged, _ = self.masks[ch].check(tr.t, tr.v)
+            if not judged:
+                raise ValueError("the waveform and the mask don't overlap in time")
+            return float(bad)
         if not m or m.group(1) not in MEASUREMENTS:
             raise ValueError(f"measure one of {', '.join(MEASUREMENTS)} followed by the "
                              "channel number, e.g. vpp1 or freq2")

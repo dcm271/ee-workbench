@@ -19,6 +19,7 @@ import math
 
 import pyqtgraph as pg
 from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QPixmap
 from PyQt6.QtWidgets import (QAbstractItemView, QCheckBox, QDialog, QDialogButtonBox,
                              QFileDialog, QFormLayout, QHBoxLayout, QHeaderView, QLabel,
                              QLineEdit,
@@ -101,7 +102,7 @@ class SessionViewer(QMainWindow):
         self.notes.itemClicked.connect(lambda it: self.go(it.data(Qt.ItemDataRole.UserRole)))
         self.side_tabs.addTab(self.notes, "Notes")
         self.caps = QListWidget()
-        self.caps.itemClicked.connect(lambda it: self.go(*it.data(Qt.ItemDataRole.UserRole)))
+        self.caps.itemClicked.connect(self._capture_clicked)
         self.side_tabs.addTab(self.caps, "Captures")
         self.serial = QListWidget()
         self.serial.itemClicked.connect(lambda it: self.go(it.data(Qt.ItemDataRole.UserRole)))
@@ -226,9 +227,34 @@ class SessionViewer(QMainWindow):
             it.setData(Qt.ItemDataRole.UserRole, (a0, b0))
             it.setToolTip(c.note or "Not aligned: placed to within a few ms by the host clock")
             self.caps.addItem(it)
+        for t, name, data in s.images:
+            it = QListWidgetItem(f"{self._clock(t)}  picture: {name}")
+            it.setData(Qt.ItemDataRole.UserRole, (t, t))
+            it.setData(Qt.ItemDataRole.UserRole + 1, data)
+            self.caps.addItem(it)
         self._fill_table()
         self._build_plots()
         self.fit()
+
+    def _capture_clicked(self, it):
+        data = it.data(Qt.ItemDataRole.UserRole + 1)
+        a, b = it.data(Qt.ItemDataRole.UserRole)
+        if data is None:
+            self.go(a, b)
+            return
+        self.go(a)
+        pm = QPixmap()
+        pm.loadFromData(bytes(data))
+        dlg = QDialog(self)
+        dlg.setWindowTitle(it.text().strip())
+        lab = QLabel("This picture can't be shown") if pm.isNull() else QLabel()
+        if not pm.isNull():
+            lab.setPixmap(pm.scaled(1100, 700, Qt.AspectRatioMode.KeepAspectRatio,
+                                    Qt.TransformationMode.SmoothTransformation)
+                          if pm.width() > 1100 or pm.height() > 700 else pm)
+        v = QVBoxLayout(dlg)
+        v.addWidget(lab)
+        dlg.exec()
 
     def _clock(self, t: float) -> str:
         return f"{t - self.t_ref:9.3f} s"

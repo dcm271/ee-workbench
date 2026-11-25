@@ -278,7 +278,8 @@ class ProductionWindow(QMainWindow):
             html = sequence_report(title, seq.rows, seq.columns,
                                    getattr(seq, "run_plan_dict", None),
                                    seq.logbox.toPlainText(), getattr(seq, "run_insts", []),
-                                   outcome, self.started)
+                                   outcome, self.started,
+                                   images=getattr(seq.bench, "images", None))
             (folder / name).write_text(html)
             return str(folder / name)
         except OSError as e:

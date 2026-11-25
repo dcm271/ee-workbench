@@ -5,6 +5,12 @@ from __future__ import annotations
 import numpy as np
 
 
+def trapezoid(y, t) -> float:
+    """np.trapezoid (NumPy 2) / np.trapz (1.x, Ubuntu 24.04 and Debian 12)."""
+    y, t = np.asarray(y, float), np.asarray(t, float)
+    return float(np.sum(np.diff(t) * (y[1:] + y[:-1]) / 2))
+
+
 def levels(y: np.ndarray) -> tuple[float, float]:
     """High and low levels of a two-level (pulsed) waveform: the mean of the
     samples above / below the 50 % point. Same idea as the 663xx's
@@ -81,7 +87,7 @@ def measure(t: np.ndarray, y: np.ndarray, unit: str = "A",
         if ft:
             m["fall"] = float(np.median(ft))
     if unit == "A":
-        q = float(np.trapezoid(y, t))
+        q = trapezoid(y, t)
         m["charge"] = q                        # coulombs over the record
         if other_level is not None:
             m["energy"] = q * other_level      # joules (constant-voltage approximation)
@@ -103,7 +109,7 @@ def between(t, y, t1: float, t2: float, unit: str = "A",
         m.update(mean=float(ys.mean()), rms=float(np.sqrt(np.mean(ys ** 2))),
                  min=float(ys.min()), max=float(ys.max()))
         if unit == "A":
-            m["charge"] = float(np.trapezoid(ys, ts))
+            m["charge"] = trapezoid(ys, ts)
             if other_level is not None:
                 m["energy"] = m["charge"] * other_level
     return m

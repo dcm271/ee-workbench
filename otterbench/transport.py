@@ -70,7 +70,8 @@ def load_gpib_lib() -> tuple[bool, str]:
             linux_gpib.install()
             _GPIB_STATE = (True, "")
             return _GPIB_STATE
-        fix = "Run scripts/install-gpib-driver.sh (Pi: scripts/setup-pi.sh) to build it on this machine."
+        fix = ("Install the otterbench-gpib-dkms package, or run scripts/install-gpib-driver.sh "
+               "(Pi: scripts/setup-pi.sh) to build it on this machine.")
         if errors:
             hint = (" It was probably built on another computer (wrong CPU type)."
                     if any("ELF" in e or "format" in e for e in errors) else "")
@@ -195,6 +196,8 @@ def describe(resource: str) -> str:
         return f"GPIB{m.group(1)} @{m.group(2)}"
     if resource.upper().startswith("SIM"):
         return "simulated"
+    if resource.upper().startswith("REPLAY::"):
+        return f"tape {os.path.basename(resource[8:])}"
     if resource.upper().startswith("PPK2::"):
         path = resource[6:]
         m = re.search(r"PPK2_([0-9A-F]+)", path, re.I)
@@ -242,6 +245,12 @@ def open_transport(resource: str, baud: int = 9600, model: str = "auto"):
         from . import sim
 
         return sim.open_sim(resource)
+    if resource.upper().startswith("REPLAY::"):
+        from . import tape
+
+        t = tape.open_replay(tape.replay_path(resource))
+        t.replay.pace = tape.PACE_S         # or it would flood the tab with readings
+        return t
     d = None
     if model.startswith("SCPI:"):
         from .instruments.scpi_generic import definition_for
@@ -492,6 +501,24 @@ class VisaTransport:
             return bytes(self.inst.query_binary_values(cmd, datatype="B", container=bytes))
         except self._pyvisa.errors.VisaIOError as e:
             raise self._wrap(e, cmd) from e
+
+    def query_bytes(self, cmd: str) -> bytes:
+        """An answer without a block header (a Siglent SCDP picture)."""
+        try:
+            self.inst.write(cmd)
+            term, self.inst.read_termination = self.inst.read_termination, None
+            try:
+                return bytes(self.inst.read_raw())      # to END, not to a newline byte
+            finally:
+                self.inst.read_termination = term
+        except self._pyvisa.errors.VisaIOError as e:
+            raise self._wrap(e, cmd) from e
+
+    def write_bytes(self, data: bytes) -> None:
+        try:
+            self.inst.write_raw(data)
+        except self._pyvisa.errors.VisaIOError as e:
+            raise self._wrap(e, data[:40]) from e
 
     def read_stb(self) -> int:
         try:

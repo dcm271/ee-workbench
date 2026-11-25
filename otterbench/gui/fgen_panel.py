@@ -7,8 +7,9 @@ from __future__ import annotations
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtWidgets import (QButtonGroup, QCheckBox, QComboBox, QDoubleSpinBox, QFormLayout,
                              QGroupBox, QHBoxLayout, QLabel, QLineEdit, QPushButton,
-                             QSplitter, QTabWidget, QVBoxLayout, QWidget)
+                             QSplitter, QTabWidget, QVBoxLayout, QWidget, QFileDialog, QInputDialog, QMessageBox)
 
+from .. import arb
 from ..instruments.fgen import FUNCS, FgenState
 from . import touch
 from .panel_base import PanelBase
@@ -17,7 +18,7 @@ from .theme import set_role
 from .widgets import C_MUTED, SafeSpin
 
 FUNC_TEXT = {"sine": "Sine", "square": "Square", "ramp": "Ramp", "pulse": "Pulse",
-             "noise": "Noise", "dc": "DC"}
+             "noise": "Noise", "dc": "DC", "arb": "Arbitrary"}
 
 
 class FgenPanel(PanelBase):
@@ -78,6 +79,7 @@ class FgenPanel(PanelBase):
         pv.addWidget(hint)
         pv.addStretch(1)
         self.tabs.addTab(touch.scroll(page), "Profile")
+        self.tabs.addTab(self._build_arb_tab(), "Arbitrary")
         self.tabs.addTab(console, "Console")
         split.addWidget(self.tabs)
         split.setStretchFactor(1, 1)
@@ -85,6 +87,73 @@ class FgenPanel(PanelBase):
         root.addWidget(split)
         self.set_enabled(False)
         self.start()
+
+    # ---- arbitrary waveforms
+    def _build_arb_tab(self):
+        import pyqtgraph as pg
+        w = QWidget()
+        v = QVBoxLayout(w)
+        row = QHBoxLayout()
+        self.wave = None
+        for text, fn in (("From CSV…", self.arb_csv), ("From a scope tab…", self.arb_scope)):
+            b = QPushButton(text)
+            b.clicked.connect(fn)
+            row.addWidget(b)
+        self.arb_btn = QPushButton("Load into generator")
+        set_role(self.arb_btn, "primary")
+        self.arb_btn.clicked.connect(self.arb_load)
+        row.addWidget(self.arb_btn)
+        row.addStretch(1)
+        v.addLayout(row)
+        self.arb_info = QLabel("CSV: time in seconds and volts, with or without a heading line. "
+                               "The waveform repeats; up to 8192 points. The channel's output "
+                               "must be off while it is loaded.")
+        self.arb_info.setWordWrap(True)
+        self.arb_info.setStyleSheet(f"color:{C_MUTED};")
+        v.addWidget(self.arb_info)
+        self.arb_plot = pg.PlotWidget()
+        self.arb_plot.showGrid(x=True, y=True, alpha=0.15)
+        self.arb_plot.setLabel("bottom", "Time", units="s")
+        self.arb_plot.setLabel("left", "Voltage", units="V")
+        touch.plots(self.arb_plot)
+        v.addWidget(self.arb_plot, 1)
+        return w
+
+    def set_wave(self, wave):
+        self.wave = wave
+        self.arb_plot.clear()
+        self.arb_plot.plot([k * wave.seconds / wave.v.size for k in range(wave.v.size)],
+                           list(wave.v))
+        self.arb_info.setText(wave.describe())
+
+    def _arb(self, make):
+        try:
+            self.set_wave(make())
+        except (OSError, ValueError) as e:
+            QMessageBox.warning(self, "Waveform", str(e))
+
+    def arb_csv(self):
+        path, _ = QFileDialog.getOpenFileName(self, "Waveform", "", "CSV (*.csv *.txt)")
+        if path:
+            self._arb(lambda: arb.from_csv(path))
+
+    def arb_scope(self):
+        from .panel_base import open_panels
+        found = {f"{p.display_name()} CH{ch}": tr for p in open_panels() if p.KIND == "scope"
+                 and p.capture is not None for ch, tr in sorted(p.capture.analog.items())}
+        if not found:
+            QMessageBox.information(self, "Waveform", "Grab a waveform on a scope tab first.")
+            return
+        name, ok = QInputDialog.getItem(self, "Waveform", "Capture:", list(found), 0, False)
+        if ok:
+            self._arb(lambda: arb.make(found[name].t, found[name].v, name))
+
+    def arb_load(self):
+        if self.wave is None:
+            QMessageBox.information(self, "Waveform", "Choose a waveform first.")
+            return
+        wave, ch = self.wave, self.ch
+        self.cmd(lambda d: d.upload(wave, ch))
 
     def _build_channel_group(self):
         g = QGroupBox("Channel")

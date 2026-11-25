@@ -263,6 +263,25 @@ class ScpiPanel(PanelBase):
     def profile_names(self) -> list[str]:
         return [s.name for s in self.d.settings if s.kind == "number"] if self.d else []
 
+    def accuracy_keys(self, what, r=None):
+        rd = next((x for x in self.d.readings if x.name.lower() == what.lower()), None) \
+            if self.d else None
+        keys = []
+        for frm in ((rd.unit_from, rd.query_from) if rd else ()):
+            if frm and self.worker.drv is not None:
+                vals = self.worker.drv.values
+                label = vals.get(frm) or vals.get(f"{frm}{rd.ch}")
+                keys += [f"{what} {label}", label] if label else []
+        return keys + [what]
+
+    def builtin_accuracy(self) -> dict:
+        if self.d is None:
+            return {}
+        out = {r.name: r.accuracy for r in self.d.readings if r.accuracy}
+        for s in self.d.settings:
+            out.update({o.label: o.accuracy for o in s.options if o.accuracy})
+        return out
+
     def unit_of(self, name: str) -> str:
         return self._units.get(name, "")
 
@@ -355,6 +374,7 @@ class ScpiPanel(PanelBase):
     def on_reading(self, r: ScpiReading):
         row = [r.t]
         changed = False
+        pm = self.pm_due()
         for n in self.names:
             v = r.values.get(n)
             unit = r.units.get(n, "")
@@ -364,6 +384,9 @@ class ScpiPanel(PanelBase):
             ro = self._readouts.get(n)
             if ro is not None:
                 ro.set(fmt_value(v, unit, self._sig()))
+                if pm:
+                    u = None if v is None else self.uncertainty(n, v)
+                    ro.set_pm("" if u is None else "± " + fmt_value(u, unit, 2))
             row.append(np.nan if v is None else v)
         if changed:
             self._label_axes()

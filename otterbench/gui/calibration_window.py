@@ -14,6 +14,7 @@ from PyQt6.QtWidgets import (QAbstractItemView, QDialog, QDialogButtonBox, QForm
                              QPushButton, QSplitter, QTableWidget, QTableWidgetItem, QTabWidget,
                              QVBoxLayout, QWidget)
 
+from .. import accuracy
 from .. import calibration as cal
 from .. import report
 from . import touch
@@ -53,6 +54,14 @@ class EntryDialog(QDialog):
         self.notes = QPlainTextEdit("" if new else e.notes)
         self.notes.setMaximumHeight(90)
         f.addRow("Notes", self.notes)
+        self.acc = QPlainTextEdit(accuracy.lines(e.accuracy))
+        self.acc.setMaximumHeight(110)
+        self.acc.setPlaceholderText("DC V = 0.1: 0.005% + 3.5u; 1: 0.004% + 7u; 10: 0.0035% + 50u"
+                                    "\ncurrent = 0.1% + 2m")
+        self.acc.setToolTip("From the datasheet or the certificate, one a line: the meter's "
+                            "function or the reading's name = of the reading + a fixed part.\n"
+                            "By range: end of range: specification; …")
+        f.addRow("Accuracy", self.acc)
         v.addLayout(f)
         self.err = QLabel("")
         self.err.setStyleSheet(f"color:{C_WARN};")
@@ -63,6 +72,7 @@ class EntryDialog(QDialog):
         bb.rejected.connect(self.reject)
         v.addWidget(bb)
         self.new = new
+        self.specs = dict(e.accuracy)
 
     def _ok(self):
         day = self.day.text().strip()
@@ -71,6 +81,11 @@ class EntryDialog(QDialog):
             return
         if day and cal.parse_date(day) > date.today():
             self.err.setText("That date is in the future")
+            return
+        try:
+            self.specs = accuracy.parse_lines(self.acc.toPlainText())
+        except accuracy.AccuracyError as e:
+            self.err.setText(str(e))
             return
         self.accept()
 
@@ -233,6 +248,7 @@ class CalibrationWindow(ToolWindow):
             return
         d = EntryDialog(self, e, True)
         if d.exec():
+            e.accuracy = d.specs
             e.name, e.months = d.name.text().strip() or e.name, d.months.value()
             e.record(d.day.text().strip(), d.by.text().strip(), d.cert.text().strip(),
                      d.notes.toPlainText().strip())
@@ -244,6 +260,7 @@ class CalibrationWindow(ToolWindow):
             return
         d = EntryDialog(self, e, False)
         if d.exec():
+            e.accuracy = d.specs
             e.name, e.months = d.name.text().strip() or e.name, d.months.value()
             e.calibrated, e.by = d.day.text().strip(), d.by.text().strip()
             e.certificate, e.notes = d.cert.text().strip(), d.notes.toPlainText().strip()

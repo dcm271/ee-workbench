@@ -25,11 +25,12 @@ from PyQt6.QtWidgets import (QAbstractItemView, QCheckBox, QComboBox, QDoubleSpi
                              QSplitter, QTableWidget, QTableWidgetItem, QTabWidget, QVBoxLayout,
                              QWidget)
 
+from ..accuracy import GUARDS
 from ..clock import now
 from ..config import config_dir
 from ..report import failing_columns, sequence_report
-from ..sequencer import (ACTIONS, MEASURE_WHAT, PROFILE_WHAT, SET_WHAT, Bench, Inst,
-                         LimitFailed, Plan, SequenceError, Step, Stopped, run_plan, run_script)
+from ..sequencer import (ACTIONS, MEASURE_WHAT, PM, PROFILE_WHAT, SET_WHAT, Bench, Inst,
+                         LimitFailed, depths, parse_blocks, Plan, SequenceError, Step, Stopped, run_plan, run_script)
 from ..session import recorder as session
 from . import touch
 from .panel_base import open_panels
@@ -59,6 +60,7 @@ for v in np.arange(3.0, 3.61, 0.1):
 '''
 FAIL_BG = QBrush(QColor("#4a1c1f"))
 FAIL_CELL = QBrush(QColor("#7a2227"))
+NEAR_CELL = QBrush(QColor("#6b5516"))
 PASS_FG = QBrush(QColor("#7ee787"))
 FAIL_FG = QBrush(QColor("#ff8a80"))
 
@@ -125,11 +127,14 @@ class PanelInst(Inst):
         self.p, self.invoke, self.stop = panel, invoke, stop
         self.name = panel.display_name()
         self.kind = kind_of(panel)
-        if self.kind in ("scpi", "scope", "uart"):
+        if self.kind in ("scpi", "scope", "uart", "dmm"):
             self.set_names = panel.set_names()
             self.setting_kinds = panel.setting_kinds()
             self.measure_names = panel.measure_names()
             self.profile_names = panel.profile_names()
+
+    def uncertainty(self, what, value, r=None):
+        return self.p.uncertainty(what, value, r)
 
     def unit_of(self, what: str) -> str:
         fn = getattr(self.p, "unit_of", None)
@@ -274,6 +279,13 @@ class SequencerWindow(QMainWindow):
         self.fail_chk = QCheckBox("Stop on first fail")
         self.fail_chk.setToolTip("End the run (outputs off) as soon as a pass fails a limit")
         bar.addWidget(self.fail_chk)
+        self.guard = QComboBox()
+        for k, text in GUARDS.items():
+            self.guard.addItem(text, k)
+        self.guard.setToolTip("Readings closer to a limit than their own ± (from the accuracy "
+                              "in the calibration log or the definition file). Without one, "
+                              "limits are taken as they are.")
+        bar.addWidget(self.guard)
         bar.addStretch(1)
         self.status = QLabel("Ready")
         self.status.setStyleSheet(f"color:{C_MUTED};")
@@ -332,7 +344,13 @@ class SequencerWindow(QMainWindow):
                       "1 timeout=10 (its column = seconds it took).   Serial console: Send a "
                       "line, then Wait for a regex, e.g.  adc=(\\d+) timeout=2  (its column = "
                       "the number in the parentheses; no reply fails the pass).   Profile: e.g. "
-                      "ramp 3.0..3.6 for=10.   Note text can include {x} and {i}.")
+                      "ramp 3.0..3.6 for=10.   Command: a program, e.g.  esptool write_flash 0 "
+                      "app.bin timeout=120  (its exit status must be 0; setting = a regex for "
+                      "its output).   For: a variable and its values, e.g. y and 1, 2, 5 or "
+                      "0..10 x 11.   Repeat: 10, or until vout < 0.1 max=100 wait=1.   Retry: "
+                      "3 wait=1 (again while a limit fails).   If: vout > 3.2, with an Else "
+                      "if you like.   Each of these needs an End; results columns can be used "
+                      "by name (Vout → vout).   Note text can include {x} and {i}.")
         hint.setWordWrap(True)
         hint.setStyleSheet(f"color:{C_MUTED}; font-size:11px;")
         v.addLayout(row)
@@ -462,10 +480,16 @@ class SequencerWindow(QMainWindow):
             what.addItems(opts)
             what.setCurrentText(keep if keep in opts or not opts else opts[0])
             what.blockSignals(False)
-            uses_inst = a in ("Set", "Measure", "Capture", "Profile", "Wait for", "Send")
+            uses_inst = a in ("Set", "Measure", "Capture", "Profile", "Wait for", "Send", "Screenshot")
             target.setEnabled(uses_inst)
-            what.setEnabled(a in ("Set", "Measure", "Profile") or
+            what.setEnabled(a in ("Set", "Measure", "Profile", "For", "Command") or
                             a == "Wait for" and kind != "uart")
+            tip = {"For": "The variable's name, e.g. y",
+                   "Command": "A regex its output must match (blank: only its exit status)"
+                   }.get(a, "")
+            what.setToolTip(tip)
+            what.lineEdit().setPlaceholderText(tip.split(" (")[0])
+            self._indent()
         act.currentTextChanged.connect(refresh)
         target.currentTextChanged.connect(refresh)
         refresh()
@@ -479,10 +503,18 @@ class SequencerWindow(QMainWindow):
         return Step(cell(r, 0).currentText(), cell(r, 1).currentText().strip(),
                     cell(r, 2).currentText().strip(), text(3), text(6), text(4), text(5))
 
+    def _indent(self):
+        """The row numbers show what is inside a For / Repeat / Retry / If."""
+        acts = [self.table.cellWidget(r, 0) for r in range(self.table.rowCount())]
+        names = [a.currentText() if a is not None else "" for a in acts]
+        for r, d in enumerate(depths(names)):
+            self.table.setVerticalHeaderItem(r, QTableWidgetItem(f"{r + 1} " + "│ " * d))
+
     def remove_step(self):
         r = self.table.currentRow()
         if r >= 0:
             self.table.removeRow(r)
+            self._indent()
 
     def move_step(self, d):
         r = self.table.currentRow()
@@ -497,7 +529,8 @@ class SequencerWindow(QMainWindow):
         return Plan(steps=[self._step_at(r) for r in range(self.table.rowCount())],
                     loop=self.loop.currentData(), count=self.count.value(),
                     start=self.x_from.value(), stop=self.x_to.value(), step=self.x_step.value(),
-                    off_at_end=self.off_chk.isChecked(), stop_on_fail=self.fail_chk.isChecked())
+                    off_at_end=self.off_chk.isChecked(), stop_on_fail=self.fail_chk.isChecked(),
+                    guard=self.guard.currentData())
 
     def _set_plan(self, p: Plan):
         self.table.setRowCount(0)
@@ -510,6 +543,7 @@ class SequencerWindow(QMainWindow):
         self.x_step.setValue(p.step)
         self.off_chk.setChecked(p.off_at_end)
         self.fail_chk.setChecked(p.stop_on_fail)
+        self.guard.setCurrentIndex(max(0, self.guard.findData(p.guard)))
 
     def _loop_changed(self, *_):
         k = self.loop.currentData()
@@ -610,15 +644,24 @@ class SequencerWindow(QMainWindow):
         bench = Bench(insts, now, log=self.sig.log.emit, on_row=self.sig.row.emit,
                       on_note=self.sig.note.emit, stop=self.stop_event)
         self.bench = bench
+
+        def on_image(data, name):
+            def put():
+                if session.active:
+                    session.image(data, name)
+            self.invoke(put)
+        bench.on_image = on_image
         self.run_started = time.time()
         self.run_insts = [(i.name, i.p.identity(), i.p.calibration())
                           for i in insts]
         self.run_plan_dict = self.state()
         plan = self.plan()
+        bench.guard = plan.guard
         script = self.script.toPlainText() if self.use_script.isChecked() else None
         if script is None:
             try:
                 plan.passes()
+                parse_blocks(plan.steps)
             except SequenceError as e:
                 QMessageBox.warning(self, "Sequencer", str(e))
                 return False
@@ -733,8 +776,8 @@ class SequencerWindow(QMainWindow):
                     combo.setCurrentText(keep)
             if not self.x_col.currentText() or self.x_col.currentText() == self.columns[0]:
                 self.x_col.setCurrentText("x" if "x" in self.columns else "pass")
-            numeric = [c for c in self.columns if c not in ("t", "pass", "x", "result",
-                                                            "failures")]
+            numeric = [c for c in self.columns if not c.endswith(PM) and c not in (
+                "t", "pass", "x", "result", "failures", "marginal")]
             if numeric and self.y_col.currentText() in ("t", "pass", "x", ""):
                 self.y_col.setCurrentText(numeric[0])
         if new:
@@ -757,11 +800,14 @@ class SequencerWindow(QMainWindow):
         self.results.insertRow(r)
         failed = row.get("result") == "FAIL"
         bad = set(failing_columns(row))
+        near = set(str(row.get("marginal", "")).split("; ")) - {""}
         for c, k in enumerate(self.columns):
             v = row.get(k, "")
             it = QTableWidgetItem(f"{v:.6g}" if isinstance(v, float) else str(v))
             if failed:
                 it.setBackground(FAIL_CELL if k in bad else FAIL_BG)
+            elif k in near:
+                it.setBackground(NEAR_CELL)
             if k == "result":
                 it.setForeground(FAIL_FG if failed else PASS_FG)
             self.results.setItem(r, c, it)
@@ -797,9 +843,11 @@ class SequencerWindow(QMainWindow):
                                getattr(self, "outcome", ""), getattr(self, "run_started", None),
                                self.x_col.currentText(), None if y is None else
                                list(dict.fromkeys(y + [c for c in self.columns if c not in
-                                                       ("t", "pass", "x", "result", "failures")
+                                                       ("t", "pass", "x", "result", "failures",
+                                                        "marginal") and not c.endswith(PM)
                                                        and any(isinstance(r.get(c), (int, float))
-                                                               for r in self.rows)]))[:4])
+                                                               for r in self.rows)]))[:4],
+                               images=getattr(getattr(self, "bench", None), "images", None))
         write(self, html, path)
 
     def closeEvent(self, e):

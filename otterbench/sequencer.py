@@ -27,10 +27,13 @@ import threading
 import time
 from dataclasses import asdict, dataclass, field
 
+from .accuracy import marginal
+
 # what Set / Measure can do with each kind of instrument (shown in the step editor);
 # a generic SCPI tab and a scope tab list their own (Inst.set_names, …)
 SET_WHAT = {
-    "supply": ["voltage", "current", "output", "ovp", "sense_protect"],
+    "supply": ["voltage", "current", "output", "ovp", "ocp", "clear_protection",
+               "sense_protect"],
     "ppk2": ["voltage", "output"],
     "dmm": [],
     "logic": [],
@@ -50,8 +53,11 @@ PROFILE_WHAT = {"supply": ["voltage", "current"], "ppk2": ["voltage"],
                 "fgen": ["frequency", "amplitude", "offset", "duty"]}
 UNITS = {"voltage": "V", "current": "A", "power": "W", "dvm": "V", "peak": "A", "charge": "C",
          "ovp": "V", "frequency": "Hz", "amplitude": "Vpp", "offset": "V", "duty": "%"}
-ACTIONS = ["Set", "Wait", "Measure", "Capture", "Profile", "Wait for", "Send", "Note"]
-FGEN_FUNCS = ("sine", "square", "ramp", "pulse", "noise", "dc")
+BLOCKS = ("For", "Repeat", "Retry", "If")        # each ends with an End step
+ACTIONS = ["Set", "Wait", "Measure", "Capture", "Profile", "Wait for", "Send", "Command", "Screenshot",
+           "Note",
+           "For", "Repeat", "Retry", "If", "Else", "End"]
+FGEN_FUNCS = ("sine", "square", "ramp", "pulse", "noise", "dc", "arb")
 SAFE = {k: getattr(math, k) for k in dir(math) if not k.startswith("_")}
 SAFE.update(abs=abs, min=min, max=max, round=round)
 
@@ -115,6 +121,7 @@ class Plan:
     step: float = 0.1
     off_at_end: bool = True
     stop_on_fail: bool = False
+    guard: str = "off"          # off | marginal | strict: readings within ± of a limit
 
     def passes(self) -> list[tuple[int, float | None]]:
         if self.loop == "repeat":
@@ -143,6 +150,7 @@ class Plan:
         p.steps = [Step(**{k: "" if v is None else str(v) for k, v in s.items()
                            if k in Step.__dataclass_fields__})
                    for s in d.get("steps", []) if isinstance(s, dict)]
+        p.guard = p.guard if p.guard in ("off", "marginal", "strict") else "off"
         p.loop = p.loop if p.loop in ("once", "repeat", "sweep") else "once"
         p.count = int(p.count)
         p.start, p.stop, p.step = float(p.start), float(p.stop), float(p.step)
@@ -172,6 +180,10 @@ class Inst:
 
     def capture(self, timeout: float):                   # logic: a LogicCapture
         raise NotImplementedError
+
+    def uncertainty(self, what: str, value, r=None) -> float | None:
+        """± of a reading, when its accuracy is known (accuracy.py)."""
+        return None
 
     def outputs_off(self):
         pass
@@ -209,7 +221,12 @@ class Bench:
         self.passed = 0
         self.failed = 0
         self._fails: list[str] = []         # failures since the last record()
+        self._marginal: list[str] = []      # passed, but within ± of a limit
+        self.guard = "off"                  # off | marginal | strict (Plan.guard)
+        self._last_r = None                 # the reading measure() used last
         self._checked = False               # any expect() since the last record()
+        self.images: list = []              # (row, instrument, picture)
+        self.on_image = None                # called with (picture, instrument)
         self.on_fail = None                 # called with (name, value, lo, hi)
 
     # ---- finding instruments ------------------------------------------------
@@ -263,6 +280,8 @@ class Bench:
             self._log(f"set {inst.name} {hit} = {value}")
             inst.run(lambda d: d.set(hit, v))
             return
+        if inst.kind == "dmm":
+            return self._set_dmm(inst, what, value)
         if inst.kind == "fgen" and what.lower() == "function":
             f = str(value).strip().lower()
             if f not in FGEN_FUNCS:
@@ -278,6 +297,8 @@ class Bench:
         elif inst.kind == "supply":
             fns = {"voltage": lambda d: d.set_voltage(v), "current": lambda d: d.set_current(v),
                    "output": lambda d: d.set_output(bool(v)), "ovp": lambda d: d.set_ovp(v),
+                   "ocp": lambda d: d.set_ocp(bool(v)),
+                   "clear_protection": lambda d: d.clear_protection(),
                    "sense_protect": lambda d: _sense_protect(d, bool(v))}
         elif inst.kind == "ppk2":
             fns = {"voltage": lambda d: d.set_voltage(int(round(v * 1000))),
@@ -289,6 +310,48 @@ class Bench:
                 f" (it can set: {', '.join(fns)})" if fns else ""))
         self._log(f"set {inst.name} {what} = {value}")
         inst.run(fns[what])
+
+    def _set_dmm(self, inst, what: str, value):
+        """A meter's own settings (range and function by their labels)."""
+        names = inst.set_names or []
+        hit = next((n for n in names if n.lower() == str(what).strip().lower()), None)
+        if hit is None:
+            raise SequenceError(f"{inst.name} can't set '{what}'" + (
+                f" (it can set: {', '.join(names)})" if names else " (read-only)"))
+        choice = (inst.setting_kinds or {}).get(hit) == "choice"
+        v = str(value).strip() if choice else value_of(value, {})
+        self._log(f"set {inst.name} {hit} = {value}")
+        inst.run(lambda d: dmm_set(d, hit, v))
+
+    def command(self, line: str, match: str = "", timeout: float = 60.0, extra: dict | None = None,
+                name: str = "Command"):
+        """Run a program (a flasher, a script): `esptool write_flash 0 app.bin
+        timeout=120`. No shell: quotes work, pipes and * don't. A non-zero exit
+        status, a timeout, or output without `match` (a regex) fails the row.
+        Returns the number in the regex's first group, else its text, else None.
+        Not in the Remote API: whoever calls that can run programs already."""
+        from . import command as cmd
+        self.check()
+        line, opts = _options(str(line))
+        try:
+            timeout = float(opts.get("timeout", timeout))
+            args = cmd.split(line, extra or {})
+        except ValueError as e:
+            raise SequenceError(f"Command: {e}") from None
+        self._log("$ " + cmd.shown(args))
+        res = cmd.run(args, timeout, self.stop_event, self._log)
+        if res.stopped:
+            raise Stopped()
+        if res.problem:
+            self.fail(name, res.problem)
+            return None
+        self.passed_check()
+        if not match:
+            return None
+        found, value = cmd.find(match, res.output)
+        if not found:
+            self.fail(name, f"no '{match}' in its output")
+        return value
 
     def measure(self, name: str, what: str = "", seconds: float = 0.0) -> float:
         """One reading taken after now; or with seconds > 0 the mean of the
@@ -303,6 +366,7 @@ class Bench:
                                 + (", ".join(can) or "nothing") + ")")
         seconds = float(seconds or 0.0)
         t0 = self._clock()
+        self._last_r = None
         if inst.kind == "uart":
             # every value printed since now; a line may be a while coming
             end = time.monotonic() + max(60.0, seconds + 10.0)
@@ -340,6 +404,7 @@ class Bench:
                     self.check()
                     raise SequenceError(f"No reading from {inst.name} (is it polling?)")
                 vals.append(self._pick(inst, r, what))
+                self._last_r = r
                 t = r.t
                 if seconds <= 0 or t >= t0 + seconds:
                     break
@@ -348,6 +413,14 @@ class Bench:
             v = sum(good) / len(good) if good else float("nan")
         self._log(f"{inst.name} {what} = {v:.6g}")
         return v
+
+    def uncertainty(self, name: str, what: str, value) -> float | None:
+        """± of a reading by the instrument's accuracy specification; None when
+        none was given (calibration log or definition file)."""
+        inst = self.inst(name)
+        what = (what or (inst.measure_names or MEASURE_WHAT.get(inst.kind) or [""])[0]).lower()
+        fn = getattr(inst, "uncertainty", None)
+        return None if fn is None else fn(what, value, self._last_r)
 
     # ---- GPIO ---------------------------------------------------------------------
     def gpio(self, name: str, pin: str, value):
@@ -484,14 +557,25 @@ class Bench:
         return sent
 
     # ---- limits ------------------------------------------------------------------------
-    def expect(self, name: str, value, lo=None, hi=None) -> bool:
+    def expect(self, name: str, value, lo=None, hi=None, u=None) -> bool:
         """Check a value against limits (either may be None). A failure makes
-        the current row FAIL; returns whether it passed."""
+        the current row FAIL; returns whether it passed. u: the value's ±, for
+        the plan's guard (a value within ± of a limit is marked, or fails)."""
         lo = None if lo is None or lo == "" else float(lo)
         hi = None if hi is None or hi == "" else float(hi)
         self._checked = True
         ok = within(value, lo, hi)
-        if not ok:
+        if ok and self.guard != "off" and marginal(value, lo, hi, u):
+            text = f"{name}={value:.6g} (± {u:.3g} of {limit_text(lo, hi)})"
+            self._log(f"within ± of a limit: {text}")
+            if self.guard == "strict":
+                ok = False
+                self._fails.append(text)
+                if self.on_fail:
+                    self.on_fail(name, value, lo, hi)
+            else:
+                self._marginal.append(name)
+        elif not ok:
             v = "nan" if value is None else f"{value:.6g}"
             self._fails.append(f"{name}={v} (want {limit_text(lo, hi)})")
             self._log(f"FAIL {name} = {v}, want {limit_text(lo, hi)}")
@@ -523,6 +607,20 @@ class Bench:
             raise SequenceError(f"{inst.name}: the capture didn't finish")
         return res
 
+    def screenshot(self, name: str) -> bytes:
+        """The scope's screen: kept for the report and in the session."""
+        self.check()
+        inst = self.inst(name)
+        if inst.kind != "scope":
+            raise SequenceError(f"{inst.name} isn't an oscilloscope")
+        self._log(f"screenshot of {inst.name}")
+        data = inst.run(lambda d: d.screenshot(), timeout=60.0)
+        if len(self.images) < MAX_IMAGES:
+            self.images.append((len(self.rows) + 1, inst.name, data))
+        if self.on_image:
+            self.on_image(data, inst.name)
+        return data
+
     def note(self, text: str):
         self._log(f"note: {text}")
         self._on_note(str(text))
@@ -536,11 +634,13 @@ class Bench:
             # always present, so every judged row has the same columns (one
             # session stream, one CSV layout)
             row["failures"] = "; ".join(self._fails)
+            if self.guard == "marginal":
+                row["marginal"] = "; ".join(self._marginal)
             if self._fails:
                 self.failed += 1
             else:
                 self.passed += 1
-        self._fails, self._checked = [], False
+        self._fails, self._checked, self._marginal = [], False, []
         self.rows.append(row)
         self._on_row(row)
 
@@ -585,6 +685,7 @@ def run_plan(plan: Plan, bench: Bench, start: int = 0, extra: dict | None = None
              value replaces {name} in a Note (e.g. serial -> {serial})
     on_pass: called with the pass index after each pass is recorded"""
     passes = plan.passes()
+    tree = parse_blocks(plan.steps)
     extra = dict(extra or {})
     for idx, x in passes:
         if idx < start:
@@ -599,82 +700,327 @@ def run_plan(plan: Plan, bench: Bench, start: int = 0, extra: dict | None = None
                 row[k] = v
         if x is not None:
             row["x"] = round(x, 12)
-        for k, st in enumerate(plan.steps):
-            bench.check()
-            act = st.action
+        _Pass(plan, bench, idx, x, extra, env, row).run(tree)
+        if on_pass is not None:
+            on_pass(idx)
+
+
+class _Pass:
+    """One pass through the steps. A row of results is recorded at the end of
+    every For round that measured something, and at the end of the pass."""
+
+    def __init__(self, plan, bench, idx, x, extra, env, row):
+        self.plan, self.bench, self.idx, self.x = plan, bench, idx, x
+        self.extra, self.env, self.row = dict(extra), env, row
+        self.pending = False         # measured since the last row
+        self.rows = 0
+
+    def run(self, tree: list):
+        self.block(tree)
+        if self.pending or not self.rows:
+            self.record()
+
+    def record(self):
+        failing = bool(self.bench._fails)
+        self.bench.record(**self.row)
+        self.pending = False
+        self.rows += 1
+        if failing and self.plan.stop_on_fail:
+            raise LimitFailed(f"pass {self.idx + 1} failed: "
+                              f"{self.bench.rows[-1].get('failures', '')}")
+
+    def block(self, nodes: list):
+        for node in nodes:
+            self.bench.check()
+            fn = {"For": self._for, "Repeat": self._repeat, "Retry": self._retry,
+                  "If": self._if}.get(node.step.action)
             try:
-                if act == "Set":
-                    inst = bench.inst(st.target)
-                    kind = inst.kind
-                    raw = kind == "gpio" and str(st.value).strip().lower().startswith("pulse") \
-                        or kind == "fgen" and st.what.lower() == "function" \
-                        or (inst.setting_kinds or {}).get(st.what) == "choice"
-                    bench.set(st.target, st.what, st.value if raw else value_of(st.value, env))
-                elif act == "Wait":
-                    bench.wait(value_of(st.value, env))
-                elif act == "Measure":
-                    kind = bench.inst(st.target).kind
-                    if kind == "gpio":
-                        v = bench.read_pin(st.target, st.what)
-                        col = st.label or f"{st.what}"
-                    else:
-                        secs = value_of(st.value, env) if str(st.value).strip() else 0.0
-                        v = bench.measure(st.target, st.what, secs)
-                        unit = UNITS.get(st.what.lower(), "") or _unit_of(bench, st)
-                        col = st.label or f"{st.target} {st.what}" + (f" ({unit})" if unit else "")
-                    row[col] = v
-                    _limits(bench, st, col, v, env)
-                elif act == "Capture":
-                    res = bench.capture(st.target)
-                    if bench.inst(st.target).kind == "scope":
-                        col = st.label or f"{st.target} capture"
-                        row[col] = sum(tr.v.size for tr in res.analog.values())
-                    else:
-                        col = st.label or f"{st.target} decoded"
-                        row[col] = len(res.table_rows)
-                    if res.offset is not None:
-                        row[f"{col} t0"] = round(res.offset, 6)
-                    _limits(bench, st, col, row[col], env)
-                elif act == "Profile":
-                    bench.profile(st.target, st.what, str(st.value)
-                                  .replace("{x}", "" if x is None else f"{x:g}"))
-                elif act == "Send":
-                    bench.send(st.target, _fill_text(st.value, x, idx, extra))
-                elif act == "Wait for" and bench.inst(st.target).kind == "uart":
-                    regex, timeout = _text_args(_fill_text(st.value, x, idx, extra, braces=False))
-                    hit = bench._match(st.target, regex, timeout)
-                    col = st.label or f"{st.target} reply"
-                    if hit is None:
-                        # nan keeps a numeric column numeric
-                        row[col] = float("nan") if "(" in regex else "no reply"
-                        bench.fail(col, f"no '{regex}' within {timeout:g} s")
-                    else:
-                        bench.passed_check()
-                        v = hit["value"]
-                        row[col] = v if v is not None else next(
-                            (g for g in hit["groups"] if g is not None), hit["text"])
-                        if v is not None:
-                            _limits(bench, st, col, v, env)
-                elif act == "Wait for":
-                    level, timeout = _wait_for_args(st.value, env)
-                    took = bench.wait_for(st.target, st.what, level, timeout)
-                    if st.label:
-                        row[st.label] = round(took, 6)
-                        _limits(bench, st, st.label, took, env)
-                elif act == "Note":
-                    bench.note(_fill_text(st.value, x, idx, extra))
+                if fn is not None:
+                    fn(node)
                 else:
-                    raise SequenceError(f"Unknown action '{act}'")
+                    self.one(node.step)
             except (Stopped, SequenceError):
                 raise
             except Exception as e:      # noqa: BLE001 - say which step
-                raise SequenceError(f"Step {k + 1} ({act} {st.target} {st.what}): {e}") from e
-        failing = bool(bench._fails)
-        bench.record(**row)
-        if on_pass is not None:
-            on_pass(idx)
-        if failing and plan.stop_on_fail:
-            raise LimitFailed(f"pass {idx + 1} failed: {bench.rows[-1].get('failures', '')}")
+                st = node.step
+                raise SequenceError(f"Step {node.k + 1} ({st.action} {st.target} {st.what}): "
+                                    f"{e}") from e
+
+    # ---- blocks
+    def _for(self, node):
+        from .regulator import parse_list
+        name = node.step.what.strip()
+        outer = dict(self.row)
+        try:
+            for v in parse_list(node.step.value):
+                self.bench.check()
+                self.row.clear()
+                self.row.update(outer)
+                self.row[name] = v
+                self.env[name] = v
+                self.extra[name] = f"{v:g}"
+                self.block(node.body)
+                if self.pending:
+                    self.record()
+        finally:
+            self.env.pop(name, None)
+            self.extra.pop(name, None)
+        # what was measured inside belongs to its own rows
+        self.row.clear()
+        self.row.update(outer)
+
+    def _repeat(self, node):
+        cond, most, wait = repeat_args(node.step.value, self.env)
+        for k in range(most):
+            self.bench.check()
+            self.env["k"] = k
+            self.block(node.body)
+            if cond and value_of(cond, self.env):
+                return
+            if k + 1 < most and wait:
+                self.bench.wait(wait)
+        if cond:
+            self.bench.fail(node.step.label or "Repeat", f"'{cond}' not reached in {most} rounds")
+            self.pending = True
+
+    def _retry(self, node):
+        """Again while a limit fails; only the last try counts."""
+        b = self.bench
+        tries, wait = retry_args(node.step.value, self.env)
+        for k in range(tries):
+            fails, checked, row = list(b._fails), b._checked, dict(self.row)
+            near = list(b._marginal)
+            self.env["k"] = k
+            self.block(node.body)
+            if len(b._fails) <= len(fails) or k + 1 == tries:
+                if tries > 1 and node.step.label:
+                    self.row[node.step.label] = k + 1
+                return
+            b.log(f"retry {k + 2} of {tries}")
+            b._fails, b._checked, b._marginal = fails, checked, near
+            self.row.clear()
+            self.row.update(row)
+            if wait:
+                b.wait(wait)
+
+    def _if(self, node):
+        ok = bool(value_of(node.step.value, self.env))
+        self.bench.log(f"if {node.step.value}: {'yes' if ok else 'no'}")
+        self.block(node.body if ok else node.other)
+
+    # ---- one step
+    def one(self, st: Step):
+        bench, row, env, extra, idx, x = (self.bench, self.row, self.env, self.extra, self.idx,
+                                          self.x)
+        before = dict(row)
+        act = st.action
+        if act == "Set":
+            inst = bench.inst(st.target)
+            kind = inst.kind
+            raw = kind == "gpio" and str(st.value).strip().lower().startswith("pulse") \
+                or kind == "fgen" and st.what.lower() == "function" \
+                or (inst.setting_kinds or {}).get(st.what) == "choice"
+            bench.set(st.target, st.what, st.value if raw else value_of(st.value, env))
+        elif act == "Wait":
+            bench.wait(value_of(st.value, env))
+        elif act == "Measure":
+            kind = bench.inst(st.target).kind
+            if kind == "gpio":
+                v = bench.read_pin(st.target, st.what)
+                col = st.label or f"{st.what}"
+            else:
+                secs = value_of(st.value, env) if str(st.value).strip() else 0.0
+                v = bench.measure(st.target, st.what, secs)
+                unit = UNITS.get(st.what.lower(), "") or _unit_of(bench, st)
+                col = st.label or f"{st.target} {st.what}" + (f" ({unit})" if unit else "")
+            row[col] = v
+            u = None if kind == "gpio" else bench.uncertainty(st.target, st.what, v)
+            if u is not None:
+                row[col + PM] = u
+            _limits(bench, st, col, v, env, u)
+        elif act == "Capture":
+            res = bench.capture(st.target)
+            if bench.inst(st.target).kind == "scope":
+                col = st.label or f"{st.target} capture"
+                row[col] = sum(tr.v.size for tr in res.analog.values())
+            else:
+                col = st.label or f"{st.target} decoded"
+                row[col] = len(res.table_rows)
+            if res.offset is not None:
+                row[f"{col} t0"] = round(res.offset, 6)
+            _limits(bench, st, col, row[col], env)
+        elif act == "Profile":
+            bench.profile(st.target, st.what, str(st.value)
+                          .replace("{x}", "" if x is None else f"{x:g}"))
+        elif act == "Send":
+            bench.send(st.target, _fill_text(st.value, x, idx, extra))
+        elif act == "Wait for" and bench.inst(st.target).kind == "uart":
+            regex, timeout = _text_args(_fill_text(st.value, x, idx, extra, braces=False))
+            hit = bench._match(st.target, regex, timeout)
+            col = st.label or f"{st.target} reply"
+            if hit is None:
+                # nan keeps a numeric column numeric
+                row[col] = float("nan") if "(" in regex else "no reply"
+                bench.fail(col, f"no '{regex}' within {timeout:g} s")
+            else:
+                bench.passed_check()
+                v = hit["value"]
+                row[col] = v if v is not None else next(
+                    (g for g in hit["groups"] if g is not None), hit["text"])
+                if v is not None:
+                    _limits(bench, st, col, v, env)
+        elif act == "Wait for":
+            level, timeout = _wait_for_args(st.value, env)
+            took = bench.wait_for(st.target, st.what, level, timeout)
+            if st.label:
+                row[st.label] = round(took, 6)
+                _limits(bench, st, st.label, took, env)
+        elif act == "Command":
+            out = bench.command(st.value, st.what, extra={**extra, "i": idx + 1, **(
+                {} if x is None else {"x": f"{x:g}"})}, name=st.label or "Command")
+            if out is not None and st.label:
+                row[st.label] = out
+                _limits(bench, st, st.label, out, env)
+        elif act == "Screenshot":
+            bench.screenshot(st.target)
+        elif act == "Note":
+            bench.note(_fill_text(st.value, x, idx, extra))
+        else:
+            raise SequenceError(f"Unknown action '{act}'")
+        if row != before or bench._checked:
+            self.pending = True
+        for col, v in row.items():
+            name = "" if col.endswith(PM) else _var(col)
+            if col not in before or before[col] is not v:
+                if name and isinstance(v, (int, float)):
+                    env[name] = v
+
+
+def _var(col: str) -> str:
+    """A results column as a name for expressions ("Vout (V)" -> vout)."""
+    from .signals import slug
+    name = slug(col)
+    return "" if name in SAFE or name in ("x", "i", "n", "k", "pass", "_") else name
+
+
+@dataclass
+class Node:
+    step: Step
+    k: int                       # its place in the list
+    body: list = field(default_factory=list)
+    other: list = field(default_factory=list)       # If: the Else part
+
+
+def parse_blocks(steps: list) -> list:
+    """The steps as a tree: For / Repeat / Retry / If … (Else …) End."""
+    import keyword
+    root: list = []
+    stack: list = []             # (node, the list being filled)
+    cur = root
+    for k, st in enumerate(steps):
+        where = f"Step {k + 1} ({st.action})"
+        if st.action in BLOCKS:
+            if st.action == "For":
+                v = st.what.strip()
+                if not v.isidentifier() or keyword.iskeyword(v) or v in SAFE or \
+                        v in ("x", "i", "n", "k", "t", "result", "failures", "serial"):
+                    raise SequenceError(f"{where}: give the variable a name of its own, e.g. y")
+                if any(n.step.action == "For" and n.step.what.strip() == v for n, _ in stack):
+                    raise SequenceError(f"{where}: {v} is used by a For around it")
+                from .regulator import parse_list
+                try:
+                    parse_list(st.value)
+                except ValueError as e:
+                    raise SequenceError(f"{where}: values like 1, 2, 5 or 0..10 x 11: {e}") \
+                        from None
+            elif st.action == "If" and not str(st.value).strip():
+                raise SequenceError(f"{where}: give a condition, e.g. vout > 3.2")
+            elif st.action == "Repeat":
+                repeat_args(st.value, None)
+            elif st.action == "Retry":
+                retry_args(st.value, None)
+            node = Node(st, k)
+            cur.append(node)
+            stack.append((node, cur))
+            cur = node.body
+        elif st.action == "Else":
+            if not stack or stack[-1][0].step.action != "If" or cur is stack[-1][0].other:
+                raise SequenceError(f"{where}: there is no If for it")
+            cur = stack[-1][0].other
+        elif st.action == "End":
+            if not stack:
+                raise SequenceError(f"{where}: there is nothing to end")
+            cur = stack.pop()[1]
+        else:
+            cur.append(Node(st, k))
+    if stack:
+        n = stack[-1][0]
+        raise SequenceError(f"Step {n.k + 1} ({n.step.action}) has no End")
+    return root
+
+
+def depths(actions: list) -> list[int]:
+    """How far each step is indented."""
+    out, d = [], 0
+    for a in actions:
+        if a in ("End", "Else"):
+            d = max(0, d - 1)
+        out.append(d)
+        if a in BLOCKS or a == "Else":
+            d += 1
+    return out
+
+
+MAX_ROUNDS = 100_000
+
+
+def _options(text: str) -> tuple[str, dict]:
+    """'… max=5 wait=1' -> ('…', {'max': '5', 'wait': '1'})."""
+    import re
+    opts = {}
+    while True:
+        m = re.match(r"^(.*?)\s*\b(max|wait|timeout)=(\S+)\s*$", text, re.S)
+        if not m or m.group(2) in opts:
+            return text.strip(), opts
+        text, opts[m.group(2)] = m.group(1), m.group(3)
+
+
+def _whole(text, env, what: str, most: int = MAX_ROUNDS) -> int:
+    n = value_of(text, env or {})
+    if not (n == n and 1 <= n <= most):
+        raise SequenceError(f"{what} must be 1 … {most}, not '{text}'")
+    return int(n)
+
+
+def repeat_args(text, env) -> tuple[str, int, float]:
+    """'10 wait=1' or 'until v < 0.1 max=100 wait=1' -> (condition, rounds, wait s)."""
+    head, o = _options(str(text))
+    low = head.lower()
+    cond = head[6:].strip() if low.startswith("until ") else ""
+    try:
+        wait = float(o.get("wait", 0))
+        most = _whole(o.get("max", "1000") if cond else head, env, "Repeat: the count")
+    except (ValueError, SequenceError) as e:
+        if env is None and not cond and not isinstance(e, ValueError) and "work out" in str(e):
+            return cond, 1, 0.0          # names something only known while running
+        raise SequenceError(f"Repeat: a count like 10, or until vout < 0.1 max=100 ({e})") \
+            from None
+    if not 0 <= wait <= 86400:
+        raise SequenceError("Repeat: wait= is seconds")
+    return cond, most, wait
+
+
+def retry_args(text, env) -> tuple[int, float]:
+    """'3 wait=1' -> (tries, wait s)."""
+    head, o = _options(str(text))
+    try:
+        wait = float(o.get("wait", 0))
+        n = _whole(head or "3", env, "Retry: the number of tries", 1000)
+    except (ValueError, SequenceError) as e:
+        raise SequenceError(f"Retry: a number of tries like 3 wait=1 ({e})") from None
+    if not 0 <= wait <= 86400:
+        raise SequenceError("Retry: wait= is seconds")
+    return n, wait
 
 
 def _unit_of(bench: Bench, st: Step) -> str:
@@ -685,11 +1031,11 @@ def _unit_of(bench: Bench, st: Step) -> str:
         return ""
 
 
-def _limits(bench: Bench, st: Step, col: str, v, env: dict):
+def _limits(bench: Bench, st: Step, col: str, v, env: dict, u=None):
     lo = value_of(st.lo, env) if str(st.lo).strip() else None
     hi = value_of(st.hi, env) if str(st.hi).strip() else None
     if lo is not None or hi is not None:
-        bench.expect(col, v, lo, hi)
+        bench.expect(col, v, lo, hi, u)
 
 
 def _fill_text(text, x, idx: int, extra: dict, braces: bool = True) -> str:
@@ -710,6 +1056,51 @@ def _text_args(text: str) -> tuple[str, float]:
     if m:
         return m.group(1), float(m.group(2))
     return str(text).strip(), 10.0
+
+
+PM = " ±"                    # the column with a reading's ±
+MAX_IMAGES = 50              # kept for a report
+
+
+def dmm_set(drv, what: str, value):
+    """One setting of a meter whose driver takes its whole configuration."""
+    from dataclasses import replace
+    cfg = replace(drv.cfg)
+    old = getattr(cfg, what)
+    if isinstance(old, bool):
+        value = bool(value) if not isinstance(value, str) else value_of(value, {}) != 0
+    elif isinstance(old, str):
+        opts = dmm_options(drv, what)
+        hit = next((o for o in opts if o.replace(" ", "").lower() ==
+                    str(value).replace(" ", "").lower()), None)
+        if hit is None:
+            raise ValueError(f"{what} must be one of {', '.join(opts)}")
+        value = hit
+    else:
+        value = type(old)(value)
+        if what == "nplc":
+            from .instruments.hp3456a import NPLC_CHOICES
+            if value not in NPLC_CHOICES:
+                raise ValueError("nplc must be one of "
+                                 + ", ".join(f"{x:g}" for x in NPLC_CHOICES))
+    cfg = replace(cfg, **{what: value})
+    if what == "function" and value != old:
+        cfg = replace(cfg, range=_dmm_ranges(drv, value)[0])
+    drv.apply(cfg)
+
+
+def _dmm_ranges(drv, function: str) -> list[str]:
+    from .instruments import hp3456a, xdm
+    return list((hp3456a if drv.family == "3456A" else xdm).ranges_for(function))
+
+
+def dmm_options(drv, what: str) -> list[str]:
+    from .instruments import hp3456a, xdm
+    if what == "function":
+        return list(drv.functions()) if hasattr(drv, "functions") else list(hp3456a.FUNCTIONS)
+    if what == "range":
+        return _dmm_ranges(drv, drv.cfg.function)
+    return list(xdm.RATES) if what == "rate" else []
 
 
 def name_of(drv, what: str) -> str:

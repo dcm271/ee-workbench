@@ -66,6 +66,12 @@ class SimBase:
         data, self._bin = self._bin, None
         return bytes(data)
 
+    query_bytes = query_raw
+
+    def write_bytes(self, data: bytes):
+        """Text before the first byte that isn't; simulators get latin-1."""
+        self.write(bytes(data).decode("latin1"))
+
     def read_stb(self) -> int:
         s, self.stb = self.stb, 0
         return s

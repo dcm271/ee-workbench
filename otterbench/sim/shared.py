@@ -6,6 +6,7 @@ simulated signals, which are periodic and so can't be told apart by period).
 """
 from __future__ import annotations
 
+import time
 import weakref
 
 import numpy as np
@@ -34,6 +35,25 @@ def set_drive(gen):
 def filter_response(f: float) -> complex:
     s = 1j * f / FILTER_HZ
     return 1 / (1 + s / FILTER_Q + s * s)
+
+
+# The simulated electronic loads as if one hung on a 1.2 V regulator whose output
+# the simulated scopes show on CH4: the last current, and its last step.
+LOAD = [0.0, 0.0, -1e9]         # now, before, when (monotonic)
+
+
+def load_is(amps: float):
+    if amps != LOAD[0]:
+        LOAD[:] = [amps, LOAD[0], time.monotonic()]
+
+
+def regulator_out(t: np.ndarray) -> np.ndarray:
+    """Its output around the last step (t = 0): a damped ring, 0.04 V per amp."""
+    di = LOAD[0] - LOAD[1]
+    dv = np.where(t >= 0, -0.04 * di * np.exp(-t / 60e-6) * np.sin(
+        2 * np.pi * np.maximum(t, 0) / 200e-6) * 1.6, 0.0)
+    return 1.2 - 0.004 * np.where(t >= 0, LOAD[0], LOAD[1]) + dv
+
 
 SHARED_CH = 7
 STEP = 1e-3

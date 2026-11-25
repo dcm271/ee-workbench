@@ -174,6 +174,7 @@ One table per value. Each poll sends every reading's query, in file order, and p
 | `query_from` | Name of a `choice` setting: the query is that setting's current option's `read` (meters that read with `MEAS:VOLT:DC?`, `MEAS:CURR:AC?`, … instead of `READ?`). `query` is then the fallback. |
 | `field`, `unit_index` | Which comma-separated field of the answer; `1` takes the option's `unit2` (an LCR meter's second parameter). Readings with the same query share one answer per poll. |
 | `plot` | Readings naming the same `plot` share axes; `"-"` keeps one off the trend (it is still shown and logged). |
+| `accuracy` | Optional: the datasheet's accuracy, e.g. `"0.0035% + 50u"` or by range `"1: 0.004% + 7u; 10: 0.0035% + 50u"` ([syntax](03-users-guide.md#accuracy)). Give figures only from the maker's datasheet, for the conditions most people have (say, 1 year, 23 ± 5 °C). An option can have one too (a meter's function); it goes before the reading's. |
 | `sim` | Simulator only: a Python expression for the value (see below). |
 
 ### `[[setting]]`: things the panel can set
@@ -250,6 +251,10 @@ One driver, four command dialects. Each fetches a channel's waveform as bytes (`
 | `siglent` | `C<n>:VDIV?`, `C<n>:OFST?`, `TDIV?`, `SARA?`, `TRDL?`, `C<n>:WF? DAT2` (signed bytes) | v = code × VDIV / 25 − OFST; t₀ = −7 × TDIV − TRDL; Δt = 1 / SARA |
 
 **Capture protocol** (the same as a logic analyzer's, so the sequencer, watchdog and sessions treat both alike): `arm()` starts a single acquisition; `capture_done()` polls `status()` until the scope has stopped; `fetch()` reads every displayed channel into a `LogicCapture` with one `AnalogTrace` per channel; `abort()` stops it. `grab()` fetches without arming. `measure("vpp1")` fetches one channel and runs `trace_stats()`: Vpp, max, min, mean, RMS, frequency, period and duty from crossings of the mid level, and 10–90 % rise and fall times.
+
+**Screenshots** (`screenshot()`): `:DISP:DATA? PNG` (Keysight), `:DISP:DATA? ON,OFF,PNG` then plain `:DISP:DATA?` (Rigol), `SCDP` (Siglent: raw bytes, `query_bytes`). What comes back is accepted if it starts like a PNG, BMP or JPEG. Tektronix isn't supported. Untried on hardware; Siglent's `SCDP` hasn't been checked against its manual, and the Rigol parameters differ between series.
+
+**Masks** (`mask.py`): `Mask.around(t, v, dt, dv)` widens a trace by a sliding maximum and minimum; `check(t, v)` counts the samples outside. A driver's `masks` dict makes `measure("mask1")` work.
 
 `detect_idn()` recognises the families from `*IDN?` (maker and model prefix); `resolve()` accepts `SCOPE:RIGOL`, `DS1054Z`, `TBS2000`, `scope:tek` and similar.
 
@@ -457,10 +462,11 @@ A session is one SQLite file (WAL mode) written from the GUI thread. Rows are bu
 
 | Table | Contents |
 |---|---|
-| `meta(key, value)` | `format` (1), `created`, `wall_t0` (Unix time of app t = 0); `gate` (`{"pre_s", "post_s"}`) for a recording made only around events |
+| `meta(key, value)` | `format` (1), `created`, `wall_t0` (Unix time of app t = 0); `gate` (`{"pre_s", "post_s"}`) for a recording made only around events; `wiring` (the wiring notes and photo as JSON) |
 | `streams(id, name, model, resource, columns, tbl)` | one per instrument (or sequencer layout); `columns` is JSON |
 | `s_<id>(t, …)` | that stream's rows: `t` = app time (s), then its columns, the same as its CSV without `timestamp` and `t_s` |
 | `notes(t, text)` | |
+| `images(id, t, name, data)` | pictures (a scope's screen) as PNG / BMP / JPEG |
 | `events(t, t_from, t_to, why)` | only-around-events recordings: each event's time and the window kept around it |
 | `captures(id, t_app, t0, aligned, name, cfg, data, table_header, table_rows, note)` | `t0` = app time of the capture's t = 0 (PPK2-aligned if `aligned`, else the host's arming time); `cfg` = the LogicConfig as JSON; `data` = a compressed `.npz` of the traces (`d<ch>_t`, `d<ch>_l`, `d<ch>_end`, `a<ch>_v`, `a<ch>_td`, `x_ppk2_t`, `x_ppk2_i`) |
 
@@ -479,6 +485,12 @@ The engine doesn't import Qt. `Bench` holds one `Inst` per instrument tab and of
 
 `run_plan(plan, bench, start=0, extra=None, on_pass=None)`: `start` skips the passes before it (resuming); `extra` is a dict of names for the steps (production test: `serial`, `product`, `operator`; numbers can be used in values, any value replaces `{name}` in a Note, and `serial` becomes a result column); `on_pass(index)` is called after each finished pass (the window writes its checkpoint there). `run_script(code, bench, extra)` puts `extra` in the script's namespace.
 
+**Blocks.** `parse_blocks(steps)` turns the flat list into a tree of `Node`s (refusing unmatched blocks) and `_Pass` walks it. A **For** round that measured something is recorded as its own row; **Retry** puts the failures back to what they were before its last try. Values are evaluated with the results so far by slug name.
+
+**Commands** (`command.py`): `split()` first, placeholders afterwards, so each stays one argument; the program gets its own process group, which Stop and the timeout end as a whole. `Bench.command` is not among the Remote API's methods.
+
+**Accuracy** (`accuracy.py`): `Bench.uncertainty(name, what, value)` asks the panel, which looks in the calibration log, then the definition. `Plan.guard` is `off`, `marginal` or `strict`; `expect(…, u=…)` applies it.
+
 ## Function generators (`instruments/fgen.py`)
 
 `FunctionGenerator` (kind `"fgen"`) speaks one of two dialects, chosen from `*IDN?`: Siglent (`SDG` in the model) or SCPI (everything else). Settings are read back after every change, so the panel shows what the generator really took (it may round frequency or clamp amplitude to its limits).
@@ -493,6 +505,15 @@ The engine doesn't import Qt. `Bench` holds one `Inst` per instrument tab and of
 | Output | `OUTP1 ON` / `OUTP1?` | `C1:OUTP ON` / `C1:OUTP?` |
 | Read back | each query: `SOUR1:FUNC?` … | one `C1:BSWV?`, parsed as `key,value` pairs |
 | Channels | 2 if `SOUR2:FUNC?` answers without error | from the model number (`SDG…2…X` = 2) |
+
+**Arbitrary waveforms** (`upload(wave, ch)`, `arb.py`): refused while the channel's output is on. Untried on hardware; the Keysight commands haven't been checked against the manuals.
+
+| Generator | Commands |
+|---|---|
+| Keysight 33500 / 33600 | `SOURn:DATA:VOL:CLE`, `SOURn:DATA:ARB otter,…`, `SOURn:FUNC:ARB otter`, `SOURn:FUNC:ARB:SRAT`, `SOURn:FUNC ARB` |
+| 33220A and other older ones | `DATA VOLATILE,…`, `FUNC:USER VOLATILE`, `FUNC USER`, `FREQ` |
+| Rigol DG | `SOURn:DATA VOLATILE,…`, `SOURn:FUNC USER`, `SOURn:FREQ` |
+| Siglent SDG | `Cn:WVDT WVNM,…,WAVEDATA,` + 16-bit little-endian samples (`write_bytes`), `Cn:ARWV NAME,…` |
 
 `set_output(False)` (**Esc**) turns every channel off. `poll_enabled` is false: a generator has nothing to measure, so the worker only reads state after commands. Model numbers in `KNOWN` make auto-detect pick this driver; `looks_like_fgen(idn)` is the test.
 
@@ -563,6 +584,20 @@ At start-up, a marker whose `pid` is no longer running means the last run didn't
 ```
 
 **Reconnect back-off** (`Backoff`): 3, 6, 12, 24, 48, then 60 s per resource, reset when it answers again. `device_path(resource)` gives the `/dev/…` path of a serial resource (`PPK2::/dev/ttyACM0`, `ASRL/dev/ttyUSB0::INSTR`), which must exist again before a reconnect is tried.
+
+## Tapes (`tape.py`)
+
+`wrap(transport)` puts a `Tap` between a driver and its link; while `tap_on` it notes every write, answer, block, timeout and status byte. A tape is JSON lines: a header (`otterbench_tape: 1`, model, identity, options) and the events. `Replay` is a transport that answers from one, by command, so a driver may ask in another order; a command the tape doesn't know counts in `.unknown`. `hwcheck.replay(path)` runs the same hardware check on it and compares each step with the recording. PPK2, Saleae, sigrok, GPIO and serial consoles aren't taped.
+
+`REPLAY::/path/file.tape` opens one as an instrument. `tests/tapes/*.tape` are played back by `tests/test_hwcheck.py`.
+
+## Comparing sessions (`compare.py`)
+
+`compare(base, new, align, t_from, t_to, limits)` matches `signals()` by `slug(tab).column`, puts both on one axis (`Align`), and works out `stats()`: the mean is the integral over time divided by the time covered, without gaps (more than ten times the usual interval, at least 1 s). `python -m otterbench.compare` exits with 0 (passed), 1 (a check failed) or 2 (couldn't be compared).
+
+## Load transient (`transient.py`)
+
+`TransTest.run(bench)` arms the scope through its capture protocol, waits until the time before the trigger is filled, and then changes the load. `analyse(t, v, up, band)` works on any trace triggered at t = 0: level before = median up to a fifth of the screen before the trigger, level after = median of the last fifth.
 
 ## Reports (`report.py`)
 
@@ -712,6 +747,18 @@ All three logic/power simulators share a **debug pin** (`sim/shared.py`): an irr
 ```
 
 The tests run each driver against its simulator: identification, CV/CC, protection trips and events, error decoding, every 663xx setting, saved setups, immediate/level/segmented/output-step captures with pre-trigger, abort, capture validation, the waveform measurements in `analysis.py`, the config files, and the 3456A reading formats. PPK2 tests cover metadata captured from a real unit, word decoding, the calibration formula, the spike filter against a sample-by-sample reference (across chunk boundaries), and the driver against the simulator: sample count, timing, levels, logic, lost samples, modes, and stop/start. `test_bench_features.py` covers profiles (parsing, timing, skipping), GPIO and both generator dialects against their simulators, limits and stop-on-fail, Wait for, the watchdog's hold logic across blocks, event finding and bus attachment, math evaluation and resampling, reports (HTML, and PDF when WeasyPrint is present), setups, and the Remote API end to end over HTTP. Saleae tests cover both binary-format versions (including multi-chunk files), the edge measurements and lane envelope, resource parsing, and timed, triggered, manual and aborted captures, decoding and save/export through the simulator and the real worker thread. `test_instruments_generic.py` loads every definition, round-trips every setting and option through its simulator, checks multi-channel expansion, units that follow a function, `query_from`, the scope dialects' decoding (Vpp and frequency for all four), the model names and auto-detect, the sequencer with SCPI and scope tabs, two units of one model, and two PPK2s aligning. `test_unattended.py` covers watchdog HW plans and re-arm, only-around-events sessions, the crash marker, safety settings and back-off, the results database and verdicts, resuming and `extra` in `run_plan`, and in an offscreen window: a limit pushed into a supply, outputs off on quit, outputs off after a crash, and a production run with the serial-format check. `test_robustness.py` covers the error handling: crash-log rate limiting and rotation, damaged `last-session.json` / `config.toml` / watchdog / math / sequence / setup data, math expressions that fail after evaluating, a session file whose last write fails, foreign session files, malformed Remote API requests, and, in an offscreen Qt window, an exception in a slot not aborting, a GPIO tab's lost link offering ⟳ Reconnect and clearing it on recovery, and Esc still reaching every instrument when one fails.
+
+## Packages and CI
+
+| | |
+|---|---|
+| `pyproject.toml` | `pip install .` (or a wheel: `python -m build`); commands `otterbench`, `otterbench-check-instruments`, `otterbench-replay`, `otterbench-compare` |
+| `scripts/build-deb.sh` | one `.deb` for Ubuntu, Debian and Raspberry Pi OS, using the distribution's Python, Qt and numpy; puts a udev rule in `/usr/lib/udev/rules.d/60-otterbench.rules` |
+| `scripts/build-gpib-deb.sh` | `otterbench-gpib-dkms` (a fixed commit of linux-gpib, only the USB and usual PCI drivers) and `otterbench-libgpib`. `AUTOINSTALL` is empty on purpose: with DKMS's own hook, a module that doesn't compile makes the kernel's installation fail. The package's hooks in `/etc/kernel/postinst.d` and `header_postinst.d` call `/usr/lib/otterbench-gpib/build-for KERNEL`, which warns and always succeeds. `build-for.sh` gives linux-gpib's Makefile the headers of the kernel being built for; by itself it looks under the running one's. |
+| `scripts/build-appimage.sh` | one AppImage with everything in it, for the machine type it is built on |
+| `.github/workflows/ci.yml` | the tests on Python 3.11 – 3.14 and on Ubuntu's own packages, and the wheel and `.deb` as downloads |
+
+The code must run with numpy 1.24 and PyQt 6.4 (Debian 12): nothing that only numpy 2 has.
 
 ## The name
 

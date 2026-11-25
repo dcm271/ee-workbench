@@ -26,6 +26,8 @@ BRANDING = Path(__file__).resolve().parent / "gui" / "branding"
 
 def revision() -> str:
     """The git commit this copy is at, "+" when it has changes ("" unknown)."""
+    if not (ROOT / ".git").exists():
+        return ""                # pip-installed: not some other repository's commit
     try:
         def git(*a):
             return subprocess.run(["git", "-C", str(ROOT), *a], capture_output=True, text=True,

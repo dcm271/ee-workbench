@@ -31,7 +31,7 @@ The [compatibility list](docs/01-hardware-and-resources.md#compatibility) says w
 
 Across instruments:
 
-- **Sequencer with limits.** Steps (set, wait, measure, capture, profile, wait for a GPIO pin, note) run once, N times or as a sweep, or a Python script with the same `bench` API. Min/max limits mark each pass PASS or FAIL, optionally stopping at the first failure. Results come as a table, a plot and CSV.
+- **Sequencer with limits.** Steps (set, wait, measure, capture, profile, wait for a GPIO pin, run a program such as a flasher, note) run once, N times or as a sweep, with nested loops, retries and conditions, or a Python script with the same `bench` API. Min/max limits mark each pass PASS or FAIL, optionally stopping at the first failure. Results come as a table, a plot and CSV.
 - **Reports.** One HTML or PDF page per sequence run or session: verdict, instruments, plots, results, steps and log.
 - **Profiles.** Vary any supply, PPK2 or generator setpoint over time (sine, triangle, square, ramp, steps, log steps, a list, or a CSV), for battery curves, brown-out tests and frequency sweeps.
 - **Watchdog.** Rules across instruments: *PPK2 current > 50 mA for 10 ms → all outputs off*, *rail < 2.9 V → generator off*, *e-stop pin low → stop the sequence*, *current spike → capture on the scope*. **In HW** also sets a supply's own OVP / current limit from the rule, so the DUT stays protected even if the computer stops.
@@ -39,15 +39,20 @@ Across instruments:
 - **Math channels.** Live expressions such as `_66321d_out.power / _6632a_in.power * 100` (efficiency) or integrated energy, plotted and recorded. They work in the session viewer too.
 - **Bode plots.** Gain and phase with any supported generator and scope: −3 dB points, phase and gain margins, reference sweep.
 - **Regulator test.** Input voltage × load sweeps with a supply and a load: efficiency, losses, line and load regulation, pass / fail, report.
+- **Load transient test.** Steps a load and measures droop, overshoot and recovery on a scope.
 - **Battery tester.** Charge / rest / discharge cycles with a load (or a 66321D sinking): capacity, energy and internal resistance per cycle.
 - **Calibration log.** Due dates per instrument, checks of one meter against a better one, and the status in every report.
+- **Measurement uncertainty.** Enter an instrument's accuracy and every reading shows its ±; readings within it of a limit can be marked or failed.
+- **Hardware check.** Goes through an instrument's driver step by step, and keeps the traffic as a tape the test suite replays.
+- **Scope extras.** The scope's own screenshot in sessions and reports, mask tests, and waveforms replayed on a function generator.
 - **Identify port.** Finds out what is on a USB serial port by asking only read-only questions.
 - **PPK2 ↔ logic-analyzer alignment.** Wire one DUT pin to an analyzer channel and a PPK2 logic input. Each capture is then lined up with the PPK2 to within ±5–10 µs, with the current drawn under the decoded traffic.
 - **Sessions.** One file (`.otter`, SQLite) records every instrument, capture, math channel, result and note. The viewer lays them out on one time axis, with cursors (Δt, mean, charge, energy), math, CSV/PNG export and reports. A **flight-recorder** mode keeps only the seconds before and after each event (a watchdog trip, a capture, a note), for overnight runs.
+- **Compare sessions.** Two recordings overlaid, with differences and limits; also a command for CI.
 - **Production test.** Scan a serial number, the sequence runs, a big PASS / FAIL banner says where the unit goes. Every unit goes into a results database with history, first-pass and final yield, per-unit HTML reports and CSV export.
 - **Unattended runs.** Outputs off on quit or after a crash, automatic reconnect when a USB cable is replugged or an instrument power-cycled, resuming a sequence after a crash, and a heartbeat GPIO pin for an external hardware watchdog.
 - **Several PPK2s in step.** Line up two or more PPK2s' time axes through a shared logic input, to within tens of µs.
-- **Setups.** Save the whole bench (instruments, sequence, watchdog, math) under a name, and recall it in one click.
+- **Setups.** Save the whole bench (instruments, sequence, watchdog, math, wiring notes with a photo) under a name, and recall it in one click.
 - **Remote API.** Drive the open bench from Jupyter, pytest or CI: `bench = connect(); bench.measure("PPK2", "current", 2.0)`.
 
 Each instrument opens in its own tab with live readouts, trend plots on a shared time base, and CSV recording. **Esc turns every output off**: supplies, PPK2 DUT power, generator channels and GPIO outputs. It also stops a running sequence or profile.
@@ -70,6 +75,8 @@ Each instrument opens in its own tab with live readouts, trend plots on a shared
 | [Production test](docs/03-users-guide.md#production-test) | [Watchdog](docs/03-users-guide.md#watchdog) with limits in the supply |
 
 ## Quick start
+
+Build a `.deb` (`scripts/build-deb.sh`) or an AppImage (`scripts/build-appimage.sh`) for a one-step install ([Packages](docs/02-installation.md#packages)), or run from the source folder:
 
 ```bash
 ./scripts/setup-ubuntu.sh                  # once, on a fresh Ubuntu: apt packages, .venv, sigrok,

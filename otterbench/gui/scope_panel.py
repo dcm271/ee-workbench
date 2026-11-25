@@ -11,8 +11,9 @@ from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import (QCheckBox, QComboBox, QDoubleSpinBox, QFileDialog, QFormLayout,
                              QGridLayout, QGroupBox, QHBoxLayout, QLabel, QLineEdit,
                              QPushButton, QSplitter, QTableWidget, QTableWidgetItem, QTabWidget,
-                             QVBoxLayout, QWidget)
+                             QVBoxLayout, QWidget, QInputDialog, QMenu)
 
+from .. import mask
 from ..clock import now
 from ..instruments.logic import LogicCapture
 from ..instruments.scopes import SLOPES, SWEEPS, ScopeReading, ScopeState, trace_stats
@@ -20,7 +21,7 @@ from ..session import recorder as session
 from . import touch
 from .panel_base import PanelBase
 from .theme import set_role
-from .widgets import C_MUTED, MONO, fmt_si, io_errors
+from .widgets import C_BAD, C_GOOD, C_MUTED, MONO, fmt_si, io_errors
 
 CH_COLORS = ["#fff176", "#4dd0e1", "#f06292", "#64b5f6"]      # the usual scope colours
 VDIV = [1e-3, 2e-3, 5e-3, 1e-2, 2e-2, 5e-2, 0.1, 0.2, 0.5, 1, 2, 5, 10]
@@ -57,6 +58,7 @@ class ScopePanel(PanelBase):
                                          "query reads the answer)", read_button=True)
         split = QSplitter(Qt.Orientation.Horizontal)
         split.setChildrenCollapsible(False)
+        self.masks: dict = {}                 # channel -> mask.Mask
         inner = QWidget()
         lay = QVBoxLayout(inner)
         lay.setContentsMargins(0, 0, 6, 0)
@@ -210,6 +212,21 @@ class ScopePanel(PanelBase):
         self.cap_label.setStyleSheet(f"color:{C_MUTED};")
         self.cap_label.setWordWrap(True)
         bar.addWidget(self.cap_label, 1)
+        self.mask_label = QLabel("")
+        self.mask_label.setWordWrap(True)
+        bar.addWidget(self.mask_label, 1)
+        self.shot_btn = QPushButton("Screenshot…")
+        self.shot_btn.setToolTip("The scope's own screen as a picture (into the session too)")
+        self.shot_btn.clicked.connect(self.screenshot)
+        bar.addWidget(self.shot_btn)
+        self.mask_btn = QPushButton("Mask ▾")
+        menu = QMenu(self.mask_btn)
+        menu.addAction("Make from this capture…", self.make_mask)
+        menu.addAction("Load…", self.load_mask)
+        menu.addAction("Save…", self.save_mask)
+        menu.addAction("Remove", self.clear_mask)
+        self.mask_btn.setMenu(menu)
+        bar.addWidget(self.mask_btn)
         self.save_btn = QPushButton("Save CSV…")
         self.save_btn.clicked.connect(self.save_csv)
         bar.addWidget(self.save_btn)
@@ -251,7 +268,115 @@ class ScopePanel(PanelBase):
         return {"acquire": "choice", "trigger_slope": "choice", "sweep": "choice"}
 
     def measure_names(self) -> list[str]:
-        return [f"{m[0]}{ch}" for ch in range(1, self.state.nch + 1) for m in MEAS]
+        return [f"{m[0]}{ch}" for ch in range(1, self.state.nch + 1) for m in MEAS] + \
+            [f"mask{ch}" for ch in sorted(self.masks)]
+
+    # ---- the scope's screen ------------------------------------------------------------
+    def screenshot(self):
+        if self.connected:
+            self.worker.submit_result("shot", lambda d: d.screenshot())
+
+    def got_screenshot(self, data: bytes):
+        if session.active:
+            session.image(data, self.display_name())
+        from PyQt6.QtGui import QImage
+        img = QImage.fromData(data)
+        path, _ = QFileDialog.getSaveFileName(self, "Save the scope's screen",
+                                              time.strftime("scope_%Y%m%d_%H%M%S.png"),
+                                              "PNG (*.png)")
+        if not path:
+            return
+        path = path if path.lower().endswith(".png") else path + ".png"
+        ok = not img.isNull() and img.save(path, "PNG")
+        self.message.emit(f"Saved {path}" if ok else f"Can't write {path}")
+
+    # ---- mask test ---------------------------------------------------------------------
+    def set_masks(self, masks: dict):
+        self.masks = dict(masks)
+        self._push_masks()
+        if self.capture is not None:
+            self._show_capture()
+        else:
+            self._judge()
+
+    def _push_masks(self):
+        if self.connected:
+            masks = dict(self.masks)
+            self.worker.submit(lambda d: setattr(d, "masks", masks))
+
+    def make_mask(self):
+        if self.capture is None or not self.capture.analog:
+            self.message.emit("Capture a good waveform first")
+            return
+        chans = [f"CH{c}" for c in sorted(self.capture.analog)]
+        ch, ok = QInputDialog.getItem(self, "Mask", "Channel:", chans, 0, False)
+        if not ok:
+            return
+        c = int(ch[2:])
+        tr = self.capture.analog[c]
+        span = tr.dt * tr.v.size
+        dv, ok = QInputDialog.getDouble(self, "Mask", "± volts:", max(
+            0.05 * float(tr.v.max() - tr.v.min()), 0.001), 0, 1000, 4)
+        if not ok:
+            return
+        us, ok = QInputDialog.getDouble(self, "Mask", "± time (µs):", span * 0.01 * 1e6, 0, 1e9, 4)
+        if not ok:
+            return
+        self.mask_from(c, us * 1e-6, dv)
+
+    def mask_from(self, ch: int, dt: float, dv: float):
+        tr = self.capture.analog[ch]
+        try:
+            m = mask.Mask.around(tr.t, tr.v, dt, dv, f"CH{ch} ±{dv:g} V ±{dt:g} s")
+        except ValueError as e:
+            self.message.emit(f"Mask: {e}")
+            return
+        self.set_masks({**self.masks, ch: m})
+
+    def load_mask(self):
+        path, _ = QFileDialog.getOpenFileName(self, "Load mask", "", "Mask (*.json)")
+        if not path:
+            return
+        try:
+            self.set_masks(mask.load(path))
+        except (OSError, ValueError) as e:
+            self.message.emit(f"Can't read {path}: {e}")
+
+    @io_errors("Save mask")
+    def save_mask(self):
+        if not self.masks:
+            self.message.emit("There is no mask")
+            return
+        path, _ = QFileDialog.getSaveFileName(self, "Save mask", "mask.json", "Mask (*.json)")
+        if path:
+            mask.save(self.masks, path)
+
+    def clear_mask(self):
+        self.set_masks({})
+
+    def _judge(self):
+        """The capture shown against its masks; marks what is outside."""
+        text, bad_total = [], 0
+        for ch, m in sorted(self.masks.items()):
+            for y in (m.lo, m.hi):
+                self.plot.plot(m.t, y, pen=pg.mkPen("#8a8f98", width=1,
+                                                    style=Qt.PenStyle.DashLine))
+            tr = self.capture.analog.get(ch) if self.capture is not None else None
+            if tr is None:
+                text.append(f"CH{ch}: no waveform")
+                continue
+            bad, judged, which = m.check(tr.t, tr.v)
+            if bad:
+                idx = which.nonzero()[0][:5000]
+                self.plot.plot(tr.t[idx], tr.v[idx], pen=None, symbol="o", symbolSize=4,
+                               symbolPen=None, symbolBrush=C_BAD)
+            bad_total += bad
+            text.append(f"CH{ch}: {bad} of {judged} outside" if judged else
+                        f"CH{ch}: the mask is elsewhere in time")
+        ok = bool(text) and not bad_total and all(" of " in x for x in text)
+        self.mask_label.setText(("Mask " + ("PASS  " if ok else "FAIL  " if bad_total else "")
+                                 + "; ".join(text)) if text else "")
+        self.mask_label.setStyleSheet(f"font-weight:bold; color:{C_GOOD if ok else C_BAD};")
 
     # ---- actions ---------------------------------------------------------------------
     def capture_now(self):
@@ -282,6 +407,9 @@ class ScopePanel(PanelBase):
             self._set_busy(status)
 
     def _on_job(self, tag, value):
+        if tag == "shot":
+            self.got_screenshot(value)
+            return
         if tag == "grab":
             self._set_busy("")
             self._on_capture(value)
@@ -336,6 +464,7 @@ class ScopePanel(PanelBase):
                 v = st[key]
                 text = "—" if v != v else (f"{v:.1f} %" if unit == "%" else fmt_si(v, unit, 4))
                 self.meas.setItem(r, k, QTableWidgetItem(text))
+        self._judge()
         self.meas.resizeColumnsToContents()
         n = sum(tr.v.size for tr in res.analog.values())
         self.cap_label.setText(time.strftime("%H:%M:%S", time.localtime(res.wall)) +
@@ -442,6 +571,7 @@ class ScopePanel(PanelBase):
         self.name_edit.setText(str(settings.get("name", "")))
 
     def _apply_pending(self):
+        self._push_masks()
         self._pending = None     # the scope keeps its own setup; only the name is ours
 
     def set_enabled(self, on: bool):

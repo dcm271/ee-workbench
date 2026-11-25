@@ -90,8 +90,9 @@ class SimRiden(_Link):
 class SimKorad(_Link):
     LOAD = 50.0
 
-    def __init__(self):
+    def __init__(self, model: str = "KA3005P"):
         super().__init__()
+        self.model = model
         self.v, self.i = 5.0, 1.0
         self.out = self.ovp = self.ocp = False
 
@@ -101,7 +102,7 @@ class SimKorad(_Link):
         vout = iout * self.LOAD
         cv = not (self.out and self.v / self.LOAD > self.i)
         if c == "*IDN?":
-            self._out += b"KORAD KA3005P V5.5 SN:03379314"
+            self._out += f"KORAD {self.model} V5.5 SN:03379314".encode()
         elif c == "VSET1?":
             self._out += b"%05.2f" % self.v
         elif c == "ISET1?":
@@ -333,7 +334,7 @@ def sim_link(d):
     if p == "riden":
         return SimRiden()
     if p == "korad":
-        return SimKorad()
+        return SimKorad(d.id)
     if p == "px100":
         return SimPx100()
     if p == "center":

@@ -59,6 +59,7 @@ class PanelBase(QWidget):
         self._edge: float | None = None
         self._x_plot = None                   # the plot whose X range scrolls (others link to it)
         self._steady: list[SteadyY] = []
+        self._pm_t = 0.0
         self._lost = False
         # Several of one model can be open: the first is plain "PPK2", then
         # "PPK2 #2", … The number is kept with the tab's settings, so rules,
@@ -133,6 +134,32 @@ class PanelBase(QWidget):
             return note_for(self.identity(), self.resource)
         except Exception as e:      # noqa: BLE001 - a report must not fail over this
             return f"calibration log unreadable: {e}"
+
+    def accuracy_keys(self, what: str, r=None) -> list[str]:
+        """The names a specification of this reading can go by, best first."""
+        return [what]
+
+    def builtin_accuracy(self) -> dict:
+        return {}
+
+    def pm_due(self) -> bool:
+        """The ± on the tab: a few times a second is enough."""
+        t = time.monotonic()
+        if t - self._pm_t < 0.25:
+            return False
+        self._pm_t = t
+        return True
+
+    def uncertainty(self, what: str, value, r=None) -> float | None:
+        """± of a reading; None when no specification was given (accuracy.py)."""
+        from .. import accuracy
+        try:
+            keys = self.accuracy_keys(what, r)
+            spec = accuracy.pick(accuracy.from_log(self.identity(), self.resource), keys) or \
+                accuracy.pick(self.builtin_accuracy(), keys)
+            return None if spec is None else spec.of(value)
+        except Exception:       # noqa: BLE001 - a damaged log must not stop the readings
+            return None
 
     # ---- several of one model -----------------------------------------------------
     def _free_instance(self, want: int | None = None) -> int:
