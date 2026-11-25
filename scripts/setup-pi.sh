@@ -33,11 +33,12 @@ fi
 step "Installing system packages (sudo)"
 sudo apt-get update
 # PyQt6 and numpy come from apt: building them with pip on a Pi takes hours.
+# pyqt6-dev-tools has PyQt6.uic, which pyqtgraph imports (Bookworm splits it off).
 # qt6-wayland lets Qt run natively on the Bookworm Wayland desktop.
 # sigrok-cli drives USB logic analyzers (Saleae's Logic 2 doesn't run on ARM).
 # python3-libgpiod drives the GPIO header (relays, buttons, "done" pins).
-sudo apt-get install -y git python3-venv python3-pip python3-pyqt6 python3-numpy \
-  python3-serial qt6-wayland fonts-dejavu-core sigrok-cli sigrok-firmware-fx2lafw \
+sudo apt-get install -y git python3-venv python3-pip python3-pyqt6 pyqt6-dev-tools \
+  python3-numpy python3-serial qt6-wayland fonts-dejavu-core sigrok-cli sigrok-firmware-fx2lafw \
   python3-libgpiod
 if (( PDF )); then
   # WeasyPrint (PDF reports) draws text with Pango
