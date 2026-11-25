@@ -242,14 +242,16 @@ def test_panel(qapp, monkeypatch, touch_mode):
     p = SupplyPanel("SIM::66309B", "auto", 9600)
     try:
         assert _wait(qapp, lambda: p.connected and p.last_reading is not None)
-        assert p.tabs.isTabVisible(p.tabs.indexOf(p.out2_scroll))
-        assert "1 + 2" in p.out_btn.text() and not p.out2_btn.isEnabled()
+        # both outputs are on show; one button stands for the coupled pair
+        assert not p.out2_col.isHidden() and p.out2_btn.isHidden()
+        assert "1 + 2" in p.out_btn.text() and p.both_slot.indexOf(p.out_btn) >= 0
         assert p.ovt_chk.text() == "OVP"
         assert "voltage2" in p.measure_names() and "output2" in p.set_names()
         assert "power2" in p.quantities()
         assert len(p.csv_header()) == 17
         p.cmd(lambda d: (d.set_voltage2(5), d.set_current2(1), d.set_coupled(False)))
-        assert _wait(qapp, lambda: p.sp.coupled is False and p.out2_btn.isEnabled())
+        assert _wait(qapp, lambda: p.sp.coupled is False)
+        assert not p.out2_btn.isHidden() and p.out_slot.indexOf(p.out_btn) == 0
         assert p.out_btn.text().startswith("OUTPUT 1 ")
         p.set_output2(True)
         if touch_mode:                               # one tap only arms it
@@ -257,11 +259,27 @@ def test_panel(qapp, monkeypatch, touch_mode):
             p.set_output2(True)
         assert _wait(qapp, lambda: p.sp.output2 is True)
         assert p.sp.output is False
-        assert _wait(qapp, lambda: "+5.00" in p.out2_line.text())
+        assert _wait(qapp, lambda: p.r_volt2.value.text().startswith("+5.00"))
         p.redraw()
         # ALL OUTPUTS OFF, with the outputs separate
         p.output_off()
         assert _wait(qapp, lambda: p.sp.output2 is False)
+        # a trip of output 2 shows beside output 2
+        p.cmd(lambda d: (d.set_current2(0.1), d.set_ocp(True), d.set_output2(True)))
+        assert _wait(qapp, lambda: "OCP2" in p.flags2_label.text())
+        assert "OCP2" not in p.flags_label.text() and "Clear trip" in p.flags_label.text()
+        p.clr_btn.click()
+        assert _wait(qapp, lambda: p.flags2_label.text() == "")
+        # coupled while only output 2 is on: the button reads ON, and turns it off
+        p.cmd(lambda d: (d.set_ocp(False), d.set_current2(1), d.set_output2(True)))
+        assert _wait(qapp, lambda: p.sp.output2 is True)
+        p.cmd(lambda d: d.set_coupled(True))
+        assert _wait(qapp, lambda: p.sp.coupled is True)
+        assert p.out_btn.isChecked() and "ONLY OUTPUT 2" in p.out_btn.text()
+        p.out_btn.click()
+        assert _wait(qapp, lambda: p.sp.output2 is False)
+        p.cmd(lambda d: d.set_coupled(False))
+        assert _wait(qapp, lambda: p.sp.coupled is False)
         # a change made on the front panel shows up
         p.worker.drv.t.coupled = True
         assert _wait(qapp, lambda: p.sp.coupled is True and "1 + 2" in p.out_btn.text())
@@ -274,8 +292,22 @@ def test_panel_of_a_single_output_supply(qapp):
     p = SupplyPanel("SIM::66321D", "663xx", 9600)
     try:
         assert _wait(qapp, lambda: p.connected)
-        assert not p.tabs.isTabVisible(p.tabs.indexOf(p.out2_scroll))
+        assert p.out2_col.isHidden() and p.meas2_chk.isHidden()
+        assert p.out_slot.indexOf(p.out_btn) == 0 and p.prot_row.indexOf(p.clr_btn) >= 0
         assert p.out_btn.text().startswith("OUTPUT O") and len(p.csv_header()) == 13
         assert "voltage2" not in p.measure_names() and "output2" not in p.set_names()
+    finally:
+        p.shutdown()
+
+
+def test_clear_does_not_stop_the_trend(qapp):
+    """Clear forgets the lag; a redraw before the next reading must not fail."""
+    from otterbench.gui.supply_panel import SupplyPanel
+    p = SupplyPanel("SIM::66321D", "663xx", 9600)
+    try:
+        assert _wait(qapp, lambda: p.connected and p.last_reading is not None)
+        p.clear_trend()
+        assert p._view_edge() is None
+        p.redraw()
     finally:
         p.shutdown()

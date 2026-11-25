@@ -128,7 +128,7 @@ Any number of instruments of any kind can be open at once, including several of 
 ## The computer
 
 - **OS:** tested on Ubuntu 26.04.1 LTS (kernel `7.0.0-43-generic`). Any Linux works if you can build kernel modules for it.
-- **Python:** 3.12 or newer, with PyQt6 installed from the distribution (`python3-pyqt6`).
+- **Python:** 3.11 or newer, with PyQt6 installed from the distribution (`python3-pyqt6`, and `pyqt6-dev-tools` for the `PyQt6.uic` module that pyqtgraph imports).
 - **Build tools** for the GPIB driver: `build-essential`, `autoconf`, `automake`, `libtool`, `flex`, `bison`, and the kernel headers that match your running kernel. The installation script installs all of these.
 - **Secure Boot:** if it is enabled, the out-of-tree GPIB module has to be signed (MOK enrolment) before it will load. On the test machine Secure Boot is off.
 - **A USB 2.0 port** for the GPIB adapter. Avoid unpowered hubs.
@@ -168,7 +168,7 @@ What the app uses: essentially everything. Setpoints, output on/off, voltage lim
 | Over-current protection | one switch for both outputs | |
 | Waveform capture, pulse statistics | yes | no (average V and I) |
 
-- The outputs are **coupled** at power-on and after `*RST` (not on Option 521 units): one switch for both. From firmware A.02.04 they can be separated on the **Output 2** tab; earlier firmware always switches both.
+- The outputs are **coupled** at power-on and after `*RST` (not on Option 521 units): one switch for both. From firmware A.02.04 they can be separated (untick *Switch both together*); earlier firmware always switches both.
 - **ALL OUTPUTS OFF**, the watchdog and the shutdowns after a crash or at quit switch both outputs off, coupled or not.
 - `VOLT:PROT` is a real OVP trip level here and on the 66311B (on the 66321 it is a limit on the setting).
 - There is no RS-232, output resistance, 1 A range or external trigger. The 66319B/D opens the same way, but its output 2 is unchecked against its manual.

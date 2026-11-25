@@ -88,10 +88,31 @@ def t_new():
         d.grab().save(str(OUT / "touch-safety.png"))  # noqa: F821
         d.close()
         nw.all_outputs_off()
-        t_at(500, lambda: (nw.close(), app.quit()))  # noqa: F821
+        t_at(500, lambda: (nw.close(), t_dual()))
 
     t_at(2500, setup)
     t_at(6000, shots)
+
+
+def t_dual():
+    """A dual-output supply: both outputs side by side."""
+    global dw
+    dw = MainWindow([parse_target("SIM::66309B")])  # noqa: F821
+    dw.resize(1280, 800)
+    dw.show()
+
+    def setup():
+        p = dw.panels()[0]
+        p.cmd(lambda d: (d.set_voltage(3.8), d.set_current(1.5), d.set_voltage2(5),
+                         d.set_current2(1), d.set_output(True)))
+
+    def shot():
+        dw.grab().save(str(OUT / "touch-66309b.png"))  # noqa: F821
+        dw.all_outputs_off()
+        t_at(500, lambda: (dw.close(), app.quit()))  # noqa: F821
+
+    t_at(1500, setup)
+    t_at(5000, shot)
 
 
 t_at(1500, t_setup)

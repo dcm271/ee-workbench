@@ -71,13 +71,15 @@ Each instrument gets its own **tab**. Closing a tab disconnects that instrument 
 
 ### Output 2 (66309B / 66309D)
 
-A dual-output supply has an **Output 2** tab, and a line under the main output button that always shows output 2's state.
+![66309B panel: both outputs side by side](images/touch-66309b.png)
 
-- **Coupled** (the default): the main button reads **OUTPUTS 1 + 2** and switches both. Check output 2's voltage before pressing it: it comes on at whatever it is set to.
-- **Separate** (untick *Switch both outputs together*; firmware A.02.04 or later): each output has its own button. The supply is coupled again at power-on unless you save it into the power-on state.
+A dual-output supply shows both outputs side by side, each with its readings and settings. **Clear trip** clears both.
+
+- **Coupled** (the default): one button across both columns reads **OUTPUTS 1 + 2** and switches both. Check output 2's voltage before pressing it: it comes on at whatever it is set to.
+- **Separate** (untick *Switch both together*; firmware A.02.04 or later): each output has its own button. If you couple them while one is on, the button reads **ONLY OUTPUT 1 ON** or **ONLY OUTPUT 2 ON**, and pressing it switches off. The supply is coupled again at power-on unless you save it into the power-on state.
 - **ALL OUTPUTS OFF** (Esc) switches both off either way.
-- **OVP** on this supply (and the 66311B) is a real trip level with an on/off box, in place of *Voltage limit* and *OV trip*. Unticked, nothing stops an over-voltage. It covers output 1 only; output 2 has none. **OCP** is one switch for both; a trip of output 2 shows as **OCP2**.
-- Untick *Measure output 2* for faster readings: each takes about 90 ms longer with it (211 ms against 123 ms, measured). Its on/off state is read either way.
+- **OVP** on this supply (and the 66311B) is a real trip level with an on/off box, in place of *Voltage limit* and *OV trip*. Unticked, nothing stops an over-voltage. It covers output 1 only; output 2 has none. **OCP 1+2** is one switch for both; a trip of output 2 shows as **OCP2** beside its badge.
+- Untick *Measure output 2* (Measurement setup; the **Setup** tab on a touch screen) for faster readings: each takes about 90 ms longer with it (211 ms against 123 ms, measured). Its on/off state is read either way.
 - Output 2 is drawn dashed in the Trend and recorded as extra columns. Elsewhere it is `voltage2`, `current2`, `power2` (readings) and `voltage2`, `current2`, `output2`, `coupled` (settings). `output2 on` is refused while the outputs are coupled.
 - The software limits, the app presets, the Tests tab and Profile work on output 1. While the outputs are coupled, switching output 1 there switches output 2 too.
 

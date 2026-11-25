@@ -1,5 +1,5 @@
 """Tab for a DC source (Agilent 663xx SCPI family or HP 6632A family). A second
-output (66309 / 66319) has its own tab, and a line under the output button."""
+output (66309 / 66319) gets a column of its own beside the first."""
 from __future__ import annotations
 
 import csv
@@ -36,6 +36,11 @@ SPEED_PRESETS = [
                      "Best averaging for pulsed loads."),
 ]
 
+
+# two outputs side by side: the readouts' size, and the width of both columns
+DUAL_SIZE = 22
+DUAL_WIDTH = 620
+DUAL_WIDTH_TOUCH = 580
 
 
 def _profile_page(box):
@@ -83,14 +88,11 @@ class SupplyPanel(PanelBase):
         self.worker.capture_status.connect(self.capture_tab.on_status)
         self.worker.capture_done.connect(self.capture_tab.on_capture)
         self.worker.job_result.connect(self.system_tab.on_result)
-        split = QSplitter(Qt.Orientation.Horizontal)
+        split = self.split = QSplitter(Qt.Orientation.Horizontal)
         split.setChildrenCollapsible(False)
         split.addWidget(self._build_left())
         self.tabs = QTabWidget()
         self.tabs.addTab(self._build_trend_tab(), "Trend")
-        self.out2_scroll = touch.scroll(self._build_out2())
-        self.tabs.addTab(self.out2_scroll, "Output 2")
-        self.tabs.setTabVisible(self.tabs.indexOf(self.out2_scroll), False)
         self.tabs.addTab(self.tests_tab, "Tests")
         self.profile_box = ProfileBox(self, {"voltage": lambda d, v: d.set_voltage(v),
                                              "current": lambda d, v: d.set_current(v)},
@@ -134,17 +136,28 @@ class SupplyPanel(PanelBase):
         lay.setContentsMargins(0, 0, 6, 0)
         if not touch.TOUCH:
             lay.addLayout(self._build_header())
-        lay.addWidget(self._build_readouts())
-        lay.addWidget(self._build_output_group())
+        # the output button spans both columns while two outputs are coupled
+        self.both_slot = QVBoxLayout()
+        lay.addLayout(self.both_slot)
+        cols = QHBoxLayout()
+        one = QVBoxLayout()
+        one.addWidget(self._build_readouts())
+        one.addWidget(self._build_output_group())
+        one.addStretch(1)
+        cols.addLayout(one, 1)
+        self.out2_col = self._build_out2()
+        self.out2_col.setVisible(False)
+        cols.addWidget(self.out2_col, 1)
+        lay.addLayout(cols)
         if not touch.TOUCH:
             lay.addWidget(self._build_measure_group())
         lay.addStretch(1)
-        sa = touch.scroll(inner)
+        sa = self.left = touch.scroll(inner)
         sa.setMinimumWidth(420 if touch.TOUCH else 400)
         return sa
 
     def _build_readouts(self):
-        g = QGroupBox("Measurements")
+        g = self.g_meas = QGroupBox("Measurements")
         lay = QVBoxLayout(g)
         top = QHBoxLayout()
         self.mode_badge = QLabel("—")
@@ -191,7 +204,7 @@ class SupplyPanel(PanelBase):
         lay.addWidget(self.pulse_box)
         return g
 
-    def _set_row(self, form, label, spin, apply_fn):
+    def _set_row(self, form, label, spin, apply_fn, title=""):
         row = QHBoxLayout()
         row.addWidget(spin, 1)
         b = QPushButton("Set")
@@ -201,26 +214,21 @@ class SupplyPanel(PanelBase):
         row.addWidget(b)
         if touch.TOUCH:
             # The keypad's own Set button sends the value; no separate button needed.
-            touch.attach_keypad(spin, label, apply_fn)
+            touch.attach_keypad(spin, title or label, apply_fn)
             b.setVisible(False)
         lab = QLabel(label)
         form.addRow(lab, row)
         return lab, b
 
     def _build_output_group(self):
-        g = QGroupBox("Output")
-        v = QVBoxLayout(g)
+        g = self.g_out = QGroupBox("Output")
+        v = self.out_slot = QVBoxLayout(g)
         self.out_btn = QPushButton("OUTPUT —")
         self.out_btn.setCheckable(True)
         self.out_btn.setMinimumHeight(60 if touch.TOUCH else 44)
         self.out_btn.setToolTip("Toggle the output. Esc turns every supply's output OFF.")
         self.out_btn.clicked.connect(lambda on: self.set_output(on))
         v.addWidget(self.out_btn)
-        self.out2_line = QLabel("")
-        self.out2_line.setWordWrap(True)
-        self.out2_line.setFont(QFont(MONO, 10))
-        self.out2_line.setVisible(False)
-        v.addWidget(self.out2_line)
 
         form = QFormLayout()
         form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
@@ -242,7 +250,7 @@ class SupplyPanel(PanelBase):
             lambda: self.cmd(lambda d, x: d.set_resistance(x), self.sp_res.value()))
         v.addLayout(form)
 
-        row = QHBoxLayout()
+        row = self.prot_row = QHBoxLayout()
         self.ocp_chk = QCheckBox("OCP")
         self.ocp_chk.setToolTip("Over-current protection: turn the output off if the supply "
                                 "goes into current limit.")
@@ -279,19 +287,29 @@ class SupplyPanel(PanelBase):
         return g
 
     def _build_out2(self):
+        """Output 2, laid out like output 1 beside it."""
         w = QWidget()
         lay = QVBoxLayout(w)
-        g = QGroupBox("Output 2")
+        lay.setContentsMargins(0, 0, 0, 0)
+        g = self.g_meas2 = QGroupBox("Output 2 measurements")
         v = QVBoxLayout(g)
         self.mode2_badge = QLabel("—")
         self.mode2_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.mode2_badge.setFixedSize(64, 26)
-        v.addWidget(self.mode2_badge)
-        self.r_volt2 = Readout("Voltage", C_VOLT, 26)
-        self.r_curr2 = Readout("Current", C_CURR, 26)
+        self.flags2_label = QLabel("")
+        self.flags2_label.setStyleSheet(f"color:{C_WARN}; font-weight:bold;")
+        top = QHBoxLayout()
+        top.addWidget(self.mode2_badge)
+        top.addWidget(self.flags2_label, 1)
+        v.addLayout(top)
+        self.r_volt2 = Readout("Voltage", C_VOLT, DUAL_SIZE)
+        self.r_curr2 = Readout("Current", C_CURR, DUAL_SIZE)
         self.r_pow2 = Readout("Power", C_POW, 16)
         for r in (self.r_volt2, self.r_curr2, self.r_pow2):
             v.addWidget(r)
+        lay.addWidget(g)
+        g = self.g_out2 = QGroupBox("Output 2")
+        v = self.out2_slot = QVBoxLayout(g)
         self.out2_btn = QPushButton("OUTPUT 2 —")
         self.out2_btn.setCheckable(True)
         self.out2_btn.setMinimumHeight(60 if touch.TOUCH else 44)
@@ -301,31 +319,74 @@ class SupplyPanel(PanelBase):
         form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
         self.sp_volt2 = SafeSpin(4, 0.01, " V")
         self.sp_curr2 = SafeSpin(4, 0.001, " A")
-        self._set_row(form, "Output 2 voltage", self.sp_volt2,
-                      lambda: self.cmd(lambda d, x: d.set_voltage2(x), self.sp_volt2.value()))
-        self._set_row(form, "Output 2 current limit", self.sp_curr2,
-                      lambda: self.cmd(lambda d, x: d.set_current2(x), self.sp_curr2.value()))
+        self._set_row(form, "Voltage", self.sp_volt2,
+                      lambda: self.cmd(lambda d, x: d.set_voltage2(x), self.sp_volt2.value()),
+                      "Output 2 voltage")
+        self._set_row(form, "Current limit", self.sp_curr2,
+                      lambda: self.cmd(lambda d, x: d.set_current2(x), self.sp_curr2.value()),
+                      "Output 2 current limit")
+        none = QLabel("none")
+        none.setToolTip("Output 2 has no over-voltage protection.")
+        none.setStyleSheet(f"color:{C_MUTED};")
+        none.setMinimumHeight(touch.HIT - 4 if touch.TOUCH else 28)
+        form.addRow("OVP", none)
         v.addLayout(form)
-        self.couple_chk = QCheckBox("Switch both outputs together (coupled)")
-        self.couple_chk.setToolTip("Coupled: the main output button switches both outputs. "
-                                   "Separate: each has its own button.\n"
+        self.couple_chk = QCheckBox("Switch both together")
+        self.couple_chk.setToolTip("Ticked (coupled): one button switches both outputs. "
+                                   "Unticked: each has its own button.\n"
                                    "The supply is coupled again after *RST and at power-on, "
                                    "unless you save it into the power-on state (System tab).\n"
                                    "ALL OUTPUTS OFF always switches both off.")
         self.couple_chk.clicked.connect(lambda on: self.cmd(lambda d, x: d.set_coupled(x), on))
         v.addWidget(self.couple_chk)
-        self.meas2_chk = QCheckBox("Measure output 2 (uncheck for faster readings)")
-        self.meas2_chk.setChecked(True)
-        self.meas2_chk.toggled.connect(self._apply_poll)
-        v.addWidget(self.meas2_chk)
         lay.addWidget(g)
-        hint = QLabel("Output 2 is isolated from output 1. It has no over-voltage protection; "
-                      "OCP is one switch for both outputs.")
-        hint.setWordWrap(True)
-        hint.setStyleSheet(f"color:{C_MUTED};")
-        lay.addWidget(hint)
         lay.addStretch(1)
         return w
+
+    def _lay_out_outputs(self, dual: bool):
+        """One column, or one for each output."""
+        self.out2_col.setVisible(dual)
+        self.meas2_chk.setVisible(dual)
+        self.g_meas.setTitle("Output 1 measurements" if dual else "Measurements")
+        self.g_out.setTitle("Output 1" if dual else "Output")
+        self.ocp_chk.setText("OCP 1+2" if dual else "OCP")
+        # one Clear trip for both, at the foot of the shorter column
+        if dual:
+            self.out2_slot.addWidget(self.clr_btn)
+        else:
+            self.prot_row.addWidget(self.clr_btn)
+        size = DUAL_SIZE if dual else 30 if touch.TOUCH else 26
+        for r in (self.r_volt, self.r_curr):
+            f = r.value.font()
+            f.setPointSize(size)
+            r.value.setFont(f)
+        if dual:
+            for box in (self.g_meas, self.g_meas2, self.g_out, self.g_out2):
+                m = box.layout().contentsMargins()
+                box.layout().setContentsMargins(10, m.top(), 10, min(m.bottom(), 10))
+                box.layout().setSpacing(4)
+            width = DUAL_WIDTH_TOUCH if touch.TOUCH else DUAL_WIDTH
+            self.left.setMinimumWidth(width)
+            w = max(self.split.width(), 1200)
+            self.split.setSizes([width, w - width])
+        else:
+            self.left.setMinimumWidth(420 if touch.TOUCH else 400)
+
+    def _place_output_button(self):
+        """Across both columns while one button switches both outputs."""
+        both = self.caps.has_out2 and bool(self.sp.coupled)
+        if both and self.both_slot.indexOf(self.out_btn) < 0:
+            self.both_slot.addWidget(self.out_btn)
+        elif not both and self.out_slot.indexOf(self.out_btn) < 0:
+            self.out_slot.insertWidget(0, self.out_btn)
+        self.out2_btn.setVisible(not both)
+
+    def _main_on(self) -> bool | None:
+        """What the main button stands for. Coupled, with only output 2 on: ON,
+        so that pressing it switches off."""
+        if self.caps.has_out2 and self.sp.coupled and self.sp.output2:
+            return True
+        return self.sp.output
 
     def _build_measure_group(self):
         g = QGroupBox("Measurement setup")
@@ -363,6 +424,13 @@ class SupplyPanel(PanelBase):
         self.det_combo.activated.connect(
             lambda: self.cmd(lambda d, x: d.set_detector(x), self.det_combo.currentText()))
         add("Detector", self.det_combo)
+
+        self.meas2_chk = QCheckBox("Measure output 2")
+        self.meas2_chk.setToolTip("Untick for faster readings of output 1")
+        self.meas2_chk.setChecked(True)
+        self.meas2_chk.setVisible(False)
+        self.meas2_chk.toggled.connect(self._apply_poll)
+        form.addRow(self.meas2_chk)
 
         presets = QWidget()
         pr = QHBoxLayout(presets)
@@ -468,7 +536,7 @@ class SupplyPanel(PanelBase):
             QTimer.singleShot(3000, self._disarm)
             return
         self._armed = False
-        self.out_btn.setChecked(bool(self.sp.output))  # revert until confirmed
+        self.out_btn.setChecked(bool(self._main_on()))  # revert until confirmed
         self.cmd(lambda d, x: d.set_output(x), on)
 
     def set_output2(self, on: bool):
@@ -501,7 +569,7 @@ class SupplyPanel(PanelBase):
         if self.capture_tab.busy or self.capture_tab.running:
             self.capture_tab.stop()
         if self.connected:
-            self.out_btn.setChecked(bool(self.sp.output))    # until confirmed
+            self.out_btn.setChecked(bool(self._main_on()))   # until confirmed
             self.cmd(lambda d: getattr(d, "all_off", lambda: d.set_output(False))())
 
     def reset_instrument(self):
@@ -573,8 +641,7 @@ class SupplyPanel(PanelBase):
             self.ovt_chk.setText("OVP")
             self.ovt_chk.setToolTip("Over-voltage protection: turn the output off above the OVP "
                                     "level. Unticked, nothing stops an over-voltage.")
-        self.tabs.setTabVisible(self.tabs.indexOf(self.out2_scroll), caps.has_out2)
-        self.out2_line.setVisible(caps.has_out2)
+        self._lay_out_outputs(caps.has_out2)
         self.sp_volt2.setRange(0, caps.v2_max)
         self.sp_curr2.setRange(0, caps.i2_max)
         self.couple_chk.setVisible(caps.has_coupling)
@@ -609,6 +676,7 @@ class SupplyPanel(PanelBase):
             self.sp_curr2.set_from_instrument(sp.current2)
             self.couple_chk.setChecked(bool(sp.coupled))
             self._style_output2()
+        self._place_output_button()
         self._style_output_button()
         if self.caps.has_meas_setup:
             self.sw_points.blockSignals(True)
@@ -644,7 +712,9 @@ class SupplyPanel(PanelBase):
             hint = "  (a sense lead is open: reconnect +S / −S, then Clear trip)"
         elif trip:
             hint = "  (press Clear trip)"
-        self.flags_label.setText("  ".join(r.flags) + hint)
+        second = [x for x in r.flags if x.endswith("2")] if self.caps.has_out2 else []
+        self.flags_label.setText("  ".join(x for x in r.flags if x not in second) + hint)
+        self.flags2_label.setText("  ".join(second))
         self.buf.append([r.t, r.voltage, r.current, r.i_max, r.dvm, r.voltage2, r.current2])
         if self.recording:
             self.record([time.strftime("%Y-%m-%dT%H:%M:%S"), f"{r.t:.3f}", r.voltage,
@@ -679,12 +749,15 @@ class SupplyPanel(PanelBase):
         self.capture_tab.on_error()
 
     def _style_output_button(self):
-        on = self.sp.output
+        on = self._main_on()
         size = 18 if touch.TOUCH else 15
         self.out_btn.setChecked(bool(on))
         # a coupled pair: say that the button switches both
         name = "OUTPUT" if not self.caps.has_out2 else \
             "OUTPUTS 1 + 2" if self.sp.coupled else "OUTPUT 1"
+        if on and self.caps.has_out2 and self.sp.coupled and \
+                bool(self.sp.output) != bool(self.sp.output2):
+            name = "ONLY OUTPUT 1" if self.sp.output else "ONLY OUTPUT 2"
         self.out_btn.setText({True: f"{name} ON", False: f"{name} OFF",
                               None: f"{name} ?  (state unknown)"}[on])
         self.out_btn.setStyleSheet(
@@ -692,13 +765,10 @@ class SupplyPanel(PanelBase):
             if on else f"QPushButton {{ font-weight:bold; font-size:{size}px; }}")
 
     def _style_output2(self):
-        on, sp = bool(self.sp.output2), self.sp
+        on = bool(self.sp.output2)
         size = 18 if touch.TOUCH else 15
         self.out2_btn.setChecked(on)
-        # coupled: OFF still works here, ON belongs to the main button
-        self.out2_btn.setEnabled(self.connected and (on or not sp.coupled))
-        self.out2_btn.setText(f"OUTPUT 2 {'ON' if on else 'OFF'}"
-                              + ("  (with output 1)" if sp.coupled else ""))
+        self.out2_btn.setText(f"OUTPUT 2 {'ON' if on else 'OFF'}")
         self.out2_btn.setStyleSheet(
             f"QPushButton {{ background:{C_ON}; color:white; font-weight:bold; font-size:{size}px; }}"
             if on else f"QPushButton {{ font-weight:bold; font-size:{size}px; }}")
@@ -710,13 +780,6 @@ class SupplyPanel(PanelBase):
         self.r_volt2.set(f"{r.voltage2:+.4f} V" if known else "—")
         self.r_curr2.set(fmt_current(r.current2) if known else "—")
         self.r_pow2.set(f"{r.power2:+.4f} W" if known else "—")
-        text = f"Output 2  {r.mode2}"
-        if known:
-            text += f"  {r.voltage2:+.3f} V  {fmt_current(r.current2).strip()}"
-        elif self.sp.voltage2 is not None:
-            text += f"  set to {self.sp.voltage2:.3f} V"
-        self.out2_line.setText(text)
-        self.out2_line.setStyleSheet(f"color:{C_GOOD if r.output2 else C_MUTED};")
 
     # ================================================================ trend
     def clear_trend(self):
@@ -769,8 +832,6 @@ class SupplyPanel(PanelBase):
             w.setEnabled(True)
         self.capture_tab._buttons()
         self.profile_box.set_enabled(on)
-        if self.caps.has_out2:
-            self._style_output2()
         if on:
             self.system_tab.set_enabled(on)
         else:
