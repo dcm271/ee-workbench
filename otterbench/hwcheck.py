@@ -65,7 +65,8 @@ def near(got, want, rel: float, floor: float) -> bool:
 def outputs_on(drv) -> bool | None:
     """None: it can't say. (Asks the instrument.)"""
     if drv.kind == "supply":
-        return drv.read_setpoints().output
+        s = drv.read_setpoints()
+        return True if s.output2 else s.output
     if drv.kind == "scpi":
         drv.read_settings()
         vals = [drv.values.get(s.name) for s in drv.d.settings if s.output]
@@ -78,7 +79,7 @@ def outputs_on(drv) -> bool | None:
 
 def outputs_off(drv):
     if hasattr(drv, "set_output") and drv.kind in ("supply", "scpi", "fgen"):
-        drv.set_output(False)
+        getattr(drv, "all_off", lambda: drv.set_output(False))()
 
 
 def _g(v) -> str:
@@ -305,6 +306,8 @@ class HardwareCheck:
             if before.ovp is not None and getattr(self.caps, "setpoint_readback", True):
                 d.set_ovp(before.ovp)
             d.set_voltage(before.voltage or 0.0)
+            if before.voltage2 is not None:
+                d.set_voltage2(before.voltage2)
             if before.current is not None:
                 d.set_current(before.current)
         self.step("Voltage and current put back" if before.voltage is not None
@@ -508,6 +511,8 @@ class HardwareCheck:
             def job(d):
                 d.set_voltage(volts)
                 d.set_current(amps)
+                if before.coupled:
+                    d.set_voltage2(0.0)         # it comes on too
                 d.set_output(True)
             self.run(job)
             self.sleep(o.settle)

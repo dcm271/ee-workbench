@@ -180,10 +180,24 @@ def hw_plan(rule: Rule, kind: str, settings: list[str] | None = None):
         return None, "the limit must be above 0"
     if kind == "supply":
         if ch:
-            return None, "this supply has one output"
+            if ch != "2" or "current2" not in (settings or []):
+                return None, "this supply has one output"
+            if what == "voltage":
+                return None, "output 2 has no over-voltage protection"
+
+            def job(d):
+                sp = d.read_setpoints()
+                if sp.current2 is None or sp.current2 > L:
+                    d.set_current2(L)
+                d.set_ocp(True)
+                return f"output 2 current limit ≤ {L:g} A, OCP on (both outputs)"
+            return job, f"output 2 current limit no higher than {L:g} A, " \
+                        "over-current protection on (both outputs)"
         if what == "voltage":
             def job(d):
                 d.set_ovp(L)
+                if getattr(getattr(d, "caps", None), "ovp_is_trip", False):
+                    d.set_ovp_tracking(True)      # its switch
                 return f"OVP {L:g} V"
             return job, f"over-voltage protection at {L:g} V"
 

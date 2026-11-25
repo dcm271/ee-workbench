@@ -40,6 +40,7 @@ SET_WHAT = {
     "gpio": [],            # the pins configured in the GPIO tab (filled in by the window)
     "fgen": ["function", "frequency", "amplitude", "offset", "duty", "output"],
 }
+OUT2_SET = ["voltage2", "current2", "output2", "coupled"]     # supplies with a second output
 MEASURE_WHAT = {
     "supply": ["voltage", "current", "power", "dvm"],
     "ppk2": ["current", "peak", "charge"],
@@ -52,7 +53,8 @@ MEASURE_WHAT = {
 PROFILE_WHAT = {"supply": ["voltage", "current"], "ppk2": ["voltage"],
                 "fgen": ["frequency", "amplitude", "offset", "duty"]}
 UNITS = {"voltage": "V", "current": "A", "power": "W", "dvm": "V", "peak": "A", "charge": "C",
-         "ovp": "V", "frequency": "Hz", "amplitude": "Vpp", "offset": "V", "duty": "%"}
+         "ovp": "V", "frequency": "Hz", "amplitude": "Vpp", "offset": "V", "duty": "%",
+         "voltage2": "V", "current2": "A", "power2": "W"}
 BLOCKS = ("For", "Repeat", "Retry", "If")        # each ends with an End step
 ACTIONS = ["Set", "Wait", "Measure", "Capture", "Profile", "Wait for", "Send", "Command", "Screenshot",
            "Note",
@@ -80,6 +82,14 @@ def _sense_protect(drv, on: bool):
         raise SequenceError("this supply has no open-sense-lead detection (the 66311B / "
                             "66321B / 66321D do; the 6632A family doesn't)")
     drv.set_sense_protect(on)
+
+
+def _out2(what: str, v):
+    def fn(drv):
+        if not getattr(getattr(drv, "caps", None), "has_out2", False):
+            raise SequenceError("this supply has one output")
+        getattr(drv, f"set_{what}")(bool(v) if what in ("output2", "coupled") else v)
+    return fn
 
 
 def value_of(text, env: dict):
@@ -299,7 +309,8 @@ class Bench:
                    "output": lambda d: d.set_output(bool(v)), "ovp": lambda d: d.set_ovp(v),
                    "ocp": lambda d: d.set_ocp(bool(v)),
                    "clear_protection": lambda d: d.clear_protection(),
-                   "sense_protect": lambda d: _sense_protect(d, bool(v))}
+                   "sense_protect": lambda d: _sense_protect(d, bool(v)),
+                   **{k: _out2(k, v) for k in OUT2_SET}}
         elif inst.kind == "ppk2":
             fns = {"voltage": lambda d: d.set_voltage(int(round(v * 1000))),
                    "output": lambda d: d.set_dut_power(bool(v))}
@@ -590,6 +601,8 @@ class Bench:
         if inst.kind == "scpi":
             key = next((k for k in r.values if k.lower() == what), what)
             return r.values.get(key)
+        if what in ("voltage2", "current2", "power2"):
+            return getattr(r, what, None)
         return {"voltage": r.voltage, "current": r.current, "dvm": r.dvm,
                 "power": getattr(r, "power", None) if getattr(r, "power", None) is not None
                 else (r.voltage or 0.0) * r.current}[what]

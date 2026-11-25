@@ -459,7 +459,8 @@ class MainWindow(QMainWindow):
             for p in panels:
                 if only is not None and p is not only:
                     continue
-                job, text = hw_plan(rule, p.KIND, p.set_names() if p.KIND == "scpi" else None)
+                job, text = hw_plan(rule, p.KIND, 
+                                    p.set_names() if p.KIND in ("scpi", "supply") else None)
                 if job is None:
                     self.hw_status[id(rule)] = f"not set: {text}"
                     continue
@@ -1147,6 +1148,7 @@ def parse_target(s: str) -> tuple[str, str]:
     if "@" in s:
         model, res = s.split("@", 1)
         model = {"66321D": "663xx", "66321B": "663xx", "66311B": "663xx",
+                 "66309B": "663xx", "66309D": "663xx",
                  "6633A": "6632A", "6634A": "6632A", "ppk2": "PPK2", "fgen": "FGEN",
                  "gpio": "GPIO", "DPS-150": "DPS150", "dps150": "DPS150",
                  "dps-150": "DPS150"}.get(model, model)

@@ -494,3 +494,128 @@ class Sim663xx(SimBase):
             self.ques_ev = 0
         else:
             self._err(-113, "Undefined header")
+
+
+V2_MAX, I2_MAX, R2 = 12.25, 1.52, 10.0
+CV2, CC2 = 1 << 9, 1 << 12
+
+
+class Sim66309(Sim663xx):
+    """A 66309B: no DVM, output resistance, 1 A range or external trigger; a
+    real OVP; and output 2, feeding 10 ohm. Before fw A.02.04 (coupling=False)
+    the outputs can't be separated."""
+
+    def __init__(self, coupling: bool = True):
+        self.coupling = coupling
+        super().__init__()
+
+    def _rst(self):
+        super()._rst()
+        self.cfg["OUTP:TYPE"] = "LOW"
+        self.v2, self.i2, self.out2, self.coupled = 0.0, 0.1 * I2_MAX, False, True
+        self.saved2 = getattr(self, "saved2", {})
+
+    def _out2_now(self) -> tuple[float, float]:
+        i = min(self.v2 / R2, self.i2) if self.out2 else 0.0
+        return i * R2, i
+
+    def _cc2(self) -> bool:
+        return self.out2 and self.v2 / R2 > self.i2
+
+    def _check(self):
+        """Protection trips."""
+        if self.out and self.cfg["VOLT:PROT:STAT"] and self.vset > self.vlim:
+            self._trip(0)
+        if self.ocp and self._cc2():
+            self._trip(12)
+
+    def _trip(self, bit: int):
+        out = self.out
+        super()._trip(bit)
+        if bit == 12:
+            self.out2 = False
+            self.out = out and not self.coupled
+        elif self.coupled:
+            self.out2 = False
+        self._push()
+
+    def _exec(self, part: str):
+        hdr, _, arg = part.partition(" ")
+        hdr, A = hdr.upper(), arg.strip().upper()
+        q, h = hdr.endswith("?"), hdr.rstrip("?")
+        out = self._out.append
+
+        def level(cur, hi):
+            try:
+                x = {"MAX": hi, "MIN": 0.0}.get(A)
+                x = float(A) if x is None else x
+            except ValueError:
+                self._err(-104, "Data type error")
+                return cur
+            if not 0 <= x <= hi:
+                self._err(-222, "Data out of range")
+                return cur
+            return x
+
+        if h == "*IDN":
+            out(f"HEWLETT-PACKARD,66309B,SIM0000002,A.02.{'04' if self.coupling else '00'}")
+        elif h.startswith(("RES", "OUTP:COMP")) or ":DVM" in h or A == "EXT":
+            self._err(-113, "Undefined header")
+        elif h == "OUTP:TYPE":
+            if q:
+                out(self.cfg[h])
+            elif A in ("LOW", "HIGH", "H2"):
+                self.cfg[h] = A
+            else:
+                self._err(-224, "Illegal parameter value")
+        elif h in ("VOLT2", "CURR2"):
+            k, hi = ("v2", V2_MAX) if h == "VOLT2" else ("i2", I2_MAX)
+            if q:
+                out(self._num({"MAX": hi, "MIN": 0.0}.get(A, getattr(self, k))))
+            else:
+                setattr(self, k, level(getattr(self, k), hi))
+        elif h in ("MEAS:VOLT2", "MEAS:CURR2"):
+            time.sleep(0.032)
+            out(self._num(self._out2_now()[h == "MEAS:CURR2"] + self._rng.normal(0, 1e-4)))
+        elif h == "VOLT" and not q:
+            self.vset = level(self.vset, V_MAX)
+            self._push()
+        elif h == "INST:COUP:OUTP:STAT" and self.coupling:
+            if q:
+                out("ALL" if self.coupled else "NONE")
+            elif A in ("ALL", "NONE"):
+                self.coupled = A == "ALL"
+            else:
+                self._err(-224, "Illegal parameter value")
+        elif h == "OUTP2" and self.coupling:
+            if q:
+                out("1" if self.out2 else "0")
+            elif self.coupled:
+                self._both(A)
+            elif A in ("1", "ON") and self.tripped:
+                self._err(-221, "Settings conflict; protection tripped")
+            else:
+                self.out2 = A in ("1", "ON")
+        elif h == "OUTP" and not q and self.coupled:
+            self._both(A)
+        elif h == "STAT:OPER:COND":
+            super()._exec(part)
+            if self.out2:
+                self._out[-1] = f"{int(self._out[-1]) | (CC2 if self._cc2() else CV2):+d}"
+        elif h in ("*SAV", "*RCL"):
+            super()._exec(part)
+            n = int(float(A))
+            if h == "*SAV":
+                self.saved2[n] = (self.v2, self.i2, self.out2, self.coupled)
+            elif n in self.saved2:
+                self.v2, self.i2, self.out2, self.coupled = self.saved2[n]
+        elif h == "SENS:CURR:RANG" and not q:
+            super()._exec(part)
+            self.rng = "MAX" if self.rng == "1" else self.rng
+        else:
+            super()._exec(part)
+        self._check()
+
+    def _both(self, A: str):
+        super()._exec(f"OUTP {A}")
+        self.out2 = self.out

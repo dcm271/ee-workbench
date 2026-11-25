@@ -17,6 +17,8 @@ from .forms import choice, hint, number, select
 from .widgets import C_MUTED, C_ON, C_WARN, io_errors
 
 COMP_MODES = {
+    "H2": ("High capacitance, always (H2)",
+           "As high capacitance, and it stays there whatever the load does."),
     "LLOC": ("Low capacitance, local sense",
              "Fast response for loads with little capacitance (< 5 µF). Instrument default."),
     "HLOC": ("High capacitance, local sense",
@@ -257,6 +259,10 @@ class SystemTab(QWidget):
         self.g_prot.setVisible(caps.has_ovp_tracking or caps.has_prot_delay or
                                caps.has_sense_protect)
         self.ovp_track.setVisible(caps.has_ovp_tracking)
+        if caps.ovp_is_trip:
+            self.ovp_track.setText("Over-voltage protection (OVP) on")
+            self.ovp_track.setToolTip("Unticked, nothing stops an over-voltage, for example "
+                                      "when a sense lead comes off.")
         self.prot_form.setRowVisible(self.delay_row, caps.has_prot_delay)
         self.sense_prot.setVisible(caps.has_sense_protect)
         self.g_comp.setVisible(bool(caps.comp_modes))

@@ -188,7 +188,7 @@ class InstrumentWorker(QThread):
     def _read_state(self):
         if self.drv.kind == "supply":
             sp = self.drv.read_setpoints()
-            self._last_output = sp.output
+            self._last_output = (sp.output, sp.output2, sp.coupled)
             return sp
         return self.drv.cfg
 
@@ -213,7 +213,8 @@ class InstrumentWorker(QThread):
             for e in getattr(r, "errors", []):
                 self.error.emit(f"Instrument error: {e}")
             out = getattr(r, "output", None)
-            if self.drv.kind == "supply" and out is not None and out != self._last_output:
+            if self.drv.kind == "supply" and out is not None and \
+                    (out, r.output2, r.coupled) != self._last_output:
                 # changed by protection trip or the front panel
                 self.state.emit(self._read_state())
             self.reading.emit(r)

@@ -295,7 +295,7 @@ api_port = 8765
 ./run.sh --api SIM::66321D SIM::PPK2       # simulators, with the Remote API on
 ```
 
-`MODEL@RESOURCE` forces a driver. Models are `663xx` (or `66321D`), `6632A`, `3456A`, `BK393`, `BK393B`, `XDM`, `PPK2`, `SALEAE`, `SIGROK`, `FGEN`, `GPIO`, `SCPI:<id>` for an [instrument definition](04-technical-reference.md#instrument-definition-files-toml) (`SCPI:34461A`, `SCPI:DP832`, …; plain `34461A` works too) and `SCOPE:RIGOL`, `SCOPE:KEYSIGHT`, `SCOPE:TEK`, `SCOPE:SIGLENT` (a model name such as `DS1054Z` or `TBS2000` works too). **The 3456A always has to be named**, because it has no ID query. The same resource can't be opened twice, but any number of different instruments of one model can.
+`MODEL@RESOURCE` forces a driver. Models are `663xx` (or `66321D`, `66309B`), `6632A`, `3456A`, `BK393`, `BK393B`, `XDM`, `PPK2`, `SALEAE`, `SIGROK`, `FGEN`, `GPIO`, `SCPI:<id>` for an [instrument definition](04-technical-reference.md#instrument-definition-files-toml) (`SCPI:34461A`, `SCPI:DP832`, …; plain `34461A` works too) and `SCOPE:RIGOL`, `SCOPE:KEYSIGHT`, `SCOPE:TEK`, `SCOPE:SIGLENT` (a model name such as `DS1054Z` or `TBS2000` works too). **The 3456A always has to be named**, because it has no ID query. The same resource can't be opened twice, but any number of different instruments of one model can.
 
 ### Desktop launcher (optional)
 

@@ -3,7 +3,8 @@ watchdog (rules) and math channels.
 
 signals_of(kind, reading) -> {quantity: (t array, value array)}
 
-  supply   voltage, current, power, dvm (when the model has one)
+  supply   voltage, current, power, dvm (when the model has one);
+           voltage2, current2, power2 (66309 / 66319: output 2)
   ppk2     current (every 10 µs sample)
   dmm      value
   gpio     gpio17 … (each configured pin: 0 / 1)
@@ -27,7 +28,9 @@ QUANTITIES = {
     "fgen": [],
     "logic": [],
 }
-UNITS = {"voltage": "V", "current": "A", "power": "W", "dvm": "V", "value": ""}
+UNITS = {"voltage": "V", "current": "A", "power": "W", "dvm": "V", "value": "",
+         "voltage2": "V", "current2": "A", "power2": "W"}
+OUT2_QUANTITIES = ["voltage2", "current2", "power2"]
 
 
 def slug(name: str) -> str:
@@ -82,6 +85,10 @@ def signals_of(kind: str, r) -> dict:
         d = getattr(r, "dvm", None)
         if d is not None:
             out["dvm"] = (t, np.array([float(d)]))
+        for k in OUT2_QUANTITIES:
+            x = getattr(r, k, None)
+            if x is not None:
+                out[k] = (t, np.array([float(x)]))
         return out
     if kind == "dmm":
         if getattr(r, "overload", False) or r.value is None:

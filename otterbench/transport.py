@@ -21,7 +21,7 @@ class TransportError(Exception):
     pass
 
 
-SIM_RESOURCES = ["SIM::66321D", "SIM::6632A", "SIM::3456A", "SIM::PPK2", "SIM::SALEAE",
+SIM_RESOURCES = ["SIM::66321D", "SIM::66309B", "SIM::6632A", "SIM::3456A", "SIM::PPK2", "SIM::SALEAE",
                  "SIM::SIGROK", "SIM::FGEN", "SIM::GPIO", "SIM::DPS150",
                  "SIM::BK393", "SIM::BK393B", "SIM::XDM1041", "SIM::UART"]
 

@@ -41,6 +41,7 @@ class SupplyCaps:
     has_trigger: bool = False         # triggered/pre-triggered capture + output transients
     has_ext_trigger: bool = False     # rear-port external measurement trigger
     has_ovp_tracking: bool = False
+    ovp_is_trip: bool = False         # VOLT:PROT is the OVP trip level, VOLT:PROT:STAT its switch
     has_prot_delay: bool = False
     has_window: bool = False
     has_sense_protect: bool = False
@@ -50,6 +51,11 @@ class SupplyCaps:
     has_display: bool = False
     saved_states: int = 0             # *SAV/*RCL locations (0..n-1)
     has_selftest: bool = False
+    # second output (66309B/D, 66319B/D)
+    has_out2: bool = False
+    has_coupling: bool = False        # its outputs can be switched separately
+    v2_max: float = 12.0
+    i2_max: float = 1.5
     info: dict = field(default_factory=dict)        # firmware, options, cal date, ...
 
     @property
@@ -89,6 +95,10 @@ class Setpoints:
     volt_trig: float | None = None
     curr_trig: float | None = None
     res_trig: float | None = None
+    voltage2: float | None = None
+    current2: float | None = None
+    output2: bool | None = None
+    coupled: bool | None = None       # OUTP switches both outputs
 
 
 @dataclass
@@ -96,6 +106,7 @@ class SupplyPoll:
     pulse_stats: bool = False
     dvm: bool = False
     measure_voltage: bool = True
+    out2: bool = True             # measure output 2 (when there is one)
 
 
 @dataclass
@@ -114,10 +125,21 @@ class SupplyReading:
     i_low: float | None = None
     i_rms: float | None = None
     events: list[str] = field(default_factory=list)   # latched trips since last poll
+    # second output (None: there isn't one, or it isn't measured)
+    voltage2: float | None = None
+    current2: float | None = None
+    output2: bool | None = None
+    coupled: bool | None = None
+    mode2: str = ""
 
     @property
     def power(self) -> float | None:
         return None if self.voltage is None else self.voltage * self.current
+
+    @property
+    def power2(self) -> float | None:
+        return None if self.voltage2 is None or self.current2 is None \
+            else self.voltage2 * self.current2
 
 
 @dataclass

@@ -12,7 +12,7 @@ from otterbench.instruments.scpi_generic import builtin_dir, definitions, parse_
 from otterbench.transport import open_transport
 
 TAPES = sorted(glob.glob(os.path.join(os.path.dirname(__file__), "tapes", "*.tape")))
-SIMS = ["SIM::66321D", "SIM::6632A", "SIM::3456A", "SIM::DPS150", "SIM::BK393", "SIM::BK393B",
+SIMS = ["SIM::66321D", "SIM::66309B", "SIM::6632A", "SIM::3456A", "SIM::DPS150", "SIM::BK393", "SIM::BK393B",
         "SIM::XDM1041", "SIM::FGEN", "SIM::SDG", "SIM::SCOPE", "SIM::DSOX", "SIM::TBS",
         "SIM::SDS"] + [f"SIM::{k}" for k in sorted(definitions())]
 

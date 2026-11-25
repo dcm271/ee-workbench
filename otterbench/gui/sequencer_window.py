@@ -127,7 +127,7 @@ class PanelInst(Inst):
         self.p, self.invoke, self.stop = panel, invoke, stop
         self.name = panel.display_name()
         self.kind = kind_of(panel)
-        if self.kind in ("scpi", "scope", "uart", "dmm"):
+        if self.kind in ("scpi", "scope", "uart", "dmm", "supply"):
             self.set_names = panel.set_names()
             self.setting_kinds = panel.setting_kinds()
             self.measure_names = panel.measure_names()

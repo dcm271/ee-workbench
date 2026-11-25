@@ -20,7 +20,7 @@ from .xdm import OwonXDM
 
 MODELS = {
     "auto": "Auto-detect (asks *IDN?)",
-    "663xx": "Agilent 66311B / 66321B / 66321D",
+    "663xx": "Agilent 66309B / 66311B / 66321B / 66321D",
     "6632A": "HP 6632A / 6633A / 6634A",
     "DPS150": "FNIRSI DPS-150 (USB)",
     "3456A": "HP 3456A DMM",
@@ -74,7 +74,7 @@ _CLASSES = {"663xx": Agilent663xx, "6632A": HP6632A, "DPS150": DPS150, "3456A": 
             "SALEAE": SaleaeLogic, "SIGROK": SigrokLogic, "FGEN": FunctionGenerator,
             "GPIO": GpioDriver}
 
-SIM_MODELS = {"SIM::66321D": "663xx", "SIM::6632A": "6632A", "SIM::3456A": "3456A",
+SIM_MODELS = {"SIM::66321D": "663xx", "SIM::66309B": "663xx", "SIM::6632A": "6632A", "SIM::3456A": "3456A",
               "SIM::PPK2": "PPK2", "SIM::SALEAE": "SALEAE",
               "SIM::SIGROK": "SIGROK", "SIM::FGEN": "FGEN", "SIM::SDG": "FGEN",
               "SIM::GPIO": "GPIO", "SIM::DPS150": "DPS150",

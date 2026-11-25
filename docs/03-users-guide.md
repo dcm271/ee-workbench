@@ -69,6 +69,18 @@ Each instrument gets its own **tab**. Closing a tab disconnects that instrument 
 - **Clear trip** resets a latched OV, OCP or open-sense trip. Remove the cause first.
 - **\*RST** returns the supply to its power-on defaults (output off). The app asks you to confirm first.
 
+### Output 2 (66309B / 66309D)
+
+A dual-output supply has an **Output 2** tab, and a line under the main output button that always shows output 2's state.
+
+- **Coupled** (the default): the main button reads **OUTPUTS 1 + 2** and switches both. Check output 2's voltage before pressing it: it comes on at whatever it is set to.
+- **Separate** (untick *Switch both outputs together*; firmware A.02.04 or later): each output has its own button. The supply is coupled again at power-on unless you save it into the power-on state.
+- **ALL OUTPUTS OFF** (Esc) switches both off either way.
+- **OVP** on this supply (and the 66311B) is a real trip level with an on/off box, in place of *Voltage limit* and *OV trip*. Unticked, nothing stops an over-voltage. It covers output 1 only; output 2 has none. **OCP** is one switch for both; a trip of output 2 shows as **OCP2**.
+- Untick *Measure output 2* for faster readings: each takes about 90 ms longer with it (211 ms against 123 ms, measured). Its on/off state is read either way.
+- Output 2 is drawn dashed in the Trend and recorded as extra columns. Elsewhere it is `voltage2`, `current2`, `power2` (readings) and `voltage2`, `current2`, `output2`, `coupled` (settings). `output2 on` is refused while the outputs are coupled.
+- The software limits, the app presets, the Tests tab and Profile work on output 1. While the outputs are coupled, switching output 1 there switches output 2 too.
+
 ### Measurement setup and speed
 
 The 66321D digitizes the output and averages each reading over *samples × interval*. Fewer samples give faster updates, more samples give smoother readings. Times measured on the real 66321D over GPIB:
@@ -572,7 +584,7 @@ With **Resume a running sequence** ticked in [Safety](#safety-and-unattended-run
 | Column | |
 |---|---|
 | **On** | the rule is checked |
-| **Instrument**, **Quantity** | what to watch: a supply's `voltage` `current` `power` `dvm`, a PPK2's `current`, a DMM's `value`, a GPIO pin (`gpio26`), any reading of a SCPI instrument (`voltage2`, `value`) |
+| **Instrument**, **Quantity** | what to watch: a supply's `voltage` `current` `power` `dvm` (66309B: also `voltage2` `current2` `power2`), a PPK2's `current`, a DMM's `value`, a GPIO pin (`gpio26`), any reading of a SCPI instrument (`voltage2`, `value`) |
 | **>** / **<**, **Limit** | the limit, with SI suffixes: `50m` = 0.05, `10u` = 0.00001, `3.3` |
 | **For (ms)** | how long it must stay past the limit (0: at once) |
 | **Then** | what to do, see below |
@@ -602,7 +614,7 @@ The watchdog acts through the app: if the app, the computer or the USB cable fai
 
 | Supply | voltage > L | current > L |
 |---|---|---|
-| Agilent 66321D / 66311B, HP 6632A | over-voltage protection at L | current limit no higher than L, over-current protection on (the output trips off instead of limiting) |
+| Agilent 66321D / 66311B / 66309B (output 1), HP 6632A | over-voltage protection at L | current limit no higher than L, over-current protection on (the output trips off instead of limiting) |
 | SCPI supplies whose definition has `ovp` / `ocp` settings (Rigol DP832, Keysight E36312A, any single-output SCPI supply) | `ovp` at L (and `ovp_on`) | `iset` no higher than L, and `ocp` / `ocp_on` where the supply has them |
 
 The limit is set when the rule is armed, when the supply's tab connects (or reconnects), and when the rule's limit changes; the status bar says what was sent, and it goes into the session being recorded. On a multi-output supply, the quantity names the output (`voltage2`). The supply acts at once, without the rule's hold time, so set the limit a little above the highest value the DUT should ever see. **Making a rule looser or removing it doesn't undo what the supply was told**: change the OVP / current limit on the supply's tab. Supplies without OVP over SCPI (Siglent SPD3303X) show *HW not set* with the reason.

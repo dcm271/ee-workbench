@@ -20,6 +20,7 @@ OPEN_MODES = ("last", "list", "scan", "none")
 MODEL_KEYS = ("auto", "663xx", "6632A", "DPS150", "3456A", "BK393", "BK393B", "XDM", "PPK2",
               "SALEAE", "SIGROK", "FGEN", "GPIO", "UART")
 MODEL_ALIASES = {"66321D": "663xx", "66321B": "663xx", "66311B": "663xx",
+                 "66309B": "663xx", "66309D": "663xx",
                  "6633A": "6632A", "6634A": "6632A", "ppk2": "PPK2",
                  "saleae": "SALEAE", "Saleae": "SALEAE",
                  "sigrok": "SIGROK", "fgen": "FGEN", "gpio": "GPIO", "SDG": "FGEN",

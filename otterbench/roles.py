@@ -32,6 +32,8 @@ def ports(insts) -> list[Found]:
     for i in insts:
         if i.kind == "supply":
             out.append(Found(i.name, i.name, "", "source"))
+            if "output2" in (i.set_names or []):
+                out.append(Found(f"{i.name} output 2", i.name, "2", "source"))
             if two_quadrant(i):
                 out.append(Found(i.name, i.name, "", "sink"))
         elif i.kind == "scpi":

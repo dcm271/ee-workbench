@@ -1,4 +1,4 @@
-"""SCPI driver for Agilent/HP 66311B, 66321B and 66321D mobile-comm DC sources.
+"""SCPI driver for Agilent/HP 66309B/D, 66311B/D, 66319B/D, 66321B/D mobile-comm DC sources.
 
 Command set from the 66319B/D-66321B/D User's Guide (Language Dictionary,
 chapter 8). Behaviour measured on a real 66321D (fw A.03.01) over an NI
@@ -15,6 +15,15 @@ GPIB-USB-HS:
   * ABOR clears the WTG (waiting-for-trigger) bit within ~70 ms.
   * SENS:LEAD:STAT? (in the manual) is an undefined header on fw A.03.01;
     an open sense lead shows up as the SD bit of the questionable register.
+
+The 66309B/D (66111A-66311B/D-66309B/D User's Guide; every query checked on a
+66309B fw A.02.04, switching and setting not yet) adds
+an isolated output 2, 12 V / 1.5 A: VOLT2, CURR2, MEAS:VOLT2?, MEAS:CURR2?.
+  * Its outputs are coupled at power-on: OUTP switches both. From fw A.02.04
+    INST:COUP:OUTP:STAT NONE separates them; a plain OUTP is then output 1 only.
+  * OCP is one switch for both; output 2 has no OVP and no waveforms.
+  * VOLT:PROT is a real OVP trip level and VOLT:PROT:STAT switches it, on the
+    66311B/D too (on the 66319 / 66321 it is a limit on the setting).
 """
 from __future__ import annotations
 
@@ -28,11 +37,14 @@ OPER_WTG = 1 << 5
 OPER_CV = 1 << 8
 OPER_CC_POS = 1 << 10
 OPER_CC_NEG = 1 << 11
+OPER_CV2 = 1 << 9
+OPER_CC2 = 1 << 12
 
 QUES_FLAGS = {0: "OV", 1: "OCP", 3: "FP-LOCAL", 4: "OT", 5: "SENSE-OPEN", 9: "RI",
-              10: "UNREG", 14: "OVLD"}
+              8: "UNREG2", 10: "UNREG", 12: "OCP2", 14: "OVLD"}
 QUES_EVENTS = {0: "Over-voltage trip", 1: "Over-current trip", 4: "Over-temperature",
                5: "Open sense lead", 9: "Remote inhibit", 10: "Output unregulated",
+               8: "Output 2 unregulated", 12: "Output 2 over-current trip",
                14: "Measurement overload"}
 
 ARRAY_BYTES_PER_S = 3700.0   # measured, instrument-limited
@@ -43,6 +55,9 @@ TINT_MIN = 15.6e-6
 # (label, value sent with SENS:CURR:RANG, full scale)
 RANGES_3 = [("3 A", "MAX", 3.0712), ("1 A", "1", 1.0), ("20 mA", "MIN", 0.02)]
 RANGES_2 = [("3 A", "MAX", 3.0712), ("20 mA", "MIN", 0.02)]
+
+DUAL = ("66309", "66319")
+OVP_TRIPS = ("66309", "66311", "66111")     # the others: a limit on the setting
 
 
 def _unquote(s: str) -> str:
@@ -122,8 +137,11 @@ class Agilent663xx:
             c.ovp_max = _f(self.t.query("VOLT:PROT? MAX"))
         except Exception:
             pass
-        c.has_dvm = self._supports("MEAS:DVM?")
-        c.has_resistance = self._supports("RES?")
+        # each probe of something missing is a timeout (~3 s on GPIB): skip what
+        # the manual says these models don't have
+        older = c.model.startswith(OVP_TRIPS)
+        c.has_dvm = not (older and c.model[5:6] in ("A", "B")) and self._supports("MEAS:DVM?")
+        c.has_resistance = not older and self._supports("RES?")
         if c.has_resistance:
             try:
                 c.r_min = _f(self.t.query("RES? MIN"))
@@ -134,7 +152,9 @@ class Agilent663xx:
         self._ranges = RANGES_3 if c.model.startswith(("66321", "66319")) else RANGES_2
         c.current_ranges = [(lab, fs) for lab, _, fs in self._ranges]
         c.has_ovp_tracking = self._supports("VOLT:PROT:STAT?")
-        if c.has_ovp_tracking:
+        if c.has_ovp_tracking and c.model.startswith(OVP_TRIPS):
+            c.ovp_is_trip = True
+        elif c.has_ovp_tracking:
             c.ovp_label = "Voltage limit"
             c.ovp_tip = ("Highest voltage that can be programmed (VOLT:PROT), from here or "
                          "the front panel. The over-voltage trip itself tracks the setting "
@@ -142,15 +162,27 @@ class Agilent663xx:
         c.has_prot_delay = self._supports("OUTP:PROT:DEL?")
         c.has_window = self._supports("SENS:WIND?")
         c.has_sense_protect = self._supports("SENS:PROT:STAT?")
-        if self._supports("OUTP:COMP:MODE?"):
+        if not older and self._supports("OUTP:COMP:MODE?"):
             c.comp_modes = ["LLOC", "HLOC", "LREM", "HREM"]
         elif self._supports("OUTP:TYPE?"):
-            c.comp_modes = ["LOW", "HIGH"]
+            c.comp_modes = ["LOW", "HIGH"] + (["H2"] if c.model.startswith("66309") else [])
         c.has_ri_dfi = self._supports("OUTP:RI:MODE?")
         c.has_port = self._supports("DIG:FUNC?")
         c.has_display = self._supports("DISP:MODE?")
         c.has_trigger = self._supports("TRIG:ACQ:SOUR?")
-        c.has_ext_trigger = c.has_trigger and c.has_port and fw >= "A.03.01"
+        c.has_ext_trigger = c.has_trigger and c.has_port and fw >= "A.03.01" \
+            and not c.model.startswith(OVP_TRIPS)
+        if c.model.startswith(DUAL) and self._supports("VOLT2?"):
+            c.has_out2 = True
+            try:
+                c.v2_max = _f(self.t.query("VOLT2? MAX"))
+                c.i2_max = _f(self.t.query("CURR2? MAX"))
+            except Exception:
+                pass
+            c.has_coupling = self._supports("INST:COUP:OUTP:STAT?")
+            if not c.has_coupling:
+                c.note = ("This firmware always switches both outputs together "
+                          "(separate switching needs A.02.04).")
         c.saved_states = 4
         c.has_selftest = True
         for key, q in (("Options", "*OPT?"), ("Calibrated", "CAL:DATE?"),
@@ -217,9 +249,16 @@ class Agilent663xx:
             extra += [("volt_trig", "VOLT:TRIG?", _f), ("curr_trig", "CURR:TRIG?", _f)]
             if c.has_resistance:
                 extra.append(("res_trig", "RES:TRIG?", _f))
+        if c.has_out2:
+            extra += [("voltage2", "VOLT2?", _f), ("current2", "CURR2?", _f)]
+            if c.has_coupling:
+                extra += [("output2", "OUTP2?", parse_bool),
+                          ("coupled", "INST:COUP:OUTP:STAT?", self._coupled)]
         if extra:
             for (attr, _, conv), val in zip(extra, self.queries([q for _, q, _ in extra])):
                 setattr(s, attr, conv(val))
+        if c.has_out2 and not c.has_coupling:
+            s.output2, s.coupled = s.output, True
         if c.has_display:
             # separate: the text itself could contain ';'
             s.display_text = _unquote(self.query("DISP:TEXT?"))
@@ -233,7 +272,49 @@ class Agilent663xx:
         self.write(f"CURR {a:.5f}")
 
     def set_output(self, on: bool):
+        """Output 1; both outputs of a dual unit while they are coupled."""
         self.write(f"OUTP {'ON' if on else 'OFF'}")
+
+    def all_off(self):
+        """Every output, coupled or not."""
+        self.write("OUTP OFF")
+        if self.caps.has_out2:
+            self.write("OUTP2 OFF")     # OUTP alone is output 1 when they are separate
+            if not self.caps.has_coupling:
+                self.errors()           # older firmware: OUTP did both, no OUTP2
+
+    # ---- output 2 (66309 / 66319) ----------------------------------------
+    @staticmethod
+    def _coupled(s: str) -> bool:
+        return s.strip().strip('"').upper().startswith("ALL")
+
+    def _need_out2(self):
+        if not self.caps.has_out2:
+            raise ValueError(f"the {self.caps.model or 'supply'} has no output 2")
+
+    def set_voltage2(self, v: float):
+        self._need_out2()
+        self.write(f"VOLT2 {v:.4f}")
+
+    def set_current2(self, a: float):
+        self._need_out2()
+        self.write(f"CURR2 {a:.5f}")
+
+    def set_output2(self, on: bool):
+        """Output 2 alone. ON is refused while the outputs are coupled (it
+        would switch output 1 on too); OFF never is."""
+        self._need_out2()
+        c = self.caps
+        if on and (not c.has_coupling or self._coupled(self.query("INST:COUP:OUTP:STAT?"))):
+            raise ValueError("outputs 1 and 2 are coupled: switch output 1 on (that does both)"
+                             + (", or separate them first" if c.has_coupling else ""))
+        self.write(f"OUTP{'2' if c.has_coupling else ''} {'ON' if on else 'OFF'}")
+
+    def set_coupled(self, on: bool):
+        self._need_out2()
+        if not self.caps.has_coupling:
+            raise ValueError("this firmware always switches both outputs together")
+        self.write(f"INST:COUP:OUTP:STAT {'ALL' if on else 'NONE'}")
 
     def set_ovp(self, v: float):
         """VOLT:PROT: on the 663xx this is the programmable voltage limit."""
@@ -275,7 +356,7 @@ class Agilent663xx:
         self.write(f"SENS:PROT:STAT {'ON' if on else 'OFF'}")
 
     def set_comp_mode(self, mode: str):
-        if mode in ("LOW", "HIGH"):
+        if mode in ("LOW", "HIGH", "H2"):
             self.write(f"OUTP:TYPE {mode}")
         else:
             self.write(f"OUTP:COMP:MODE {mode}")
@@ -359,9 +440,15 @@ class Agilent663xx:
             qs.append("MEAS:DVM?")
         # STAT:QUES? is the latched event register (reading clears it): it
         # catches trips that come and go between polls.
+        c = self.caps
+        out2 = c.has_out2 and cfg.out2
+        if out2:
+            qs += ["MEAS:VOLT2?", "MEAS:CURR2?"]
         qs += ["STAT:OPER:COND?", "STAT:QUES:COND?", "STAT:QUES?", "OUTP?"]
+        if c.has_coupling:
+            qs += ["OUTP2?", "INST:COUP:OUTP:STAT?"]
         acqs = (1 if cfg.measure_voltage else 0) + 1 + (1 if dvm else 0)
-        acq = self._sweep[0] * self._sweep[1] * acqs
+        acq = self._sweep[0] * self._sweep[1] * acqs + (2 * 2048 * TINT_MIN if out2 else 0)
         with self.t.temp_timeout(max(5.0, acq * 2 + 2)):
             vals = self.queries(qs)
         it = iter(vals)
@@ -371,8 +458,17 @@ class Agilent663xx:
             r.i_max, r.i_min, r.i_high, r.i_low, r.i_rms = (_f(next(it)) for _ in range(5))
         if dvm:
             r.dvm = _f(next(it))
+        if out2:
+            r.voltage2, r.current2 = _f(next(it)), _f(next(it))
         oper, ques, ques_ev = (int(_f(next(it))) for _ in range(3))
         r.output = parse_bool(next(it))
+        if c.has_coupling:
+            r.output2, r.coupled = parse_bool(next(it)), self._coupled(next(it))
+        elif c.has_out2:
+            r.output2, r.coupled = r.output, True
+        if c.has_out2:
+            r.mode2 = "OFF" if not r.output2 else "CC" if oper & OPER_CC2 else \
+                "CV" if oper & OPER_CV2 else "--"
         r.flags = [name for bit, name in QUES_FLAGS.items() if ques & (1 << bit)]
         r.events = [name for bit, name in QUES_EVENTS.items() if ques_ev & (1 << bit)]
         if not r.output:

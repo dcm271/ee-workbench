@@ -45,7 +45,7 @@ MainWindow
 |---|---|
 | `linux_gpib.py` | linux-gpib's C library through ctypes, as the `gpib` / `Gpib` modules pyvisa-py looks for |
 | `instruments/base.py` | Data types: `SupplyCaps`, `Setpoints`, `SupplyReading`, `DmmConfig`, `DmmReading` |
-| `instruments/agilent663xx.py` | 66311B/66321B/66321D SCPI driver |
+| `instruments/agilent663xx.py` | 66309B/66311B/66321B/66321D SCPI driver |
 | `instruments/hp6632a.py` | 6632A/33A/34A driver (HP's pre-SCPI command language) |
 | `instruments/hp3456a.py` | 3456A driver (program codes) |
 | `instruments/bk393.py` | B&K 393 (streamed frames) and 393B (APPA 500-series packets), read-only |
@@ -298,6 +298,19 @@ Voltage and current are **digitized separately**: `FETC:VOLT?` after `MEAS:CURR?
 The pulse-statistics `FETC` queries have to come before `MEAS:DVM?`, because the DVM acquisition replaces the current data (error +603 otherwise).
 
 Not available on fw A.03.01, so not offered: long integration, DVM arrays (`FETC:ARR:DVM?`), and `SENS:LEAD:STAT?`.
+
+### Output 2 (66309B / 66309D)
+
+Written from the 66111A / 66311B/D / 66309B/D User's Guide. Every query was checked on a 66309B (fw A.02.04) with its outputs off; setting and switching have not been tried on hardware.
+
+| What | Commands |
+|---|---|
+| Setpoints | `VOLT2`, `CURR2` |
+| Switching | `OUTP` (both while coupled, else output 1), `OUTP2`, `INST:COUP:OUTP:STAT ALL/NONE` (fw A.02.04) |
+| Poll, added | `MEAS:VOLT2?`, `MEAS:CURR2?` (fixed 2048 × 15.6 µs), `OUTP2?`, `INST:COUP:OUTP:STAT?` |
+| Status, added | `STAT:OPER:COND?` bits 9 (CV2) and 12 (CC2); `STAT:QUES` bits 8 (UNREG2) and 12 (OCP2) |
+
+`all_off()` sends `OUTP OFF` and then `OUTP2 OFF` as two messages, whatever the coupling. `set_output2(True)` asks for the coupling first and refuses when coupled. Output 2 is probed on 66309 and 66319 only.
 
 ### Triggered capture
 
@@ -719,6 +732,7 @@ Colours are tokens in `theme.py`, and one application stylesheet uses them. Butt
 
 | Resource | Model |
 |---|---|
+| `SIM::66309B` | The same output 1 without resistance, DVM or 1 A range, with a real OVP; output 2 feeds 10 Ω |
 | `SIM::66321D` | 47 Ω load with 4.7 Ω, 577 µs bursts every 4.615 ms. The output is modelled over time (40 µs step response from a history of setpoint changes), so level triggers, pre-trigger data, segments, output steps, external triggers (fires 0.4 s after arming) and `ABOR` behave like the real unit. Binary and ASCII arrays, the WTG bit, latched status events, every System-tab setting with `*RST` defaults, `*SAV/*RCL`, `*TST?`, a DVM at 3.7 V ± 0.15 V, the full SCPI error queue (including +603), and OCP trips |
 | `SIM::6632A` | 10 Ω load; ERR codes; OCP/OVP trips; 30 ms readback delay |
 | `SIM::BK393`, `SIM::BK393B` | DCV on a drifting 5 V rail; the 393 streams frames, the 393B answers APPA packets |

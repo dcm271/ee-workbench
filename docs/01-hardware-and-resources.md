@@ -14,6 +14,7 @@ This guide lists the hardware OtterBench supports, what each instrument can do f
 | Item | Role | Interface | Status in OtterBench |
 |---|---|---|---|
 | **Agilent 66321D** Mobile Communications DC Source | Main supply with DVM input | GPIB (and RS-232) | **Fully supported**. Tested on real hardware (fw A.03.01) |
+| **Agilent 66309B / 66309D** | Dual output: the same main output, plus an isolated 12 V / 1.5 A output 2 (D: DVM too) | GPIB only | Supported by the same driver, [output 2 included](#agilent-66309b-66309d-dual-output). Readings checked on a 66309B (fw A.02.04); setting and switching tested on the simulator |
 | Agilent 66311B / 66321B | Same family without DVM | GPIB / RS-232 | Supported by the same driver; DVM hidden if absent |
 | **HP 6632A** System DC Power Supply (also 6633A, 6634A) | Second supply, 20 V / 5 A | GPIB only | Supported. Written from the manual and tested on the simulator |
 | **HP 3456A** 6½-digit DMM | Precision voltage / resistance | GPIB only | Supported. Written from the manual and tested on the simulator |
@@ -47,6 +48,7 @@ Every instrument below has a simulator, so its tab, the sequencer, the watchdog 
 
 | Instrument | Model key | Auto-detect | Status | Simulator |
 |---|---|---|---|---|
+| Agilent 66309B, 66309D | `66309B` | yes | Simulator; readings tested (66309B, fw A.02.04) | `SIM::66309B` |
 | Agilent 66321D, 66321B, 66311B | `66321D` | yes | Tested (66321D, fw A.03.01) | `SIM::66321D` |
 | HP 6632A, 6633A, 6634A | `6632A` | yes (`ID?`) | Simulator | `SIM::6632A` |
 | HP 3456A | `3456A` | **no**: choose by hand (it doesn't answer `*IDN?`) | Simulator | `SIM::3456A` |
@@ -155,6 +157,21 @@ Other controllers supported by linux-gpib also work, such as the Agilent 82357A/
 | Factory GPIB address | 5 |
 
 What the app uses: essentially everything. Setpoints, output on/off, voltage limit, over-voltage trip, over-current protection (OCP) and its delay, open-sense detection, output resistance, current range, measurement window, ACDC/DC detector, digitizer settings, pulse statistics (max, min, high, low, RMS), DVM readings, triggered and pre-triggered waveform capture (level, external and output-step triggers, multiple segments), output transients, output compensation mode, the rear control port (remote inhibit, fault output, digital I/O, external trigger), the front-panel display, saved setups, power-on state, self-test and instrument information.
+
+### Agilent 66309B / 66309D (dual output)
+
+| Parameter | Output 1 | Output 2 |
+|---|---|---|
+| Voltage | 0 to 15.356 V | 0 to 12.25 V |
+| Current limit | 0 to 3.071 A | 0 to 1.52 A |
+| Over-voltage protection | trip level 0 to 22 V, with a switch | none |
+| Over-current protection | one switch for both outputs | |
+| Waveform capture, pulse statistics | yes | no (average V and I) |
+
+- The outputs are **coupled** at power-on and after `*RST` (not on Option 521 units): one switch for both. From firmware A.02.04 they can be separated on the **Output 2** tab; earlier firmware always switches both.
+- **ALL OUTPUTS OFF**, the watchdog and the shutdowns after a crash or at quit switch both outputs off, coupled or not.
+- `VOLT:PROT` is a real OVP trip level here and on the 66311B (on the 66321 it is a limit on the setting).
+- There is no RS-232, output resistance, 1 A range or external trigger. The 66319B/D opens the same way, but its output 2 is unchecked against its manual.
 
 ### HP 6632A / 6633A / 6634A
 

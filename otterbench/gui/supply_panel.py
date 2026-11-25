@@ -1,4 +1,5 @@
-"""Tab for a DC source (Agilent 663xx SCPI family or HP 6632A family)."""
+"""Tab for a DC source (Agilent 663xx SCPI family or HP 6632A family). A second
+output (66309 / 66319) has its own tab, and a line under the output button."""
 from __future__ import annotations
 
 import csv
@@ -14,6 +15,8 @@ from PyQt6.QtWidgets import (QCheckBox, QComboBox, QFileDialog, QFormLayout, QFr
                              QVBoxLayout, QWidget)
 
 from ..analysis import trapezoid
+from ..sequencer import OUT2_SET
+from ..signals import OUT2_QUANTITIES
 from ..instruments.base import SupplyCaps, SupplyPoll, SupplyReading, Setpoints
 from . import touch
 from .capture_tab import CaptureTab
@@ -22,7 +25,7 @@ from .system_tab import SystemTab
 from .tests_tab import TestsTab
 from .panel_base import PanelBase
 from .profile_box import ProfileBox
-from .widgets import (C_CURR, C_DVM, C_MUTED, C_ON, C_POW, C_VOLT, C_WARN, MONO,
+from .widgets import (C_CURR, C_DVM, C_GOOD, C_MUTED, C_ON, C_POW, C_VOLT, C_WARN, MONO,
                       Readout, SafeSpin, TraceBuffer, fmt_current, fmt_si)
 
 # Digitizer presets for the 663xx: (label, points, tooltip)
@@ -62,10 +65,11 @@ class SupplyPanel(PanelBase):
         self.poll = SupplyPoll()
         self.worker.poll_cfg = self.poll
         self.last_voltage = None
-        # columns: t, V, I, Imax, DVM
-        self.buf = TraceBuffer(5)
+        # columns: t, V, I, Imax, DVM, V2, I2
+        self.buf = TraceBuffer(7)
 
         self._armed = False  # touch: first tap on OUTPUT arms, second turns ON
+        self._armed2 = False
         root = QHBoxLayout(self)
         root.setContentsMargins(0, 4, 0, 0)
         console = self.build_console_tab(
@@ -84,6 +88,9 @@ class SupplyPanel(PanelBase):
         split.addWidget(self._build_left())
         self.tabs = QTabWidget()
         self.tabs.addTab(self._build_trend_tab(), "Trend")
+        self.out2_scroll = touch.scroll(self._build_out2())
+        self.tabs.addTab(self.out2_scroll, "Output 2")
+        self.tabs.setTabVisible(self.tabs.indexOf(self.out2_scroll), False)
         self.tabs.addTab(self.tests_tab, "Tests")
         self.profile_box = ProfileBox(self, {"voltage": lambda d, v: d.set_voltage(v),
                                              "current": lambda d, v: d.set_current(v)},
@@ -209,6 +216,11 @@ class SupplyPanel(PanelBase):
         self.out_btn.setToolTip("Toggle the output. Esc turns every supply's output OFF.")
         self.out_btn.clicked.connect(lambda on: self.set_output(on))
         v.addWidget(self.out_btn)
+        self.out2_line = QLabel("")
+        self.out2_line.setWordWrap(True)
+        self.out2_line.setFont(QFont(MONO, 10))
+        self.out2_line.setVisible(False)
+        v.addWidget(self.out2_line)
 
         form = QFormLayout()
         form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
@@ -265,6 +277,55 @@ class SupplyPanel(PanelBase):
         self.note_label.setVisible(False)
         v.addWidget(self.note_label)
         return g
+
+    def _build_out2(self):
+        w = QWidget()
+        lay = QVBoxLayout(w)
+        g = QGroupBox("Output 2")
+        v = QVBoxLayout(g)
+        self.mode2_badge = QLabel("—")
+        self.mode2_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.mode2_badge.setFixedSize(64, 26)
+        v.addWidget(self.mode2_badge)
+        self.r_volt2 = Readout("Voltage", C_VOLT, 26)
+        self.r_curr2 = Readout("Current", C_CURR, 26)
+        self.r_pow2 = Readout("Power", C_POW, 16)
+        for r in (self.r_volt2, self.r_curr2, self.r_pow2):
+            v.addWidget(r)
+        self.out2_btn = QPushButton("OUTPUT 2 —")
+        self.out2_btn.setCheckable(True)
+        self.out2_btn.setMinimumHeight(60 if touch.TOUCH else 44)
+        self.out2_btn.clicked.connect(lambda on: self.set_output2(on))
+        v.addWidget(self.out2_btn)
+        form = QFormLayout()
+        form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
+        self.sp_volt2 = SafeSpin(4, 0.01, " V")
+        self.sp_curr2 = SafeSpin(4, 0.001, " A")
+        self._set_row(form, "Output 2 voltage", self.sp_volt2,
+                      lambda: self.cmd(lambda d, x: d.set_voltage2(x), self.sp_volt2.value()))
+        self._set_row(form, "Output 2 current limit", self.sp_curr2,
+                      lambda: self.cmd(lambda d, x: d.set_current2(x), self.sp_curr2.value()))
+        v.addLayout(form)
+        self.couple_chk = QCheckBox("Switch both outputs together (coupled)")
+        self.couple_chk.setToolTip("Coupled: the main output button switches both outputs. "
+                                   "Separate: each has its own button.\n"
+                                   "The supply is coupled again after *RST and at power-on, "
+                                   "unless you save it into the power-on state (System tab).\n"
+                                   "ALL OUTPUTS OFF always switches both off.")
+        self.couple_chk.clicked.connect(lambda on: self.cmd(lambda d, x: d.set_coupled(x), on))
+        v.addWidget(self.couple_chk)
+        self.meas2_chk = QCheckBox("Measure output 2 (uncheck for faster readings)")
+        self.meas2_chk.setChecked(True)
+        self.meas2_chk.toggled.connect(self._apply_poll)
+        v.addWidget(self.meas2_chk)
+        lay.addWidget(g)
+        hint = QLabel("Output 2 is isolated from output 1. It has no over-voltage protection; "
+                      "OCP is one switch for both outputs.")
+        hint.setWordWrap(True)
+        hint.setStyleSheet(f"color:{C_MUTED};")
+        lay.addWidget(hint)
+        lay.addStretch(1)
+        return w
 
     def _build_measure_group(self):
         g = QGroupBox("Measurement setup")
@@ -385,6 +446,9 @@ class SupplyPanel(PanelBase):
         self.c_v = self.p_v.plot(pen=pg.mkPen(C_VOLT, width=1.5))
         self.c_i = self.p_i.plot(pen=pg.mkPen(C_CURR, width=1.5))
         self.c_imax = self.p_i.plot(pen=pg.mkPen(C_CURR, width=1, style=Qt.PenStyle.DotLine))
+        # output 2, dashed
+        self.c_v2 = self.p_v.plot(pen=pg.mkPen(C_VOLT, width=1, style=Qt.PenStyle.DashLine))
+        self.c_i2 = self.p_i.plot(pen=pg.mkPen(C_GOOD, width=1, style=Qt.PenStyle.DashLine))
         self.c_d = self.p_d.plot(pen=pg.mkPen(C_DVM, width=1.5))
         self.p_d.setVisible(False)
         touch.plots(self.p_v, self.p_i, self.p_d)
@@ -407,19 +471,38 @@ class SupplyPanel(PanelBase):
         self.out_btn.setChecked(bool(self.sp.output))  # revert until confirmed
         self.cmd(lambda d, x: d.set_output(x), on)
 
+    def set_output2(self, on: bool):
+        if on and touch.TOUCH and not self._armed2:
+            self._armed2 = True
+            self.out2_btn.setChecked(False)
+            self.out2_btn.setText("Tap again to turn ON")
+            self.out2_btn.setStyleSheet("QPushButton { background:#8a6d00; color:white; "
+                                        "font-weight:bold; font-size:17px; }")
+            QTimer.singleShot(3000, self._disarm2)
+            return
+        self._armed2 = False
+        self.out2_btn.setChecked(bool(self.sp.output2))   # revert until confirmed
+        self.cmd(lambda d, x: d.set_output2(x), on)
+
+    def _disarm2(self):
+        if self._armed2:
+            self._armed2 = False
+            self._style_output2()
+
     def _disarm(self):
         if self._armed:
             self._armed = False
             self._style_output_button()
 
     def output_off(self):
-        self._armed = False
+        self._armed = self._armed2 = False
         self.profile_box.stop()
         self.tests_tab.abort()
         if self.capture_tab.busy or self.capture_tab.running:
             self.capture_tab.stop()
         if self.connected:
-            self.set_output(False)
+            self.out_btn.setChecked(bool(self.sp.output))    # until confirmed
+            self.cmd(lambda d: getattr(d, "all_off", lambda: d.set_output(False))())
 
     def reset_instrument(self):
         what = ("CLR returns the 6632A to power-on defaults: 0 V, minimum current, "
@@ -443,6 +526,7 @@ class SupplyPanel(PanelBase):
         self.worker.interval_s = self.poll_ms.value() / 1000
         self.poll.measure_voltage = self.volt_chk.isChecked()
         self.poll.pulse_stats = self.pulse_chk.isChecked() and self.caps.has_pulse_stats
+        self.poll.out2 = self.meas2_chk.isChecked() and self.caps.has_out2
         self.poll.dvm = self.dvm_chk.isChecked() and self.caps.has_dvm
         self.pulse_box.setVisible(self.poll.pulse_stats)
         self.r_dvm.setVisible(self.poll.dvm)
@@ -485,6 +569,15 @@ class SupplyPanel(PanelBase):
         self.ovp_label.setToolTip(caps.ovp_tip)
         self.sp_ovp.setToolTip(caps.ovp_tip)
         self.ovt_chk.setVisible(caps.has_ovp_tracking)
+        if caps.ovp_is_trip:
+            self.ovt_chk.setText("OVP")
+            self.ovt_chk.setToolTip("Over-voltage protection: turn the output off above the OVP "
+                                    "level. Unticked, nothing stops an over-voltage.")
+        self.tabs.setTabVisible(self.tabs.indexOf(self.out2_scroll), caps.has_out2)
+        self.out2_line.setVisible(caps.has_out2)
+        self.sp_volt2.setRange(0, caps.v2_max)
+        self.sp_curr2.setRange(0, caps.i2_max)
+        self.couple_chk.setVisible(caps.has_coupling)
         self.sense_chk.setVisible(caps.has_sense_protect)
         if caps.has_waveform and self.tabs.indexOf(self.capture_tab) < 0:
             self.tabs.insertTab(1, self.capture_tab, "Capture")
@@ -511,6 +604,11 @@ class SupplyPanel(PanelBase):
             self.sense_chk.setChecked(sp.sense_protect)
         self.system_tab.on_state(sp)
         self.capture_tab.on_state(sp)
+        if self.caps.has_out2:
+            self.sp_volt2.set_from_instrument(sp.voltage2)
+            self.sp_curr2.set_from_instrument(sp.current2)
+            self.couple_chk.setChecked(bool(sp.coupled))
+            self._style_output2()
         self._style_output_button()
         if self.caps.has_meas_setup:
             self.sw_points.blockSignals(True)
@@ -538,22 +636,40 @@ class SupplyPanel(PanelBase):
                 lab.setText(fmt_current(getattr(r, k)))
         self.mode_badge.setText(r.mode)
         self._style_badge(r.mode)
-        trip = {"OV", "OCP", "SENSE-OPEN"} & set(r.flags)
+        if self.caps.has_out2:
+            self._show_output2(r)
+        trip = {"OV", "OCP", "OCP2", "SENSE-OPEN"} & set(r.flags)
         hint = ""
         if "SENSE-OPEN" in r.flags:
             hint = "  (a sense lead is open: reconnect +S / −S, then Clear trip)"
         elif trip:
             hint = "  (press Clear trip)"
         self.flags_label.setText("  ".join(r.flags) + hint)
-        self.buf.append([r.t, r.voltage, r.current, r.i_max, r.dvm])
+        self.buf.append([r.t, r.voltage, r.current, r.i_max, r.dvm, r.voltage2, r.current2])
         if self.recording:
             self.record([time.strftime("%Y-%m-%dT%H:%M:%S"), f"{r.t:.3f}", r.voltage,
                                r.current, r.power, r.mode, "|".join(r.flags), r.dvm,
-                               r.i_max, r.i_min, r.i_high, r.i_low, r.i_rms])
+                               r.i_max, r.i_min, r.i_high, r.i_low, r.i_rms]
+                        + ([r.voltage2, r.current2, r.power2, r.mode2]
+                           if self.caps.has_out2 else []))
 
     def csv_header(self):
         return ["timestamp", "t_s", "voltage_V", "current_A", "power_W", "mode", "flags",
-                "dvm_V", "i_max_A", "i_min_A", "i_high_A", "i_low_A", "i_rms_A"]
+                "dvm_V", "i_max_A", "i_min_A", "i_high_A", "i_low_A", "i_rms_A"] + (
+                    ["voltage2_V", "current2_A", "power2_W", "mode2"]
+                    if self.caps is not None and self.caps.has_out2 else [])
+
+    def _more(self, names: list[str], extra: list[str]) -> list[str]:
+        return names + (extra if getattr(self.caps, "has_out2", False) else [])
+
+    def quantities(self):
+        return self._more(super().quantities(), OUT2_QUANTITIES)
+
+    def measure_names(self):
+        return self._more(super().measure_names(), OUT2_QUANTITIES)
+
+    def set_names(self):
+        return self._more(super().set_names(), OUT2_SET)
 
     def csv_name(self):
         return f"{self.caps.model or 'supply'}_%Y%m%d_%H%M%S.csv"
@@ -566,11 +682,41 @@ class SupplyPanel(PanelBase):
         on = self.sp.output
         size = 18 if touch.TOUCH else 15
         self.out_btn.setChecked(bool(on))
-        self.out_btn.setText({True: "OUTPUT ON", False: "OUTPUT OFF",
-                              None: "OUTPUT ?  (state unknown)"}[on])
+        # a coupled pair: say that the button switches both
+        name = "OUTPUT" if not self.caps.has_out2 else \
+            "OUTPUTS 1 + 2" if self.sp.coupled else "OUTPUT 1"
+        self.out_btn.setText({True: f"{name} ON", False: f"{name} OFF",
+                              None: f"{name} ?  (state unknown)"}[on])
         self.out_btn.setStyleSheet(
             f"QPushButton {{ background:{C_ON}; color:white; font-weight:bold; font-size:{size}px; }}"
             if on else f"QPushButton {{ font-weight:bold; font-size:{size}px; }}")
+
+    def _style_output2(self):
+        on, sp = bool(self.sp.output2), self.sp
+        size = 18 if touch.TOUCH else 15
+        self.out2_btn.setChecked(on)
+        # coupled: OFF still works here, ON belongs to the main button
+        self.out2_btn.setEnabled(self.connected and (on or not sp.coupled))
+        self.out2_btn.setText(f"OUTPUT 2 {'ON' if on else 'OFF'}"
+                              + ("  (with output 1)" if sp.coupled else ""))
+        self.out2_btn.setStyleSheet(
+            f"QPushButton {{ background:{C_ON}; color:white; font-weight:bold; font-size:{size}px; }}"
+            if on else f"QPushButton {{ font-weight:bold; font-size:{size}px; }}")
+
+    def _show_output2(self, r: SupplyReading):
+        self.mode2_badge.setText(r.mode2)
+        self._style_badge(r.mode2, self.mode2_badge)
+        known = r.voltage2 is not None and r.current2 is not None
+        self.r_volt2.set(f"{r.voltage2:+.4f} V" if known else "—")
+        self.r_curr2.set(fmt_current(r.current2) if known else "—")
+        self.r_pow2.set(f"{r.power2:+.4f} W" if known else "—")
+        text = f"Output 2  {r.mode2}"
+        if known:
+            text += f"  {r.voltage2:+.3f} V  {fmt_current(r.current2).strip()}"
+        elif self.sp.voltage2 is not None:
+            text += f"  set to {self.sp.voltage2:.3f} V"
+        self.out2_line.setText(text)
+        self.out2_line.setStyleSheet(f"color:{C_GOOD if r.output2 else C_MUTED};")
 
     # ================================================================ trend
     def clear_trend(self):
@@ -586,7 +732,7 @@ class SupplyPanel(PanelBase):
         start = int(np.searchsorted(t, t[-1] - span)) if span else 0
         # Plot one point past the window so the lines run to the left edge;
         # the statistics below stay on the window itself.
-        t, v, i, imax, dvm = d[max(0, start - 1):].T
+        t, v, i, imax, dvm, v2, i2 = d[max(0, start - 1):].T
         w = d[start:]
         self.c_v.setData(t, v, connect="finite")
         self.c_i.setData(t, i)
@@ -594,6 +740,11 @@ class SupplyPanel(PanelBase):
             self.c_imax.setData(t, imax, connect="finite")
         else:
             self.c_imax.setData([], [])
+        for curve, y in ((self.c_v2, v2), (self.c_i2, i2)):
+            if np.isfinite(y).any():
+                curve.setData(t, y, connect="finite")
+            else:
+                curve.setData([], [])
         if self.p_d.isVisible():
             self.c_d.setData(t, dvm, connect="finite")
         t, v, i = w[:, 0], w[:, 1], w[:, 2]
@@ -604,9 +755,9 @@ class SupplyPanel(PanelBase):
             f"max {fmt_current(i.max())}{vtxt}   charge {fmt_si(charge, 'Ah')}")
 
     # ================================================================ misc
-    def _style_badge(self, mode: str):
+    def _style_badge(self, mode: str, badge=None):
         bg = {"CV": "#1b5e20", "CC": "#b71c1c", "CC-": "#880e4f", "OFF": "#37474f"}.get(mode, "#263238")
-        self.mode_badge.setStyleSheet(
+        (badge or self.mode_badge).setStyleSheet(
             f"background:{bg}; color:white; font-weight:bold; border-radius:4px;")
 
     def set_enabled(self, on: bool):
@@ -618,6 +769,8 @@ class SupplyPanel(PanelBase):
             w.setEnabled(True)
         self.capture_tab._buttons()
         self.profile_box.set_enabled(on)
+        if self.caps.has_out2:
+            self._style_output2()
         if on:
             self.system_tab.set_enabled(on)
         else:

@@ -64,6 +64,6 @@ def open_sim(resource: str):
         from .s6632a import Sim6632A
 
         return Sim6632A()
-    from .s663xx import Sim663xx
+    from .s663xx import Sim663xx, Sim66309
 
-    return Sim663xx()
+    return Sim66309() if "66309" in name else Sim663xx()

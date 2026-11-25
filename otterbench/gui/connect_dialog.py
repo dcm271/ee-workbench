@@ -13,7 +13,7 @@ from . import touch
 from .theme import set_role
 from .widgets import C_MUTED
 
-SHORT_MODELS = {"auto": "Auto-\ndetect", "663xx": "66321D\n66311B/21B",
+SHORT_MODELS = {"auto": "Auto-\ndetect", "663xx": "66321D/11B\n66309B",
                 "6632A": "6632A\n33A/34A", "DPS150": "DPS-150\nFNIRSI", "3456A": "3456A\nDMM",
                 "BK393": "B&&K 393\nhandheld", "BK393B": "B&&K 393B\nhandheld",
                 "XDM": "OWON\nXDM1041", "PPK2": "PPK2\nNordic",
