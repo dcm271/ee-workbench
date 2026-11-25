@@ -338,7 +338,7 @@ class PanelBase(QWidget):
         glides instead of stepping once per reading.  It runs at most two
         reading intervals past the newest reading, so it stops soon after the
         readings do, and it never moves backwards."""
-        if self._t_last is None:
+        if self._t_last is None or self._lag is None:     # nothing yet, or just cleared
             return None
         rate = self.readings_per_s()
         limit = self._t_last + (2 / rate if rate > 0 else 0.0)
