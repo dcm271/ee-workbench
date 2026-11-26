@@ -630,7 +630,10 @@ class SupplyPanel(PanelBase):
         for label, fs in caps.current_ranges:
             self.range_combo.addItem(f"{label}", label)
         if caps.has_auto_range:
-            self.range_combo.addItem("Auto", "AUTO")
+            self.range_combo.addItem("Auto", "Auto")
+            self.range_combo.setItemData(self.range_combo.count() - 1,
+                                         "Switches to the lowest range that fits the current",
+                                         Qt.ItemDataRole.ToolTipRole)
         self.win_combo.setVisible(caps.has_window)
         self.win_label.setVisible(caps.has_window)
         self.ovp_label.setText(caps.ovp_label)
@@ -716,16 +719,21 @@ class SupplyPanel(PanelBase):
         self.flags_label.setText("  ".join(x for x in r.flags if x not in second) + hint)
         self.flags2_label.setText("  ".join(second))
         self.buf.append([r.t, r.voltage, r.current, r.i_max, r.dvm, r.voltage2, r.current2])
+        auto = self.range_combo.findData("Auto")
+        if auto >= 0:
+            text = f"Auto (now {r.i_range})" if r.i_range else "Auto"
+            if self.range_combo.itemText(auto) != text:
+                self.range_combo.setItemText(auto, text)
         if self.recording:
             self.record([time.strftime("%Y-%m-%dT%H:%M:%S"), f"{r.t:.3f}", r.voltage,
                                r.current, r.power, r.mode, "|".join(r.flags), r.dvm,
-                               r.i_max, r.i_min, r.i_high, r.i_low, r.i_rms]
+                               r.i_max, r.i_min, r.i_high, r.i_low, r.i_rms, r.i_range]
                         + ([r.voltage2, r.current2, r.power2, r.mode2]
                            if self.caps.has_out2 else []))
 
     def csv_header(self):
         return ["timestamp", "t_s", "voltage_V", "current_A", "power_W", "mode", "flags",
-                "dvm_V", "i_max_A", "i_min_A", "i_high_A", "i_low_A", "i_rms_A"] + (
+                "dvm_V", "i_max_A", "i_min_A", "i_high_A", "i_low_A", "i_rms_A", "i_range"] + (
                     ["voltage2_V", "current2_A", "power2_W", "mode2"]
                     if self.caps is not None and self.caps.has_out2 else [])
 

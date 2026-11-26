@@ -285,6 +285,7 @@ Voltage and current are **digitized separately**: `FETC:VOLT?` after `MEAS:CURR?
 | Setpoints | `VOLT`, `CURR`, `OUTP ON/OFF`, `VOLT:PROT` (a limit on the setting, not a trip), `RES` |
 | Protection | `CURR:PROT:STAT`, `VOLT:PROT:STAT` (tracking OV trip), `OUTP:PROT:DEL`, `SENS:PROT:STAT` (open sense), `OUTP:PROT:CLE` |
 | Measurement setup | `SENS:SWE:POIN`, `SENS:SWE:TINT`, `SENS:CURR:RANG MAX/1/MIN`, `SENS:WIND HANN/RECT`, `SENS:CURR:DET ACDC/DC` |
+| Current auto-range (in the driver: the 66309B fw A.02.04 answers -113 to `SENS:CURR:RANG:AUTO`) | after each poll: `SENS:CURR:RANG` up when \|I\| > 95 % of full scale, down when < 80 % of the lower range's; on an overflow (`9.91E+37` or QUES bit 14) up and `MEAS:CURR?` again, then no step down for 30 s. Captures use `MAX` |
 | Poll (one message) | `MEAS:VOLT?;:MEAS:CURR?;[:FETC:CURR:MAX?;…MIN?;…HIGH?;…LOW?;…ACDC?];[:MEAS:DVM?];:STAT:OPER:COND?;:STAT:QUES:COND?;:STAT:QUES?;:OUTP?` |
 | Capture | `ABOR`, `SENS:FUNC`, `SENS:SWE:OFFS:POIN` (negative = pre-trigger), `TRIG:ACQ:SOUR BUS/INT/EXT`, `TRIG:ACQ:LEV/HYST/SLOP/COUN:<CURR\|VOLT>`, `INIT:NAME ACQ`, `TRIG:ACQ`, `FETC:ARR:<CURR\|VOLT>?` (binary), `FETC:<f>?`, `…:ACDC?`, `…:MAX?` etc. |
 | Output transients | `VOLT:TRIG`, `CURR:TRIG`, `RES:TRIG`, `INIT:NAME TRAN`, `TRIG:TRAN`; `*TRG` fires both systems for a step capture |
@@ -293,7 +294,7 @@ Voltage and current are **digitized separately**: `FETC:VOLT?` after `MEAS:CURR?
 | Display | `DISP`, `DISP:MODE NORM/TEXT`, `DISP:TEXT` |
 | Saved setups, housekeeping | `*SAV`, `*RCL`, `*TST?`, `*RST`, `*CLS`, `SYST:ERR?`, `*OPT?`, `SYST:VERS?`, `CAL:DATE?` |
 | Data format | `FORM REAL,32;:FORM:BORD SWAP` after connect, `*RST` and `*RCL` (arrays arrive as little-endian floats; scalar replies stay ASCII) |
-| Capability probes at connect | `VOLT? MAX`, `CURR? MAX`, `VOLT:PROT? MAX`, `MEAS:DVM?`, `RES?`, `SENS:CURR:RANG:AUTO?`, plus a query for each optional feature (an "undefined header" reply hides it) |
+| Capability probes at connect | `VOLT? MAX`, `CURR? MAX`, `VOLT:PROT? MAX`, `MEAS:DVM?`, `RES?`, plus a query for each optional feature (an "undefined header" reply hides it) |
 
 The pulse-statistics `FETC` queries have to come before `MEAS:DVM?`, because the DVM acquisition replaces the current data (error +603 otherwise).
 

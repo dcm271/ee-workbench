@@ -86,6 +86,7 @@ class Sim663xx(SimBase):
         self.vset, self.iset, self.res, self.out = 0.0, 0.1 * I_MAX, 0.0, False
         self.vlim, self.ocp = OVP_MAX, False
         self.rng = "MAX"
+        self.ovld = False
         self.trig = {"VOLT": None, "CURR": None, "RES": None}   # None = follows immediate
         self.tripped = 0           # latched questionable condition bits
         self.acq = None            # armed/finished triggered acquisition
@@ -453,7 +454,13 @@ class Sim663xx(SimBase):
                 x = val(I_MAX, 0, I_MAX)
                 self.rng = "MIN" if x <= 0.02 else ("1" if x <= 1.0 else "MAX")
         elif h in ("MEAS:VOLT", "MEAS:CURR"):
-            out(self._num(self._measure(h[5:]).mean()))
+            y = self._measure(h[5:])
+            # the real one: 9.91E+37 and QUES bit 14 when the range overflows
+            self.ovld = h == "MEAS:CURR" and self.rng != "MAX" and \
+                bool((np.abs(y) >= RANGES[self.rng] * 1.02).any())
+            if self.ovld:
+                self.ques_ev |= 1 << 14
+            out("9.91E+37" if self.ovld else self._num(y.mean()))
         elif h in ("MEAS:VOLT:ACDC", "MEAS:CURR:ACDC"):
             y = self._measure(h[5:9])
             out(self._num(float(np.sqrt((y ** 2).mean()))))
@@ -488,7 +495,7 @@ class Sim663xx(SimBase):
                 bits |= CCP if self._cc_now() else CV
             out(f"{bits:+d}")
         elif h == "STAT:QUES:COND":
-            out(f"{self.tripped:+d}")
+            out(f"{self.tripped | (1 << 14 if self.ovld else 0):+d}")
         elif h == "STAT:QUES":
             out(f"{self.ques_ev:+d}")
             self.ques_ev = 0

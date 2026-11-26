@@ -248,7 +248,7 @@ def test_panel(qapp, monkeypatch, touch_mode):
         assert p.ovt_chk.text() == "OVP"
         assert "voltage2" in p.measure_names() and "output2" in p.set_names()
         assert "power2" in p.quantities()
-        assert len(p.csv_header()) == 17
+        assert len(p.csv_header()) == 18
         p.cmd(lambda d: (d.set_voltage2(5), d.set_current2(1), d.set_coupled(False)))
         assert _wait(qapp, lambda: p.sp.coupled is False)
         assert not p.out2_btn.isHidden() and p.out_slot.indexOf(p.out_btn) == 0
@@ -294,7 +294,7 @@ def test_panel_of_a_single_output_supply(qapp):
         assert _wait(qapp, lambda: p.connected)
         assert p.out2_col.isHidden() and p.meas2_chk.isHidden()
         assert p.out_slot.indexOf(p.out_btn) == 0 and p.prot_row.indexOf(p.clr_btn) >= 0
-        assert p.out_btn.text().startswith("OUTPUT O") and len(p.csv_header()) == 13
+        assert p.out_btn.text().startswith("OUTPUT O") and len(p.csv_header()) == 14
         assert "voltage2" not in p.measure_names() and "output2" not in p.set_names()
     finally:
         p.shutdown()

@@ -10,7 +10,9 @@ GPIB-USB-HS:
     arrays are read as float32 (FORM REAL,32 + BORD SWAP: 4 bytes/point)
     instead of ASCII (~12 bytes/point): 1024 points in 1.15 s instead of 2.9 s.
   * scalar queries stay ASCII under FORM REAL.
-  * there is no SENS:CURR:RANG:AUTO; ranges are 3 A, 1 A and 20 mA.
+  * there is no SENS:CURR:RANG:AUTO (nor on a 66309B, fw A.02.04): ranges are
+    3 A, 1 A and 20 mA, and "Auto" is done here, in poll(). The 20 mA range
+    reads within ~1 uA of zero where the 3 A one is 0.3-0.5 mA out (66309B).
   * the DVM can be triggered but has no array (FETC:ARR:DVM? is undefined).
   * ABOR clears the WTG (waiting-for-trigger) bit within ~70 ms.
   * SENS:LEAD:STAT? (in the manual) is an undefined header on fw A.03.01;
@@ -55,6 +57,12 @@ TINT_MIN = 15.6e-6
 # (label, value sent with SENS:CURR:RANG, full scale)
 RANGES_3 = [("3 A", "MAX", 3.0712), ("1 A", "1", 1.0), ("20 mA", "MIN", 0.02)]
 RANGES_2 = [("3 A", "MAX", 3.0712), ("20 mA", "MIN", 0.02)]
+AUTO = "Auto"
+# Auto: up past UP x the range's full scale (or on overload), down below
+# DOWN x the lower range's; after an overload it stays up HOLD_S, so a pulsed
+# load whose peaks overflow a range doesn't make it switch on every reading.
+UP, DOWN, HOLD_S = 0.95, 0.8, 30.0
+OVERFLOW = 9.9e37        # what MEASure returns when a range overflows
 
 DUAL = ("66309", "66319")
 OVP_TRIPS = ("66309", "66311", "66111")     # the others: a limit on the setting
@@ -74,6 +82,9 @@ class Agilent663xx:
         self.log = None
         self._sweep = (2048, TINT_MIN)    # the poll's digitizer settings
         self._ranges = RANGES_2
+        self._auto = True        # choose the current range from the readings
+        self._rng: str | None = None     # the range the instrument is on
+        self._hold_until = 0.0
         self._capturing: CaptureSpec | None = None
         self._step_from: dict = {}
 
@@ -151,6 +162,9 @@ class Agilent663xx:
         # 1 A range on 66321B/D and 66319B/D only (manual table 2-3)
         self._ranges = RANGES_3 if c.model.startswith(("66321", "66319")) else RANGES_2
         c.current_ranges = [(lab, fs) for lab, _, fs in self._ranges]
+        c.has_auto_range = not c.model.startswith("66111")    # one range only
+        self._auto = c.has_auto_range
+        self._rng = None
         c.has_ovp_tracking = self._supports("VOLT:PROT:STAT?")
         if c.has_ovp_tracking and c.model.startswith(OVP_TRIPS):
             c.ovp_is_trip = True
@@ -218,7 +232,8 @@ class Agilent663xx:
         s.sweep_points, s.sweep_tint = pts, tint
         s.detector = next(r).strip().upper()
         fs = _f(next(r))
-        s.current_range = min(self._ranges, key=lambda x: abs(x[2] - fs))[0]
+        self._rng = min(self._ranges, key=lambda x: abs(x[2] - fs))[0]
+        s.current_range = AUTO if self._auto else self._rng
         if c.has_resistance:
             s.resistance = _f(next(r))
 
@@ -336,11 +351,55 @@ class Agilent663xx:
         self.write(f"RES {ohms:.4f}")
 
     def set_current_range(self, label: str):
+        """A range, or AUTO: poll() then picks one as the current changes."""
+        if label == AUTO and self.caps.has_auto_range:
+            self._auto, self._hold_until = True, 0.0
+            return
         for lab, arg, _ in self._ranges:
             if lab == label:
-                self.write(f"SENS:CURR:RANG {arg}")
+                self._auto = False
+                self._put_range(lab)
                 return
         raise ValueError(f"Unknown range {label!r}")
+
+    def _put_range(self, label: str):
+        arg = next(a for lab, a, _ in self._ranges if lab == label)
+        self.write(f"SENS:CURR:RANG {arg}")
+        self._rng = label
+
+    def _autorange(self, r: SupplyReading, cfg: SupplyPoll, stats: list[str]):
+        """Auto: move up at once when the range overflows (and measure again),
+        up for the next reading when near its full scale, down when well
+        below the lower one's."""
+        ranges = sorted(self._ranges, key=lambda x: x[2])
+        if self._rng is None:
+            fs = _f(self.query("SENS:CURR:RANG?"))
+            self._rng = min(ranges, key=lambda x: abs(x[2] - fs))[0]
+        i = [lab for lab, _, _ in ranges].index(self._rng)
+        top = len(ranges) - 1
+        over = abs(r.current) >= OVERFLOW or "OVLD" in r.flags
+        if over and i < top:
+            while over and i < top:
+                i += 1
+                self._put_range(ranges[i][0])
+                with self.t.temp_timeout(max(5.0, self._sweep[0] * self._sweep[1] * 2 + 2)):
+                    vals = self.queries(["MEAS:CURR?"] + stats)
+                r.current = _f(vals[0])
+                if stats:
+                    r.i_max, r.i_min, r.i_high, r.i_low, r.i_rms = (_f(x) for x in vals[1:])
+                over = abs(r.current) >= OVERFLOW
+            r.flags = [f for f in r.flags if f != "OVLD"]
+            r.events = [e for e in r.events if e != QUES_EVENTS[14]]
+            self._hold_until = time.monotonic() + HOLD_S
+        elif not over:
+            peak = max(abs(x) for x in (r.current, r.i_max, r.i_min) if x is not None)
+            if peak > UP * ranges[i][2] and i < top:
+                self._put_range(ranges[i + 1][0])
+            elif i > 0 and time.monotonic() >= self._hold_until:
+                fits = [j for j in range(i) if peak < DOWN * ranges[j][2]]
+                if fits:
+                    self._put_range(ranges[fits[0]][0])
+        r.i_range = ranges[i][0]
 
     def set_detector(self, det: str):
         self.write(f"SENS:CURR:DET {det.upper()}")
@@ -479,6 +538,10 @@ class Agilent663xx:
             r.mode = "CC-"
         elif oper & OPER_CV:
             r.mode = "CV"
+        if self._auto and self.caps.has_auto_range and not self._capturing:
+            self._autorange(r, cfg, qs[qs.index("MEAS:CURR?") + 1:][:5] if cfg.pulse_stats else [])
+        else:
+            r.i_range = self._rng or ""
         return r
 
     # ---- waveform capture (non-blocking: arm -> fire? -> done? -> fetch) ----
@@ -520,6 +583,11 @@ class Agilent663xx:
             cmds += ["TRIG:ACQ:SOUR EXT"]
         else:
             cmds += ["TRIG:ACQ:SOUR BUS"]
+        if self._auto and self.caps.has_auto_range:
+            # waveforms can have peaks the readings don't show: the top range
+            top = max(self._ranges, key=lambda x: x[2])
+            cmds.append(f"SENS:CURR:RANG {top[1]}")
+            self._rng = top[0]
         self._binary_format()
         self.write(";:".join(cmds))
         self._step_from = {}

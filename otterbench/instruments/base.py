@@ -131,6 +131,7 @@ class SupplyReading:
     output2: bool | None = None
     coupled: bool | None = None
     mode2: str = ""
+    i_range: str = ""       # the current range the reading was made on
 
     @property
     def power(self) -> float | None:

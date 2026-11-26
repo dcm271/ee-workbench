@@ -95,7 +95,11 @@ The 66321D digitizes the output and averages each reading over *samples × inter
 
 - **Measure voltage:** untick it for faster current-only logging. The supply measures voltage and current one after the other, so voltage costs a second acquisition.
 - **Pulse statistics** add no extra acquisition. **Read DVM input** adds one.
-- **Current range:** **3 A**, **1 A**, or **20 mA** for sleep and standby currents. Pick the lowest range that still covers the *peak* current: a range that's too low clips the bursts and shows **OVLD**. The 66321D has no auto-ranging.
+- **Current range:** **Auto** (the default), **3 A**, **1 A** (66321 / 66319 only), or **20 mA** for sleep and standby currents. The 20 mA range is far more accurate for small currents: on a 66309B it read within 1 µA of zero where the 3 A range was 0.3–0.5 mA out.
+  - **Auto** is done by OtterBench, since the supplies have no auto-range over GPIB. It moves to the lowest range whose full scale the current stays under by 20 %, and up when a reading reaches 95 % of the range. The box shows the range in use, e.g. **Auto (now 20 mA)**, and recordings have an `i_range` column.
+  - When a range overflows (**OVLD**), Auto measures again at once on the next range up, so no bad reading gets through. It then stays up for 30 s, so a load whose bursts overflow the lower range doesn't make it switch back and forth. Each overflow costs one extra measurement.
+  - Under Auto a capture uses the top range, since a waveform's peaks may not show in the readings. For a capture of small currents, choose **20 mA** yourself.
+  - A fixed range stays put. If it's too low it clips the bursts, and the reading shows **OVLD**.
 - **Window:** **Hanning** (the default) reduces the error from ripple when an acquisition isn't a whole number of cycles. **Rectangular** gives the plain average of exactly what was sampled.
 - **Detector:** **ACDC** measures the whole waveform (use it for pulsed loads); **DC** gives the DC component only.
 - **Poll delay:** extra time between readings. Leave it at *none* for maximum speed, or raise it for long logs.

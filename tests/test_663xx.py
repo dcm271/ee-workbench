@@ -18,7 +18,7 @@ def test_identify():
     d = make()
     assert d.caps.model == "66321D"
     c = d.caps
-    assert c.has_dvm and c.has_resistance and not c.has_auto_range
+    assert c.has_dvm and c.has_resistance and c.has_auto_range    # done by the driver
     assert [lab for lab, _ in c.current_ranges] == ["3 A", "1 A", "20 mA"]
     assert c.has_trigger and c.has_ext_trigger and c.has_ovp_tracking and c.has_prot_delay
     assert c.comp_modes == ["LLOC", "HLOC", "LREM", "HREM"] and c.has_ri_dfi and c.has_port
