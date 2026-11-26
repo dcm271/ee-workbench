@@ -167,3 +167,38 @@ def test_panel_statistics_follow_the_view(qapp, panel):
     assert panel.view_stats.text() == ""
     panel.live_trend()
     assert _wait(qapp, lambda: "average" in panel.view_stats.text())
+
+
+def test_removing_a_trace_leaves_nothing_behind(qapp, panel):
+    """The extra axes' view boxes live on the scene, outside the plot: a
+    rebuild must take them away, or their old curves stay on screen (and on
+    top, catching touches)."""
+    import pyqtgraph as pg
+    v = panel.trend
+    v.show_trace("power", True)
+    v.set_mode("one")
+    scene = v.glw.scene()
+
+    def boxes():
+        return [i for i in scene.items() if isinstance(i, pg.ViewBox)]
+    assert len(boxes()) == 3
+    v.show_trace("current", False)
+    v.show_trace("current2", False)
+    assert len(boxes()) == 2
+    v.show_trace("power", False)
+    assert len(boxes()) == 1
+    v.set_mode("stacked")
+    v.set_mode("one")
+    v.show_trace("power", True)
+    assert len(boxes()) == 2
+    curves = [i for i in scene.items() if isinstance(i, pg.PlotDataItem)]
+    assert len(curves) == len(v.curves)
+
+
+def test_the_time_axis_stays_in_seconds(qapp, panel):
+    for mode in ("stacked", "one"):
+        panel.trend.set_mode(mode)
+        p = panel.trend.x_box().parentItem()
+        while p is not None and not hasattr(p, "getAxis"):
+            p = p.parentItem()
+        assert not p.getAxis("bottom").autoSIPrefix

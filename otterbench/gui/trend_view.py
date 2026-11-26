@@ -78,6 +78,7 @@ class TrendView(QWidget):
         self.available = set(self.traces)
         self.curves: dict[str, pg.PlotDataItem] = {}
         self.boxes: dict[str, pg.ViewBox] = {}      # axis key -> its view box
+        self._extra: list[pg.ViewBox] = []          # one chart: the other axes' boxes
         self._last: tuple | None = None
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
@@ -153,6 +154,13 @@ class TrendView(QWidget):
         return pg.mkPen(t.color, width=t.width, style=t.style)
 
     def rebuild(self):
+        # the extra axes' boxes sit on the scene, not in the layout: clear()
+        # leaves them (with their curves, on top of the new chart)
+        for vb in self._extra:
+            vb.clear()
+            if vb.scene() is not None:
+                vb.scene().removeItem(vb)
+        self._extra = []
         self.glw.clear()
         self.curves, self.boxes = {}, {}
         axes = self.visible_axes()
@@ -175,6 +183,7 @@ class TrendView(QWidget):
         p.showGrid(x=True, y=True, alpha=0.15)
         p.setClipToView(True)
         p.setDownsampling(auto=True, mode="peak")
+        p.getAxis("bottom").enableAutoSIPrefix(False)     # seconds, never "ks"
         return p
 
     def _build_stacked(self, axes: list[str]):
@@ -216,6 +225,7 @@ class TrendView(QWidget):
                 ax.linkToView(vb)
                 vb.setXLink(main)
                 extra.append(vb)
+                self._extra.append(vb)
             if n:
                 ax.setGrid(False)          # one grid, the first axis's: more is clutter
             ax.setLabel(a.label, units=a.unit, color=a.color)
