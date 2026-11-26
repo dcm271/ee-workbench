@@ -535,8 +535,8 @@ class LogicPanel(PanelBase):
         v = QVBoxLayout(w)
         bar = QHBoxLayout()
         for text, tip, fn in (("Fit", "Show the whole capture", self.fit),
-                              ("＋", "Zoom in", lambda: self.zoom(0.5)),
-                              ("－", "Zoom out", lambda: self.zoom(2.0)),
+                              ("+", "Zoom in", lambda: self.zoom(0.5)),
+                              ("−", "Zoom out", lambda: self.zoom(2.0)),
                               ("◀", "Scroll left", lambda: self.pan(-0.5)),
                               ("▶", "Scroll right", lambda: self.pan(0.5))):
             b = QPushButton(text)
@@ -628,7 +628,7 @@ class LogicPanel(PanelBase):
         self.filter_edit = QLineEdit()
         self.filter_edit.setPlaceholderText("Filter rows, e.g. 0x41 or error")
         self.filter_edit.textChanged.connect(self._fill_table)
-        add = QPushButton("＋ Add decoder…")
+        add = QPushButton("+ Add decoder…")
         add.setToolTip("Add a protocol decoder (UART, I2C, SPI, …); the list is in the "
                        "Protocol decoders box on the left")
         add.clicked.connect(self._add_decoder)

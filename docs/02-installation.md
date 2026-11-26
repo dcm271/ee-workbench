@@ -222,7 +222,7 @@ Nothing extra to install: these use the same VISA library (pyvisa-py) as the gen
    - **LAN** (recommended for meters, loads and scopes): set a fixed IP address on the instrument (its Utility / I/O / LAN menu), check you can `ping` it, and use `TCPIP::<ip>::INSTR`. If VXI-11 is blocked or not offered, the raw socket form works: `TCPIP::<ip>::5025::SOCKET` (Keysight, Siglent, Keithley), `::5555::SOCKET` (Rigol), `::4000::SOCKET` (Tektronix).
    - **USB**: the instrument appears in the resource list as `USB0::0x1AB1::…::INSTR` once the udev rule above is installed (replug it after installing). Another brand: add a line with its vendor ID from `lsusb`, `sudo udevadm control --reload-rules`, replug.
    - **GPIB**: as any other GPIB instrument. **RS-232**: `ASRL/dev/ttyUSB0::INSTR` with the baud rate set in the toolbar.
-2. **Open it** with *Model: Auto-detect*: it reads `*IDN?` and opens a meter / load / supply tab or a scope tab. If it isn't recognised, choose it by hand: **Model** list in the toolbar, or **＋ Add instrument → Meter / load / scope / SCPI…**. On the command line: `./run.sh SCPI:34461A@TCPIP::192.168.1.60::INSTR`, `./run.sh SCOPE:RIGOL@TCPIP::192.168.1.70::INSTR`.
+2. **Open it** with *Model: Auto-detect*: it reads `*IDN?` and opens a meter / load / supply tab or a scope tab. If it isn't recognised, choose it by hand: **Model** list in the toolbar, or **+ Add instrument → Meter / load / scope / SCPI…**. On the command line: `./run.sh SCPI:34461A@TCPIP::192.168.1.60::INSTR`, `./run.sh SCOPE:RIGOL@TCPIP::192.168.1.70::INSTR`.
 3. **Try the simulator first** if you like: `./run.sh SIM::34461A SIM::DL3021 SIM::DP832 SIM::SCOPE`.
 
 A few instruments need a setting on their front panel first:

@@ -136,7 +136,7 @@ class UartPanel(PanelBase):
         self.table.itemChanged.connect(lambda *_: self._mark_edited())
         v.addWidget(self.table)
         row = QHBoxLayout()
-        for text, fn in (("＋ Value", lambda: self._add_row()), ("Remove", self._remove_row)):
+        for text, fn in (("+ Value", lambda: self._add_row()), ("Remove", self._remove_row)):
             b = QPushButton(text)
             b.clicked.connect(fn)
             row.addWidget(b)

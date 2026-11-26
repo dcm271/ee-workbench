@@ -25,7 +25,7 @@ The **toolbar** along the top is always visible:
 | **Model** | *Auto-detect* asks the instrument's `*IDN?` and opens the matching tab: the supplies, the generators, every [SCPI meter, load and supply](#meter-load-and-supply-panel-scpi) with a definition, and the [oscilloscopes](#oscilloscope-panel). **Choose HP 3456A by hand** (it has no ID query), and any instrument that isn't recognised. |
 | **Baud** | Appears only for serial (`ASRL…`) resources. |
 | **Connect** | Opens the instrument in a new tab. |
-| **⏺ Record** / **✎ Note** | Record a [session](#sessions-everything-in-one-file), everything or [only around events](#only-around-events-the-flight-recorder); put a note into it (Ctrl+M). |
+| **● Record** / **✎ Note** | Record a [session](#sessions-everything-in-one-file), everything or [only around events](#only-around-events-the-flight-recorder); put a note into it (Ctrl+M). |
 | **Tools ▾** | [Sequencer](#sequencer), [Watchdog](#watchdog), [Math channels](#math-channels), [Production test](#production-test), [Safety](#safety-and-unattended-runs), [Setups](#setups-the-whole-bench-by-name), open a session in the [viewer](#looking-through-a-session), a [session report](#reports), and the [Remote API](#remote-api-python-and-jupyter) switch. |
 | **All outputs OFF (Esc)** | Turns off every output: supplies (including every output of a multi-output SCPI supply), electronic-load inputs, PPK2 DUT power, function-generator channels and GPIO outputs. It also stops a running sequence, profile or remote-API call. |
 
@@ -285,7 +285,7 @@ The panel drives a Saleae Logic 8, Logic Pro 8 or Logic Pro 16 through **Logic 2
 
 **Channels and Sampling.** Tick the digital (D) and analog (A) inputs to record. Logic 2 refuses rates the analyzer can't reach with that many channels on; the reason appears in the console and status bar. **Threshold** (Pro models only) sets the logic level.
 
-**Waveform tab.** Digital lanes on top, analog traces underneath, on one time axis. Drag to pan and scroll to zoom (or use **Fit ＋ － ◀ ▶**, which also work on a touch screen). Wherever there are more edges than pixels, a lane is drawn as a solid band, so a fast clock reads as a block and a single glitch never vanishes.
+**Waveform tab.** Digital lanes on top, analog traces underneath, on one time axis. Drag to pan and scroll to zoom (or use **Fit + − ◀ ▶**, which also work on a touch screen). Wherever there are more edges than pixels, a lane is drawn as a solid band, so a fast clock reads as a block and a single glitch never vanishes.
 
 The tables under the plot measure **what's in view**, or the band when **Measure region** is ticked (its width shows as Δt and 1/Δt):
 
@@ -352,7 +352,7 @@ Bench function generators reached over LAN, USB-TMC or GPIB (`FGEN`; see [Hardwa
 
 On a Raspberry Pi the 40-pin header shows up as `GPIO::/dev/gpiochip…` in the resource list (`SIM::GPIO` simulates one anywhere). Use the pins to press a DUT's buttons, switch a relay (power-cycle the DUT, connect a load), drive a reset line, or wait for a "done" pin. See [Hardware](01-hardware-and-resources.md#raspberry-pi-gpio-header) for wiring and limits.
 
-Each row is one header pin, numbered by its **GPIO** (BCM) number with the physical **Pin** next to it (ⓘ marks pins with a second job such as I²C or the serial console):
+Each row is one header pin, numbered by its **GPIO** (BCM) number with the physical **Pin** next to it (ℹ marks pins with a second job such as I²C or the serial console):
 
 | Column | |
 |---|---|
@@ -373,7 +373,7 @@ Each row is one header pin, numbered by its **GPIO** (BCM) number with the physi
 
 ![Rigol DP832 from its definition](images/scpi-supply.png)
 
-Bench meters, electronic loads and extra programmable supplies (see the [compatibility list](01-hardware-and-resources.md#meters-loads-and-supplies-instrument-definitions)) all use one panel, built from the instrument's [definition file](04-technical-reference.md#instrument-definition-files-toml). Open one with *Auto-detect*, or choose it under **Model** (desktop) / **＋ Add instrument → Meter / load / scope / SCPI…** (touch).
+Bench meters, electronic loads and extra programmable supplies (see the [compatibility list](01-hardware-and-resources.md#meters-loads-and-supplies-instrument-definitions)) all use one panel, built from the instrument's [definition file](04-technical-reference.md#instrument-definition-files-toml). Open one with *Auto-detect*, or choose it under **Model** (desktop) / **+ Add instrument → Meter / load / scope / SCPI…** (touch).
 
 The left column, top to bottom:
 
@@ -397,7 +397,7 @@ The right side has the **Trend**: one plot per reading, with a curve per output,
 
 ## Serial console panel (UART)
 
-Open `UART::/dev/ttyUSB0@115200` (or choose **Serial console** in **＋ Add instrument**). The **Console** shows what the DUT prints, with the app's time in front, the same clock as every other instrument's readings. Type in the bottom line and press Enter to send; **↑** brings back earlier lines. **Line end** is what is added to each line. **Pulse DTR** resets most boards (it is a reset line on Arduinos).
+Open `UART::/dev/ttyUSB0@115200` (or choose **Serial console** in **+ Add instrument**). The **Console** shows what the DUT prints, with the app's time in front, the same clock as every other instrument's readings. Type in the bottom line and press Enter to send; **↑** brings back earlier lines. **Line end** is what is added to each line. **Pulse DTR** resets most boards (it is a reset line on Arduinos).
 
 **Values in the text.** Each row turns printed text into a signal: a name, a [regular expression](https://docs.python.org/3/library/re.html#regular-expression-syntax) and a unit. The first `(group)` is the value (`vbat=([\d.]+)`; hex `0x…` works). A pattern without a group is 1 each time a line matches: name `panic`, pattern `PANIC|Guru Meditation`, and a watchdog rule `panic > 0.5` switches the DUT off. Values appear in the trend, the watchdog, math, **Measure**, CSV files and sessions.
 
@@ -740,7 +740,7 @@ If an output is on, the check stops before it sends anything. **■ Stop** switc
 
 ## Identify port
 
-When you don't know what is on a USB serial port, choose it and press **Identify…** in the toolbar (**Identify port…** in **＋ Add instrument**). The app listens first, then asks the ID or measurement question of each protocol it knows. It never sets anything, and only touches the port you chose. Don't use it on a port whose device could act on unexpected text (a DUT's command console, a 3D printer).
+When you don't know what is on a USB serial port, choose it and press **Identify…** in the toolbar (**Identify port…** in **+ Add instrument**). The app listens first, then asks the ID or measurement question of each protocol it knows. It never sets anything, and only touches the port you chose. Don't use it on a port whose device could act on unexpected text (a DUT's command console, a 3D printer).
 
 ## Production test
 
@@ -858,7 +858,7 @@ The API listens only on `127.0.0.1` (this computer), on port 8765 by default (`a
 
 ## Sessions: everything in one file
 
-**⏺ Record** in the top bar asks for a file name and then records, into one session file (`.otter`):
+**● Record** in the top bar asks for a file name and then records, into one session file (`.otter`):
 
 - every open instrument's readings, in the same columns as its CSV (the PPK2 as 1 ms average/min/max rows),
 - every logic-analyzer capture: the traces, the decoded table, and its time (to µs if it was aligned to a PPK2),
@@ -871,7 +871,7 @@ Instruments opened while recording join in. **■ Stop** closes the file and off
 
 ![Record dialog](images/record-mode.png)
 
-**⏺ Record** first asks what to keep:
+**● Record** first asks what to keep:
 
 - **Everything, from now until Stop**, as above.
 - **Only around events (flight recorder)**: readings are kept in memory and written only around an *event*, from **Keep before each event** seconds before it to **Keep after each event** seconds after. Everything else is dropped.
@@ -949,7 +949,7 @@ The buttons above the table:
 ### Current per radio packet, swept over supply voltage
 
 1. Open the PPK2 (source meter, DUT power on) and the logic analyzer. Wire the radio's "TX active" debug pin to analyzer D1 and PPK2 D1, and set **Align with PPK2** to D1 ↔ PPK2 D1.
-2. Press **⏺ Record** to keep everything in a session.
+2. Press **● Record** to keep everything in a session.
 3. In the sequencer: **Sweep x** from 1.8 to 3.6 step 0.2 with *Set PPK2 voltage x*, *Wait 1*, *Measure PPK2 current 5* (column `I_avg`), *Capture Logic*.
 4. Stop the session and open it: each capture sits on the current trace, and the results table gives the average current against voltage.
 
@@ -1106,7 +1106,7 @@ GPIO tabs have no Resume button: they retry by themselves every 5 s. As soon as 
 
 ## Touch screens
 
-On a touch screen (or any display of 1280×800 or smaller) the app uses a touch layout: larger controls, a numeric keypad for setpoints, two taps to turn an output on, and an **＋ Add instrument** dialog instead of the toolbar. See *Raspberry Pi & Touch Screen* for details.
+On a touch screen (or any display of 1280×800 or smaller) the app uses a touch layout: larger controls, a numeric keypad for setpoints, two taps to turn an output on, and an **+ Add instrument** dialog instead of the toolbar. See *Raspberry Pi & Touch Screen* for details.
 
 ## Keyboard and mouse reference
 

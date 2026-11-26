@@ -71,7 +71,7 @@ Every instrument has a simulator, so you can learn the app (or develop a sequenc
    - the average current **between** events, which is the true sleep current.
 6. Battery life ≈ capacity ÷ average current. For example, 220 mAh ÷ 21 µA ≈ 10,500 h ≈ 14 months. Then see which term dominates: sleep current × time, or events × charge. The **Histogram of Charge** shows whether some events cost much more than others.
 
-To keep a record, press **⏺ Record** before step 4. The session holds the trend, and the viewer's [cursors](03-users-guide.md#looking-through-a-session) can measure the charge over any stretch later.
+To keep a record, press **● Record** before step 4. The session holds the trend, and the viewer's [cursors](03-users-guide.md#looking-through-a-session) can measure the charge over any stretch later.
 
 ---
 
@@ -153,7 +153,7 @@ For a log sweep (e.g. load current from 1 µA to 100 mA), sweep `x` from `-6` to
 ## Find a DUT's brown-out voltage
 
 1. Open the supply powering the DUT, and something that shows the DUT is alive: a GPIO input on a heartbeat pin, or the logic analyzer, or just the supply's current.
-2. Start a session (**⏺ Record**) so that everything lands on one time axis.
+2. Start a session (**● Record**) so that everything lands on one time axis.
 3. Supply tab → **Profile**: **Vary** = voltage, profile `ramp 3.3..1.5 for=90 rate=10`. Turn the output on, then press **▶ Run profile**.
 4. Stop the session and open it. In the viewer, tick the supply's voltage and the alive signal (GPIO pin or current), turn on **Cursors**, and put A where the alive signal stops. **at A** for the voltage is the brown-out level.
 5. For the power-on threshold, run `ramp 1.5..3.3 for=90`. Use `steps 2.4..1.8 n=13 dwell=5` if the DUT needs time at each level to show the problem.
@@ -190,7 +190,7 @@ Alternatively, without the sequencer: generator **Profile** tab, **Vary** = freq
 With a supply and a load, **Tools ▾ → Regulator test…** does the whole sweep ([guide](03-users-guide.md#regulator-test)). By hand:
 
 1. 6632A → regulator input (tab named "in"). The 66321D, or a resistor with the 66321D measuring it, on the output (tab named "out").
-2. **Tools ▾ → Math channels → ＋ Channel**: name `eff`, expression `_66321d_out.power / _6632a_in.power * 100`, unit `%`. (The **Signals** list shows the exact names; double-click one to insert it.)
+2. **Tools ▾ → Math channels → + Channel**: name `eff`, expression `_66321d_out.power / _6632a_in.power * 100`, unit `%`. (The **Signals** list shows the exact names; double-click one to insert it.)
 3. Add `P_loss` = `_6632a_in.power - _66321d_out.power`, unit `W`.
 4. Vary the load and read `eff` live. For a curve, use the sequencer to sweep the load current and **Measure** the two powers, then compute the efficiency in a script with `bench.record(...)`.
 
@@ -200,7 +200,7 @@ With a supply and a load, **Tools ▾ → Regulator test…** does the whole swe
 
 ![Watchdog rules](images/watchdog.png)
 
-**Tools ▾ → Watchdog → ＋ Rule** for each case:
+**Tools ▾ → Watchdog → + Rule** for each case:
 
 | Protect against | Rule |
 |---|---|
@@ -309,7 +309,7 @@ Other tools can read the file too. It's SQLite: `sqlite3 run.otter "select * fro
 
 1. On the generator: **Utility → I/O → LAN**. Set a static IP (e.g. 192.168.1.50/24), or reserve one in your router, and make sure LAN/VXI-11 is enabled.
 2. From the computer, `ping 192.168.1.50` should answer.
-3. In the app, type `TCPIP::192.168.1.50::INSTR` into the **Resource** box, set **Model** to *Auto-detect* (or *Function generator*), and **Connect**. On a touch screen, use **＋ Add instrument → Type a resource…**.
+3. In the app, type `TCPIP::192.168.1.50::INSTR` into the **Resource** box, set **Model** to *Auto-detect* (or *Function generator*), and **Connect**. On a touch screen, use **+ Add instrument → Type a resource…**.
 4. The tab shows the generator's current settings and outputs, read from it. Nothing is changed by connecting.
 5. To have it open at every start, connect it once (`open = "last"` remembers it), or add it to `config.toml`:
 
@@ -447,7 +447,7 @@ Measure a battery's capacity at constant current, stopping at its cut-off voltag
 1. Connect the battery to the load's input (short, thick leads; the load's sense leads to the battery terminals if it has them). Open the load: `SIM::DL3021` to practise.
 2. On the load's tab: **Mode** CC, **CC current** `0.5` A (C/5 for a 2.5 Ah cell).
 3. **Tools ▾ → Watchdog**: *DL3021 · voltage < `3.0` for `2000` ms → **turn off** DL3021*. The hold time stops a brief dip under load from ending the test early.
-4. **⏺ Record** a session (everything), then switch **Input** on.
+4. **● Record** a session (everything), then switch **Input** on.
 5. When it trips, open the session: put cursor **A** at the start and **B** at the trip, and the table gives the **charge** in C (÷ 3600 = Ah) and, with a [math channel](03-users-guide.md#math-channels) `dl3021.voltage * dl3021.current` integrated, the energy in Wh.
 
 For a constant-power discharge (closer to a real DUT), use **Mode** CP instead.
@@ -460,7 +460,7 @@ A rail occasionally dips, and you want to see the waveform when it does.
 
 1. Open the scope and the supply or PPK2 that powers the DUT. On the scope, set the channel on the rail, a timebase that shows the event (e.g. 100 µs/div), and a trigger on that channel *falling* below the dip level, **sweep normal**.
 2. **Tools ▾ → Watchdog**: *PPK2 · current > `30m` for `0.1` ms → **capture**, **Which** = the scope, **Re-arm (s)** `10`*. Each spike makes the scope capture; the rule re-arms itself 10 s later for the next one.
-3. **⏺ Record** with **Only around events**, keep `5` s before and after. Leave it running.
+3. **● Record** with **Only around events**, keep `5` s before and after. Leave it running.
 4. Afterwards, open the session: every capture is a lane at its moment, with the PPK2's current around it, and nothing else filled the file.
 
 The scope can also be triggered directly by its own trigger: **Single → capture** arms it and waits.
@@ -550,7 +550,7 @@ An unattended sweep or soak test should survive a crash, a power blip, or a knoc
    - *Reconnect automatically*,
    - *After a crash, resume a running sequence* (if the sequence should carry on rather than stop safely),
    - and set a **heartbeat pin** if you have an external watchdog circuit ([wiring](05-raspberry-pi.md#unattended-bench)).
-3. **Record only what matters**: **⏺ Record → Only around events**, keep 30 s before and 10 s after. Add watchdog rules with **mark session** for the things you want to catch (*current > 20m → mark session*, re-arm after 60 s).
+3. **Record only what matters**: **● Record → Only around events**, keep 30 s before and 10 s after. Add watchdog rules with **mark session** for the things you want to catch (*current > 20m → mark session*, re-arm after 60 s).
 4. **Start the app so it restarts itself**: `./run.sh --restart-on-crash` (the Pi's autostart already does this).
 5. Start the sequence and leave.
 

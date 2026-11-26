@@ -34,6 +34,8 @@ PLOT_BG = FIELD
 
 
 def _icon(name: str) -> str:
+    """A PNG (scripts/make_icons.py renders them from the SVGs): Qt draws SVG
+    only with its SVG plugin, which the Pi lacks, and then shows nothing."""
     return (ICONS / name).as_posix()
 
 
@@ -85,12 +87,12 @@ def stylesheet() -> str:
         color:{DIM}; }}
     QSpinBox::up-button, QDoubleSpinBox::up-button, QSpinBox::down-button,
     QDoubleSpinBox::down-button {{ border:none; background:transparent; width:16px; }}
-    QSpinBox::up-arrow, QDoubleSpinBox::up-arrow {{ image:url({_icon('up.svg')});
+    QSpinBox::up-arrow, QDoubleSpinBox::up-arrow {{ image:url({_icon('up.png')});
                                                    width:10px; height:10px; }}
-    QSpinBox::down-arrow, QDoubleSpinBox::down-arrow {{ image:url({_icon('down.svg')});
+    QSpinBox::down-arrow, QDoubleSpinBox::down-arrow {{ image:url({_icon('down.png')});
                                                        width:10px; height:10px; }}
     QComboBox::drop-down {{ border:none; width:22px; }}
-    QComboBox::down-arrow {{ image:url({_icon('down.svg')}); width:12px; height:12px; }}
+    QComboBox::down-arrow {{ image:url({_icon('down.png')}); width:12px; height:12px; }}
     QComboBox QAbstractItemView {{ background:{RAISED}; border:1px solid {LINE_HI};
         selection-background-color:{ACCENT_DIM}; selection-color:#ffffff; outline:0; }}
 
@@ -99,7 +101,7 @@ def stylesheet() -> str:
                             border-radius:4px; background:{FIELD}; }}
     QCheckBox::indicator:hover {{ border-color:{ACCENT}; }}
     QCheckBox::indicator:checked {{ background:{ACCENT}; border-color:{ACCENT};
-                                    image:url({_icon('check.svg')}); }}
+                                    image:url({_icon('check.png')}); }}
     QCheckBox::indicator:disabled {{ background:#15181d; border-color:#22262d; }}
 
     QRadioButton {{ spacing:8px; background:transparent; }}
@@ -119,8 +121,8 @@ def stylesheet() -> str:
     QTabWidget#instruments > QTabBar::tab {{ font-weight:600; padding:8px 16px; }}
     QTabWidget#instruments > QTabBar::tab:selected {{ background:{SURFACE};
         border-top-left-radius:8px; border-top-right-radius:8px; }}
-    QTabBar::close-button {{ image:url({_icon('close.svg')}); subcontrol-position:right; }}
-    QTabBar::close-button:hover {{ image:url({_icon('close-hover.svg')}); }}
+    QTabBar::close-button {{ image:url({_icon('close.png')}); subcontrol-position:right; }}
+    QTabBar::close-button:hover {{ image:url({_icon('close-hover.png')}); }}
 
     /* tables, lists */
     QTableWidget, QTableView, QListWidget, QTreeWidget {{ background:{FIELD};

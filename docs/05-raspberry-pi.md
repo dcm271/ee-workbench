@@ -105,7 +105,7 @@ By default the app reopens whatever was open last time, and waits up to 30 s at 
 | Action | How |
 |---|---|
 | Start full screen | `./run.sh --fullscreen` (the launcher does this) |
-| Leave / re-enter full screen | **⛶** in the top bar, or **F11** |
+| Leave / re-enter full screen | the **full-screen button** (four corners) in the top bar, or **F11** |
 | Quit | **✕** at the top right (only shown in full screen), then confirm |
 | Hide the mouse pointer | `./run.sh --fullscreen --hide-cursor` (for touch-only setups) |
 
@@ -139,7 +139,7 @@ What's different from the desktop layout:
   ![Capture tab on the touch screen](images/touch-capture.png)
 
 - **Plots don't pan or zoom** under a finger, except the supply's Trend: there a drag scrolls through time (**▶ Live** comes back), a drag on an axis moves that axis, and **T− T+ Y− Y+** zoom. Elsewhere the **Span** selector sets the time window, and Y always autoscales. Scroll areas scroll by dragging.
-- **＋ Add instrument** replaces the connection toolbar. It scans the GPIB bus when it opens and lists what it finds plus the simulators. Pick one (or enter a GPIB address with the keypad, or **Type a resource…** for a LAN or USB instrument such as a function generator), choose the model, then tap **Connect**. For the 3456A, tap the **3456A DMM** model button, because the meter can't identify itself. For a SCPI meter, load, supply or oscilloscope, **Auto-detect** usually finds it; otherwise tap **Meter / load / scope / SCPI…** and pick it from the list.
+- **+ Add instrument** replaces the connection toolbar. It scans the GPIB bus when it opens and lists what it finds plus the simulators. Pick one (or enter a GPIB address with the keypad, or **Type a resource…** for a LAN or USB instrument such as a function generator), choose the model, then tap **Connect**. For the 3456A, tap the **3456A DMM** model button, because the meter can't identify itself. For a SCPI meter, load, supply or oscilloscope, **Auto-detect** usually finds it; otherwise tap **Meter / load / scope / SCPI…** and pick it from the list.
 
   ![Add instrument](images/touch-connect.png)
 
@@ -155,7 +155,7 @@ Typing is still available where it makes sense: channel names and the console us
 
 ## The GPIO header
 
-On the Pi, the 40-pin header is an instrument too: it appears in the resource list (and **＋ Add instrument**) as `GPIO::/dev/gpiochip0`. Open it and the [GPIO tab](03-users-guide.md#gpio-panel-raspberry-pi-header) lists every usable pin by GPIO number and physical pin. Set the pins you use to Output or Input, give them names (`relay`, `reset`, `done`), and the sequencer, the watchdog, scripts and the Remote API can use them by name. It's how a Pi bench controller power-cycles a DUT with a relay board, presses its buttons, and waits for it to finish booting.
+On the Pi, the 40-pin header is an instrument too: it appears in the resource list (and **+ Add instrument**) as `GPIO::/dev/gpiochip0`. Open it and the [GPIO tab](03-users-guide.md#gpio-panel-raspberry-pi-header) lists every usable pin by GPIO number and physical pin. Set the pins you use to Output or Input, give them names (`relay`, `reset`, `done`), and the sequencer, the watchdog, scripts and the Remote API can use them by name. It's how a Pi bench controller power-cycles a DUT with a relay board, presses its buttons, and waits for it to finish booting.
 
 `setup-pi.sh` installs `python3-libgpiod` and adds you to the `gpio` group; nothing else is needed. The pin map, electrical limits (**3.3 V only, never 5 V**) and wiring for relays, buttons and resets are in [Hardware → Raspberry Pi GPIO header](01-hardware-and-resources.md#raspberry-pi-gpio-header); a worked example is in [How-to guides](06-howtos.md#power-cycle-a-dut-with-a-relay-and-check-it-boots).
 
@@ -198,7 +198,7 @@ The touch layout needs about 1180×460 pixels. Smaller screens (an 800×480 pane
 | Panel PC with its maker's own kernel (e.g. EDATec, `uname -r` without `+rpt`) | Nothing to do: when no headers package exists for the running kernel, `install-gpib-driver.sh` prepares a matching kernel tree itself (`scripts/prepare-kernel-tree.sh`). It downloads the kernel source (about 230 MB), configures it with `/boot/config-$(uname -r)`, and takes the symbol checksums from the modules already installed, so the driver loads on that exact kernel. It takes a few minutes and keeps the tree in `~/kbuild` (about 1.5 GB) for re-runs; delete it once the driver works if you need the space. Don't install the stock Raspberry Pi kernel on such a unit: the maker's kernel carries its display and touch drivers. |
 | "the linux-gpib library is not installed" | The install script didn't finish. Run `./scripts/install-gpib-driver.sh` and read its messages: since the library is installed even when the kernel driver can't be built, the app starts either way, but the adapter only works once the driver builds. |
 | Adapter found but "permission denied" on `/dev/gpib0` | Log out and back in (or reboot) after the install, so your account picks up the `gpib` group. |
-| Taskbar or title bar still showing | The app was started without `--fullscreen` (e.g. `./run.sh` from a terminal). Tap **⛶** or press F11. The menu entry and autostart launcher start full screen. |
+| Taskbar or title bar still showing | The app was started without `--fullscreen` (e.g. `./run.sh` from a terminal). Tap the full-screen button (four corners) or press F11. The menu entry and autostart launcher start full screen. |
 | Window opens but looks tiny or huge | Check **Screen Configuration** in the Pi menu is at 1280×800. Qt follows the desktop's scale setting. |
 | `qt.qpa.plugin: Could not load the Qt platform plugin "wayland"` | `sudo apt install qt6-wayland`, or run with `QT_QPA_PLATFORM=xcb`. |
 | Touches land in the wrong place | Use the Pi's **Screen Configuration → Touchscreen** to map the touch device to the right display. |

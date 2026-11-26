@@ -330,7 +330,7 @@ class SequencerWindow(QMainWindow):
         self.table.verticalHeader().setDefaultSectionSize(40 if touch.TOUCH else 30)
         v.addWidget(self.table, 1)
         row = QHBoxLayout()
-        for text, fn in (("＋ Step", self.add_step), ("Remove", self.remove_step),
+        for text, fn in (("+ Step", self.add_step), ("Remove", self.remove_step),
                          ("▲", lambda: self.move_step(-1)), ("▼", lambda: self.move_step(1)),
                          ("Load…", self.load_dialog), ("Save…", self.save_dialog)):
             b = QPushButton(text)

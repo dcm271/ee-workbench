@@ -59,7 +59,7 @@ class WatchdogWindow(QMainWindow):
         self.armed.setChecked(hub.watchdog.armed)
         self.armed.toggled.connect(self._armed_toggled)
         top.addWidget(self.armed)
-        for text, fn in (("＋ Rule", self.add_rule), ("Remove", self.remove_rule),
+        for text, fn in (("+ Rule", self.add_rule), ("Remove", self.remove_rule),
                          ("Re-arm tripped", self.rearm)):
             b = QPushButton(text)
             b.clicked.connect(fn)

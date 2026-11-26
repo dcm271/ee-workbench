@@ -45,7 +45,7 @@ class MathWindow(QMainWindow):
         central = QWidget()
         v = QVBoxLayout(central)
         top = QHBoxLayout()
-        for text, fn in (("＋ Channel", self.add_channel), ("Remove", self.remove_channel),
+        for text, fn in (("+ Channel", self.add_channel), ("Remove", self.remove_channel),
                          ("Reset totals", self.reset_totals)):
             b = QPushButton(text)
             b.clicked.connect(fn)

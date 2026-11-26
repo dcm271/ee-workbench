@@ -123,7 +123,7 @@ class GpioPanel(PanelBase):
             gl = QLabel(f"  GPIO{g}")
             if g in NOTES:
                 gl.setToolTip(NOTES[g])
-                gl.setText(f"  GPIO{g} ⓘ")
+                gl.setText(f"  GPIO{g} ℹ")
             self.table.setCellWidget(r, 0, gl)
             pin = QLabel(f"  {HEADER.get(g, '')}")
             pin.setStyleSheet(f"color:{C_MUTED};")
