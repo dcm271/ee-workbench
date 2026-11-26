@@ -6,7 +6,7 @@ A Linux desktop app (PyQt6) for controlling, logging and automating a bench of t
 
 | Instrument | Support |
 |---|---|
-| Agilent 66309B / 66309D dual DC source | As the 66311B below, plus output 2 (only its readings tried on hardware) |
+| Agilent 66309B / 66309D dual DC source | As the 66311B below, plus output 2 (output 2's readings tried on hardware, its switching not yet) |
 | Agilent 66321D / 66321B / 66311B DC source | Setpoints, protection, output resistance, DVM, pulse statistics; triggered waveform capture with cursors and automatic measurements; battery-life, battery-emulator, sequencer and I-V tests; rear port, display, saved setups, self-test |
 | HP 6632A / 6633A / 6634A DC supply | Setpoints, OVP/OCP, readback, status |
 | B&K Precision 393 / 393B handheld DMMs | Read-only over USB: reading, function, HOLD/MAX/REL, second display, statistics, CSV |

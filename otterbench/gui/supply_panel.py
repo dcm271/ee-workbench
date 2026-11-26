@@ -2,16 +2,14 @@
 output (66309 / 66319) gets a column of its own beside the first."""
 from __future__ import annotations
 
-import csv
 import time
 
 import numpy as np
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QFont
-from PyQt6.QtWidgets import (QCheckBox, QComboBox, QFileDialog, QFormLayout, QFrame,
-                             QGridLayout, QGroupBox, QHBoxLayout, QLabel, QMessageBox,
-                             QPushButton, QScrollArea, QSpinBox, QSplitter, QTabWidget,
-                             QVBoxLayout, QWidget)
+from PyQt6.QtWidgets import (QCheckBox, QComboBox, QFormLayout, QGridLayout, QGroupBox,
+                             QHBoxLayout, QLabel, QMessageBox, QPushButton, QSpinBox,
+                             QSplitter, QTabWidget, QVBoxLayout, QWidget)
 
 from .trend_view import Axis, Trace, TrendView
 from ..sequencer import OUT2_SET

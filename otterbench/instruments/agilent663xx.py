@@ -19,7 +19,8 @@ GPIB-USB-HS:
     an open sense lead shows up as the SD bit of the questionable register.
 
 The 66309B/D (66111A-66311B/D-66309B/D User's Guide; every query checked on a
-66309B fw A.02.04, switching and setting not yet) adds
+66309B fw A.02.04; output 1 switched with the outputs separate, and the
+current ranges set; output 2 switching and coupling not yet) adds
 an isolated output 2, 12 V / 1.5 A: VOLT2, CURR2, MEAS:VOLT2?, MEAS:CURR2?.
   * Its outputs are coupled at power-on: OUTP switches both. From fw A.02.04
     INST:COUP:OUTP:STAT NONE separates them; a plain OUTP is then output 1 only.

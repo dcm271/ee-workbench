@@ -14,7 +14,7 @@ This guide lists the hardware OtterBench supports, what each instrument can do f
 | Item | Role | Interface | Status in OtterBench |
 |---|---|---|---|
 | **Agilent 66321D** Mobile Communications DC Source | Main supply with DVM input | GPIB (and RS-232) | **Fully supported**. Tested on real hardware (fw A.03.01) |
-| **Agilent 66309B / 66309D** | Dual output: the same main output, plus an isolated 12 V / 1.5 A output 2 (D: DVM too) | GPIB only | Supported by the same driver, [output 2 included](#agilent-66309b-66309d-dual-output). Readings checked on a 66309B (fw A.02.04); setting and switching tested on the simulator |
+| **Agilent 66309B / 66309D** | Dual output: the same main output, plus an isolated 12 V / 1.5 A output 2 (D: DVM too) | GPIB only | Supported by the same driver, [output 2 included](#agilent-66309b-66309d-dual-output). Readings, output 1 switching and current ranges checked on a 66309B (fw A.02.04); output 2 switching and coupling tested on the simulator only |
 | Agilent 66311B / 66321B | Same family without DVM | GPIB / RS-232 | Supported by the same driver; DVM hidden if absent |
 | **HP 6632A** System DC Power Supply (also 6633A, 6634A) | Second supply, 20 V / 5 A | GPIB only | Supported. Written from the manual and tested on the simulator |
 | **HP 3456A** 6½-digit DMM | Precision voltage / resistance | GPIB only | Supported. Written from the manual and tested on the simulator |
@@ -42,13 +42,13 @@ Every instrument below has a simulator, so its tab, the sequencer, the watchdog 
 - **Tested**: used with the real instrument (model and firmware noted).
 - **Simulator**: written from the maker's programming manual and checked against a simulator that follows that manual. It should work; if it doesn't, the tab's **Console** shows each command and its answer, and fixing it is usually a one-line change to a definition file. Please report what you find, with the instrument's `*IDN?` answer.
 
-**Auto-detect** means *Model: Auto-detect* in the toolbar recognises it from its `*IDN?` answer and opens the right tab. Otherwise choose the model by hand (the **Meter / load / scope / SCPI…** entry in the **＋ Add instrument** dialog, or the Model list).
+**Auto-detect** means *Model: Auto-detect* in the toolbar recognises it from its `*IDN?` answer and opens the right tab. Otherwise choose the model by hand (the **Meter / load / scope / SCPI…** entry in the **+ Add instrument** dialog, or the Model list).
 
 ### Supplies, meters, profiler, logic, generators (built-in drivers)
 
 | Instrument | Model key | Auto-detect | Status | Simulator |
 |---|---|---|---|---|
-| Agilent 66309B, 66309D | `66309B` | yes | Simulator; readings tested (66309B, fw A.02.04) | `SIM::66309B` |
+| Agilent 66309B, 66309D | `66309B` | yes | Simulator; readings, output 1 switching and current ranges tested (66309B, fw A.02.04) | `SIM::66309B` |
 | Agilent 66321D, 66321B, 66311B | `66321D` | yes | Tested (66321D, fw A.03.01) | `SIM::66321D` |
 | HP 6632A, 6633A, 6634A | `6632A` | yes (`ID?`) | Simulator | `SIM::6632A` |
 | HP 3456A | `3456A` | **no**: choose by hand (it doesn't answer `*IDN?`) | Simulator | `SIM::3456A` |

@@ -302,7 +302,7 @@ Not available on fw A.03.01, so not offered: long integration, DVM arrays (`FETC
 
 ### Output 2 (66309B / 66309D)
 
-Written from the 66111A / 66311B/D / 66309B/D User's Guide. Every query was checked on a 66309B (fw A.02.04) with its outputs off; setting and switching have not been tried on hardware.
+Written from the 66111A / 66311B/D / 66309B/D User's Guide. Every query was checked on a 66309B (fw A.02.04). Output 1 has been switched off and on with the outputs separate (`INST:COUP:OUTP:STAT NONE`), and the current ranges set; switching output 2, and coupling and separating them, have not been tried on hardware.
 
 | What | Commands |
 |---|---|
