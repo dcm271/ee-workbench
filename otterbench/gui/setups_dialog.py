@@ -28,6 +28,7 @@ def capture_bench(main) -> dict:
             "watchdog": hub.watchdog.to_list(),
             "watchdog_armed": hub.watchdog.armed,
             "math": [c.to_dict() for c in hub.math.channels],
+            "nicknames": dict(hub.monitor.nicknames),
             "wiring": wiring.current().to_dict()}
 
 
@@ -76,6 +77,8 @@ def apply_bench(main, d: dict) -> list[str]:
     problems += hub.watchdog.load(d.get("watchdog", []))
     hub.watchdog.armed = bool(d.get("watchdog_armed", True))
     hub.math.channels = Channel.load_list(d.get("math", []))
+    if "nicknames" in d:              # older setups have none: keep the current ones
+        hub.monitor.load_nicknames(d.get("nicknames"))
     for attr in ("wd_win", "math_win"):
         w = getattr(main, attr, None)
         if w is not None:            # rebuilt with the new rules / channels next time

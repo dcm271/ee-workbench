@@ -5,7 +5,7 @@ subtitle: Every panel, control and workflow
 
 # User's Guide
 
-**Contents:** [Starting up](#starting-up) · [66321D supply](#power-supply-panel-agilent-66321d) · [6632A supply](#power-supply-panel-hp-6632a) · [3456A DMM](#multimeter-panel-hp-3456a) · [PPK2](#power-profiler-panel-nordic-ppk2) · [Logic analyzers](#logic-analyzer-panel-saleae-and-sigrok) · [Function generator](#function-generator-panel) · [GPIO](#gpio-panel-raspberry-pi-header) · [Meters, loads, supplies (SCPI)](#meter-load-and-supply-panel-scpi) · [Oscilloscope](#oscilloscope-panel) · [Several of one instrument](#several-of-the-same-instrument) · [Profiles](#profiles-varying-a-setpoint-over-time) · [PPK2 events](#ppk2-events-tab) · [Sequencer & limits](#sequencer) · [Watchdog](#watchdog) · [Math channels](#math-channels) · [Reports](#reports) · [Production test](#production-test) · [Safety & unattended runs](#safety-and-unattended-runs) · [Setups](#setups-the-whole-bench-by-name) · [Remote API](#remote-api-python-and-jupyter) · [Sessions](#sessions-everything-in-one-file) · [Workflows](#workflows) · [CSV formats](#csv-formats) · [Simulators](#simulators) · [Start-up](#instruments-at-start-up) · [When something goes wrong](#when-something-goes-wrong) · [Keys](#keyboard-and-mouse-reference)
+**Contents:** [Starting up](#starting-up) · [66321D supply](#power-supply-panel-agilent-66321d) · [6632A supply](#power-supply-panel-hp-6632a) · [3456A DMM](#multimeter-panel-hp-3456a) · [PPK2](#power-profiler-panel-nordic-ppk2) · [Logic analyzers](#logic-analyzer-panel-saleae-and-sigrok) · [Function generator](#function-generator-panel) · [GPIO](#gpio-panel-raspberry-pi-header) · [Meters, loads, supplies (SCPI)](#meter-load-and-supply-panel-scpi) · [Oscilloscope](#oscilloscope-panel) · [Several of one instrument](#several-of-the-same-instrument) · [Profiles](#profiles-varying-a-setpoint-over-time) · [PPK2 events](#ppk2-events-tab) · [Sequencer & limits](#sequencer) · [Watchdog](#watchdog) · [Monitor](#monitor-everything-that-is-on-on-one-page) · [Math channels](#math-channels) · [Reports](#reports) · [Production test](#production-test) · [Safety & unattended runs](#safety-and-unattended-runs) · [Setups](#setups-the-whole-bench-by-name) · [Remote API](#remote-api-python-and-jupyter) · [Sessions](#sessions-everything-in-one-file) · [Workflows](#workflows) · [CSV formats](#csv-formats) · [Simulators](#simulators) · [Start-up](#instruments-at-start-up) · [When something goes wrong](#when-something-goes-wrong) · [Keys](#keyboard-and-mouse-reference)
 
 Step-by-step recipes for common jobs are in [How-to guides](06-howtos.md).
 
@@ -26,6 +26,7 @@ The **toolbar** along the top is always visible:
 | **Baud** | Appears only for serial (`ASRL…`) resources. |
 | **Connect** | Opens the instrument in a new tab. |
 | **● Record** / **✎ Note** | Record a [session](#sessions-everything-in-one-file), everything or [only around events](#only-around-events-the-flight-recorder); put a note into it (Ctrl+M). |
+| **Monitor** | Everything that is on, from every open instrument, on [one page](#monitor-everything-that-is-on-on-one-page), with nicknames. |
 | **Tools ▾** | [Sequencer](#sequencer), [Watchdog](#watchdog), [Math channels](#math-channels), [Production test](#production-test), [Safety](#safety-and-unattended-runs), [Setups](#setups-the-whole-bench-by-name), open a session in the [viewer](#looking-through-a-session), a [session report](#reports), and the [Remote API](#remote-api-python-and-jupyter) switch. |
 | **All outputs OFF (Esc)** | Turns off every output: supplies (including every output of a multi-output SCPI supply), electronic-load inputs, PPK2 DUT power, function-generator channels and GPIO outputs. It also stops a running sequence, profile or remote-API call. |
 
@@ -631,6 +632,20 @@ The limit is set when the rule is armed, when the supply's tab connects (or reco
 
 The rules are kept between runs and saved in [setups](#setups-the-whole-bench-by-name). They work only while the instrument's tab is open and reading (a PPK2 must be running).
 
+## Monitor: everything that is on, on one page
+
+![Monitor](images/monitor.png)
+
+**Monitor** (in the top bar, and under **Tools ▾**) puts every reading from every open instrument on one page, while it is on: a supply's voltage, current and power while its output is on (output 2 of a 66309B counts on its own switch), and a meter's, PPK2's, SCPI instrument's or GPIO pin's readings while they keep coming. Switch an output on and its row appears; switch it off and the row goes. **Show → Everything open** lists the rest too, marked *off* (output off) or *—* (no readings for 5 s).
+
+For each signal the table gives the value **Now**, and the **Average**, **Min** and **Max** over the time the chart shows, so zooming the chart in to the last 10 s gives the figures for those 10 s.
+
+**Nicknames.** With several instruments on one page, "66309B · current2" and "XDM1041 · value" soon get hard to keep apart. Double-click (or tap twice) the **Nickname** cell and type what it is, *DUT 3V3 rail* or *battery current*; Enter keeps it, and an empty nickname goes back to the instrument's name. The nickname names that signal here and in the chart's **View ▾** list. It is kept between runs and in [setups](#setups-the-whole-bench-by-name), and belongs to the signal's identifier (`_66309b.current2`, shown when you hold the pointer over it), so it follows the instrument's tab name: rename the tab and the old nickname no longer applies.
+
+**The chart** has one axis for each unit, so the volts of a supply and a meter share an axis, and amps from a supply and a PPK2 another. Each trace has the colour of its row in the table. **View ▾** hides traces or splits the chart into one per unit; the zoom buttons, the mouse wheel and dragging work as on a [supply's Trend](#trend-tab), and **▶ Live** follows the newest readings again. A PPK2's 100 kS/s current is shown as one point per block it sends (its average), so the page stays quick; its own tab still has every sample.
+
+Double-click a signal's name to go to its instrument's tab. The monitor keeps up to an hour of each signal while the app runs, from the moment the instrument's tab opened, whether or not the page is shown.
+
 ## Math channels
 
 ![Math channels](images/math.png)
@@ -819,7 +834,8 @@ Choose a **GPIO tab** and an **output pin** on it (set it up as an output on tha
 - which instruments are open, and each tab's settings (names, DMM function and range, decoders and alignment, PPK2 mode, GPIO pin modes and names …),
 - the sequence (steps, limits, sweep, script),
 - the watchdog rules,
-- the math channels, and
+- the math channels,
+- the [monitor](#monitor-everything-that-is-on-on-one-page)'s nicknames, and
 - the [wiring notes](#wiring-notes).
 
 **Save current as…** asks for a name and an optional description. **Recall** (or double-click) closes the open tabs and opens the setup's. **Export… / Import…** move a setup to another computer as a JSON file. Setups live in `~/.config/otterbench/setups/`.

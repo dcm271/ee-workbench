@@ -37,6 +37,7 @@ Across instruments:
 - **Profiles.** Vary any supply, PPK2 or generator setpoint over time (sine, triangle, square, ramp, steps, log steps, a list, or a CSV), for battery curves, brown-out tests and frequency sweeps.
 - **Watchdog.** Rules across instruments: *PPK2 current > 50 mA for 10 ms → all outputs off*, *rail < 2.9 V → generator off*, *e-stop pin low → stop the sequence*, *current spike → capture on the scope*. **In HW** also sets a supply's own OVP / current limit from the rule, so the DUT stays protected even if the computer stops.
 - **PPK2 event finder.** Every current burst with its duration, peak and charge, histograms, the sleep current between bursts, and the decoded bus traffic during each burst.
+- **Monitor.** Every output that is on, from every instrument, on one page: values now, average / min / max over what the chart shows, one chart with an axis per unit, and nicknames (*DUT 3V3 rail*) for each signal.
 - **Math channels.** Live expressions such as `_66321d_out.power / _6632a_in.power * 100` (efficiency) or integrated energy, plotted and recorded. They work in the session viewer too.
 - **Bode plots.** Gain and phase with any supported generator and scope: −3 dB points, phase and gain margins, reference sweep.
 - **Regulator test.** Input voltage × load sweeps with a supply and a load: efficiency, losses, line and load regulation, pass / fail, report.

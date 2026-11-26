@@ -80,6 +80,7 @@ class TrendView(QWidget):
         self.boxes: dict[str, pg.ViewBox] = {}      # axis key -> its view box
         self._extra: list[pg.ViewBox] = []          # one chart: the other axes' boxes
         self._last: tuple | None = None
+        self.legend = True              # in the one-chart layout
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
         self.glw = pg.GraphicsLayoutWidget()
@@ -123,6 +124,20 @@ class TrendView(QWidget):
             self.shown[key] = on
             self.rebuild()
             self.changed.emit()
+
+    def set_traces(self, axes: list[Axis], traces: list[Trace]):
+        """New axes and traces (the monitor's come and go). Shown / hidden
+        choices are kept for the traces that stay; rebuilt only on a change."""
+        sig = ([(a.key, a.label, a.unit, a.color) for a in axes],
+               [(t.key, t.label, t.axis, t.color, t.style, t.width) for t in traces])
+        if sig == getattr(self, "_sig", None):
+            return
+        self._sig = sig
+        self.axes = {a.key: a for a in axes}
+        self.traces = {t.key: t for t in traces}
+        self.shown = {t.key: self.shown.get(t.key, t.shown) for t in traces}
+        self.available = set(self.traces)
+        self.rebuild()
 
     def set_available(self, keys):
         keys = set(keys) & set(self.traces)
@@ -207,7 +222,8 @@ class TrendView(QWidget):
         p = self._plot(0)
         p.setLabel("bottom", "Time", units="s")
         main = p.getViewBox()
-        legend = p.addLegend(offset=(10, 5), labelTextSize="8pt", colCount=3)
+        legend = p.addLegend(offset=(10, 5), labelTextSize="8pt", colCount=3) \
+            if self.legend else None
         extra = []
         for n, key in enumerate(axes):
             a = self.axes[key]
@@ -238,7 +254,8 @@ class TrendView(QWidget):
                     c.setClipToView(True)
                     c.setDownsampling(auto=True, method="peak")
                     vb.addItem(c)
-                    legend.addItem(c, t.label)
+                    if legend is not None:
+                        legend.addItem(c, t.label)
                     self.curves[k] = c
 
         def follow():
@@ -255,14 +272,18 @@ class TrendView(QWidget):
 
     # ---- data ------------------------------------------------------------------
     def set_data(self, t, cols: dict):
-        """`cols`: trace key -> values, as long as `t`. Gaps (NaN) break the line."""
+        """`cols`: trace key -> values, as long as `t`, or a (times, values)
+        pair of its own. Gaps (NaN) break the line."""
         self._last = (t, cols)
         for k, c in self.curves.items():
             y = cols.get(k)
-            if y is None or not np.isfinite(y).any():
+            tt = t
+            if isinstance(y, tuple):
+                tt, y = y
+            if y is None or not len(y) or not np.isfinite(y).any():
                 c.setData([], [])
             else:
-                c.setData(t, y, connect="finite")
+                c.setData(tt, y, connect="finite")
 
     def window(self) -> tuple[float, float] | None:
         """The time shown."""

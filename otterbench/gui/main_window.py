@@ -170,12 +170,13 @@ class MainWindow(QMainWindow):
             return
         from ..mathchannels import Channel
         prefs = {k: d.get(k) for k in ("recording", "safety", "production", "bode",
-                                         "regulator", "battery", "metercheck")
+                                         "regulator", "battery", "metercheck", "monitor")
                  if isinstance(d.get(k), dict)}
         self.prefs.update(prefs)
         bad = hub.watchdog.load(d.get("watchdog", []))
         hub.watchdog.armed = bool(d.get("watchdog_armed", True))
         hub.math.channels = Channel.load_list(d.get("math", []))
+        hub.monitor.load_nicknames(d.get("nicknames"))
         if bad:
             self._bench_warning = "Skipped damaged watchdog rules: " + "; ".join(bad)
             crash.write_log(self._bench_warning)
@@ -184,7 +185,8 @@ class MainWindow(QMainWindow):
         import json
         import os
         d = {"watchdog": hub.watchdog.to_list(), "watchdog_armed": hub.watchdog.armed,
-             "math": [c.to_dict() for c in hub.math.channels], **self.prefs}
+             "math": [c.to_dict() for c in hub.math.channels],
+             "nicknames": dict(hub.monitor.nicknames), **self.prefs}
         from ..config import json_default
         p = self._bench_file()
         try:
@@ -234,8 +236,15 @@ class MainWindow(QMainWindow):
         self.note_btn.clicked.connect(self.add_note)
         self.note_btn.setEnabled(False)
         lay.addWidget(self.note_btn)
+        mon = QPushButton("Monitor")
+        mon.setToolTip("Every output that is on, from every instrument, on one page: "
+                       "values now, a chart, and nicknames")
+        mon.clicked.connect(self.show_monitor)
+        lay.addWidget(mon)
         tools = QPushButton("Tools ▾")
         menu = QMenu(tools)
+        menu.addAction("Monitor…  (everything that is on, one page, with nicknames)",
+                       self.show_monitor)
         menu.addAction("Sequencer…  (steps or a script, with pass / fail limits)",
                        self.show_sequencer)
         menu.addAction("Watchdog…  (switch outputs off when a limit is crossed)",
@@ -276,7 +285,7 @@ class MainWindow(QMainWindow):
         self.tools_btn = tools
         lay.addWidget(tools)
         if wide:
-            for b in (self.sess_btn, self.note_btn, tools):
+            for b in (self.sess_btn, self.note_btn, mon, tools):
                 b.setMinimumHeight(44)
 
     def toggle_session(self, on: bool):
@@ -418,6 +427,10 @@ class MainWindow(QMainWindow):
         if touch.TOUCH:
             w.showMaximized()
         return w
+
+    def show_monitor(self):
+        from .monitor_window import MonitorWindow
+        return self._tool("mon_win", lambda: MonitorWindow(self))
 
     def show_math(self):
         from .math_window import MathWindow
