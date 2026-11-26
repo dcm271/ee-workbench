@@ -6,6 +6,7 @@ import math
 import time
 
 import numpy as np
+import pyqtgraph as pg
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QColor, QFont, QPalette
 from PyQt6.QtWidgets import (QApplication, QDoubleSpinBox, QFileDialog, QLabel, QMessageBox,
@@ -328,7 +329,7 @@ class SteadyY:
     EASE = 0.15         # fraction of the remaining shrink done per update
 
     def __init__(self, plot):
-        self.vb = plot.getViewBox()
+        self.vb = plot if isinstance(plot, pg.ViewBox) else plot.getViewBox()
         self.auto = True
         self.range: list[float] | None = None
         self._shrinking = False

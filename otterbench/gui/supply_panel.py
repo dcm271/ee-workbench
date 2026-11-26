@@ -6,7 +6,6 @@ import csv
 import time
 
 import numpy as np
-import pyqtgraph as pg
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import (QCheckBox, QComboBox, QFileDialog, QFormLayout, QFrame,
@@ -14,7 +13,7 @@ from PyQt6.QtWidgets import (QCheckBox, QComboBox, QFileDialog, QFormLayout, QFr
                              QPushButton, QScrollArea, QSpinBox, QSplitter, QTabWidget,
                              QVBoxLayout, QWidget)
 
-from ..analysis import trapezoid
+from .trend_view import Axis, Trace, TrendView
 from ..sequencer import OUT2_SET
 from ..signals import OUT2_QUANTITIES
 from ..instruments.base import SupplyCaps, SupplyPoll, SupplyReading, Setpoints
@@ -495,34 +494,73 @@ class SupplyPanel(PanelBase):
     def _build_trend_tab(self):
         w = QWidget()
         v = QVBoxLayout(w)
-        v.addLayout(self.build_trend_bar())
-        self.glw = pg.GraphicsLayoutWidget()
-        self.p_v = self.glw.addPlot(row=0, col=0)
-        self.p_i = self.glw.addPlot(row=1, col=0)
-        self.p_d = self.glw.addPlot(row=2, col=0)
-        for p, name, unit, c in ((self.p_v, "Voltage", "V", C_VOLT),
-                                 (self.p_i, "Current", "A", C_CURR),
-                                 (self.p_d, "DVM", "V", C_DVM)):
-            p.showGrid(x=True, y=True, alpha=0.15)
-            p.setLabel("left", name, units=unit, color=c)
-            p.getAxis("left").setWidth(70)
-            p.setClipToView(True)
-            p.setDownsampling(auto=True, mode="peak")
-        self.p_i.setXLink(self.p_v)
-        self.p_d.setXLink(self.p_v)
-        self.p_d.setLabel("bottom", "Time", units="s")
-        self.c_v = self.p_v.plot(pen=pg.mkPen(C_VOLT, width=1.5))
-        self.c_i = self.p_i.plot(pen=pg.mkPen(C_CURR, width=1.5))
-        self.c_imax = self.p_i.plot(pen=pg.mkPen(C_CURR, width=1, style=Qt.PenStyle.DotLine))
-        # output 2, dashed
-        self.c_v2 = self.p_v.plot(pen=pg.mkPen(C_VOLT, width=1, style=Qt.PenStyle.DashLine))
-        self.c_i2 = self.p_i.plot(pen=pg.mkPen(C_GOOD, width=1, style=Qt.PenStyle.DashLine))
-        self.c_d = self.p_d.plot(pen=pg.mkPen(C_DVM, width=1.5))
-        self.p_d.setVisible(False)
-        touch.plots(self.p_v, self.p_i, self.p_d)
-        self.scrolling_trend(self.p_v, self.p_v, self.p_i, self.p_d)
-        v.addWidget(self.glw, 1)
+        dash, dot = Qt.PenStyle.DashLine, Qt.PenStyle.DotLine
+        self.trend = TrendView(
+            [Axis("V", "Voltage", "V", C_VOLT), Axis("I", "Current", "A", C_CURR),
+             Axis("P", "Power", "W", C_POW), Axis("DVM", "DVM", "V", C_DVM)],
+            [Trace("voltage", "Voltage", "V", C_VOLT, short="V"),
+             Trace("current", "Current", "I", C_CURR, short="I"),
+             Trace("i_max", "Current peak", "I", C_CURR, dot, 1, short="I peak"),
+             Trace("power", "Power", "P", C_POW, shown=False, short="P"),
+             Trace("voltage2", "Output 2 voltage", "V", C_VOLT, dash, 1, short="V2"),
+             Trace("current2", "Output 2 current", "I", C_GOOD, dash, 1, short="I2"),
+             Trace("power2", "Output 2 power", "P", C_POW, dash, 1, shown=False, short="P2"),
+             Trace("dvm", "DVM", "DVM", C_DVM, short="DVM")])
+        self.trend.changed.connect(lambda: setattr(self, "_dirty", True))
+        v.addLayout(self.build_trend_bar(self.trend))
+        v.addWidget(self.trend, 1)
+        self.view_stats = QLabel("")
+        self.view_stats.setFont(QFont(MONO, 9))
+        self.view_stats.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self.view_stats.setToolTip("Over the time on screen: zoom or scroll the chart to choose it")
+        v.addWidget(self.view_stats)
         return w
+
+    def _trend_cols(self, d) -> dict:
+        _, v, i, imax, dvm, v2, i2 = d.T
+        return {"voltage": v, "current": i, "i_max": imax, "power": v * i,
+                "voltage2": v2, "current2": i2, "power2": v2 * i2, "dvm": dvm}
+
+    def update_stats(self):
+        d = self.buf.view()
+        n, rows = self.trend.stats(d[:, 0], self._trend_cols(d)) if len(d) else (0, [])
+        w = self.trend.window()
+        self.trend_stats.setText(f"In view: {w[1] - w[0]:.1f} s, {n} readings" if w else "")
+        if not rows:
+            self.view_stats.setText("")
+            return
+        cell = "<td style='padding:0 0 0 14px' align=right>{}</td>"
+        head = "".join(cell.format(f"<span style='color:{C_MUTED}'>{h}</span>")
+                       for h in ("average", "min", "max", "peak–peak", "total"))
+        html = [f"<table cellspacing=0><tr><td></td>{head}</tr>"]
+        for row in rows:
+            t = self.trend.traces[row["key"]]
+            u = row["unit"]
+            vals = [fmt_si(row[k], u, 4, signed=k != "pp") for k in ("avg", "min", "max", "pp")]
+            vals.append(fmt_si(row["total"], row["total_unit"], 4) if "total" in row else "")
+            html.append(f"<tr><td style='color:{t.color}'>{t.short or t.label}</td>"
+                        + "".join(cell.format(x) for x in vals) + "</tr>")
+        self.view_stats.setText("".join(html) + "</table>")
+
+    def _trend_traces(self):
+        """What there is data for, with the present settings."""
+        p, c = self.poll, self.caps
+        keys = {"current"}
+        if p.measure_voltage:
+            keys |= {"voltage", "power"}
+        if p.pulse_stats:
+            keys.add("i_max")
+        if c is not None and c.has_out2 and p.out2:
+            keys |= {"voltage2", "current2", "power2"}
+        if p.dvm:
+            keys.add("dvm")
+        self.trend.set_available(keys)
+
+    def session_settings(self) -> dict:
+        return {"trend": self.trend.state()}
+
+    def restore_settings(self, settings: dict):
+        self.trend.restore((settings or {}).get("trend"))
 
     # ================================================================ actions
     def set_output(self, on: bool):
@@ -598,8 +636,7 @@ class SupplyPanel(PanelBase):
         self.poll.dvm = self.dvm_chk.isChecked() and self.caps.has_dvm
         self.pulse_box.setVisible(self.poll.pulse_stats)
         self.r_dvm.setVisible(self.poll.dvm)
-        self.p_d.setVisible(self.poll.dvm)
-        self.p_v.setVisible(self.poll.measure_voltage)
+        self._trend_traces()
         self.r_volt.setVisible(self.poll.measure_voltage)
         self.r_pow.setVisible(self.poll.measure_voltage)
 
@@ -800,30 +837,12 @@ class SupplyPanel(PanelBase):
             return
         t = d[:, 0]
         span = self.span()
-        start = int(np.searchsorted(t, t[-1] - span)) if span else 0
-        # Plot one point past the window so the lines run to the left edge;
-        # the statistics below stay on the window itself.
-        t, v, i, imax, dvm, v2, i2 = d[max(0, start - 1):].T
-        w = d[start:]
-        self.c_v.setData(t, v, connect="finite")
-        self.c_i.setData(t, i)
-        if np.isfinite(imax).any():
-            self.c_imax.setData(t, imax, connect="finite")
-        else:
-            self.c_imax.setData([], [])
-        for curve, y in ((self.c_v2, v2), (self.c_i2, i2)):
-            if np.isfinite(y).any():
-                curve.setData(t, y, connect="finite")
-            else:
-                curve.setData([], [])
-        if self.p_d.isVisible():
-            self.c_d.setData(t, dvm, connect="finite")
-        t, v, i = w[:, 0], w[:, 1], w[:, 2]
-        charge = trapezoid(i, t) / 3600 if t.size > 1 else float("nan")
-        vtxt = f"   V avg {np.nanmean(v):.4f} V" if np.isfinite(v).any() else ""
-        self.trend_stats.setText(
-            f"I avg {fmt_current(i.mean())}  min {fmt_current(i.min())}  "
-            f"max {fmt_current(i.max())}{vtxt}   charge {fmt_si(charge, 'Ah')}")
+        # Live: the span, and one point before it so the lines reach the left
+        # edge. Looking back: everything (the plots clip to the view).
+        start = int(np.searchsorted(t, t[-1] - span)) if span and self._live else 0
+        d = d[max(0, start - 1):]
+        self.trend.set_data(d[:, 0], self._trend_cols(d))
+        self._stats_due = True
 
     # ================================================================ misc
     def _style_badge(self, mode: str, badge=None):

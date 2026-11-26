@@ -108,11 +108,18 @@ def t_dual():
 
     def shot():
         dw.grab().save(str(OUT / "touch-66309b.png"))  # noqa: F821
+        p = dw.panels()[0]
+        p.trend.show_trace("power", True)
+        p.trend.set_mode("one")
+        t_at(1500, lambda: (dw.grab().save(str(OUT / "touch-trend.png")), off()))  # noqa: F821
+
+    def off():
         dw.all_outputs_off()
         t_at(500, lambda: (dw.close(), app.quit()))  # noqa: F821
 
     t_at(1500, setup)
-    t_at(5000, shot)
+    t_at(3000, lambda: dw.panels()[0].cmd(lambda d: d.set_voltage(1.2)))
+    t_at(6000, shot)
 
 
 t_at(1500, t_setup)

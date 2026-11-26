@@ -59,6 +59,10 @@ class PanelBase(QWidget):
         self._edge: float | None = None
         self._x_plot = None                   # the plot whose X range scrolls (others link to it)
         self._steady: list[SteadyY] = []
+        self._live = True                     # the trend follows the newest reading
+        self._stats_due = False               # the view or the data changed
+        self._stats_at = 0.0
+        self.fit_btn = None
         self._pm_t = 0.0
         self._lost = False
         # Several of one model can be open: the first is plain "PPK2", then
@@ -258,6 +262,11 @@ class PanelBase(QWidget):
                 self._redrawn = m
                 self.redraw()
             self._scroll()
+        m = time.monotonic()
+        if self._stats_due and m - self._stats_at >= 0.25:     # ≤ 4 per second
+            self._stats_due = False
+            self._stats_at = m
+            self.update_stats()
         self.rate_label.setText(f"{self.readings_per_s():.1f} readings/s" if self.connected else "")
 
     # ---- shared UI pieces ------------------------------------------------------
@@ -282,19 +291,43 @@ class PanelBase(QWidget):
         self.worker.poll_enabled = not paused
         self.pause_btn.setText("Resume polling" if paused else "Pause polling")
 
-    def build_trend_bar(self):
+    def build_trend_bar(self, view=None):
+        """Span, Freeze, Clear, Record; with a TrendView, its View menu and the
+        zoom buttons (for fingers: the mouse wheel does the same)."""
         bar = QHBoxLayout()
         bar.addWidget(QLabel("Span"))
         self.span_combo = QComboBox()
         self.span_combo.addItems(list(SPANS))
         self.span_combo.setCurrentText("2 min")
-        self.span_combo.currentIndexChanged.connect(lambda *_: setattr(self, "_dirty", True))
+        self.span_combo.currentIndexChanged.connect(lambda *_: self.live_trend())
         bar.addWidget(self.span_combo)
         self.freeze_chk = QCheckBox("Freeze")
         bar.addWidget(self.freeze_chk)
         clr = QPushButton("Clear")
         clr.clicked.connect(self.clear_trend)
         bar.addWidget(clr)
+        zoom = []
+        if view is not None:
+            bar.addWidget(view.menu_button)
+            for text, tip, fn in (
+                    ("T−", "Show more time", lambda: self.zoom_time(False)),
+                    ("T+", "Show less time (zoom in)", lambda: self.zoom_time(True)),
+                    ("Y−", "Zoom every axis out", lambda: self.zoom_y(2.0)),
+                    ("Y+", "Zoom every axis in", lambda: self.zoom_y(0.5))):
+                b = QPushButton(text)
+                b.setToolTip(tip + ".\nWith a mouse: the wheel over the chart zooms time, "
+                                   "over an axis that axis; drag to move.")
+                b.setFixedWidth(52 if touch.TOUCH else 40)
+                b.clicked.connect(fn)
+                zoom.append(b)
+            self.fit_btn = QPushButton("Fit")
+            self.fit_btn.setToolTip("Follow the newest reading and scale every axis to its data")
+            self.fit_btn.clicked.connect(self.live_trend)
+            zoom.append(self.fit_btn)
+            self.trend_view = view
+            view.browsed.connect(self.browse_trend)
+            view.rebuilt.connect(self._trend_rebuilt)
+            self._trend_rebuilt()
         self.trend_stats = QLabel("")
         self.trend_stats.setFont(QFont(MONO, 9))
         # Long stats must never widen the window: take the free space, wrap if needed.
@@ -311,6 +344,8 @@ class PanelBase(QWidget):
             bar.addWidget(self.rec_btn)
             stats = QHBoxLayout()
             stats.addWidget(self.trend_stats, 1)
+            for b in zoom:
+                stats.addWidget(b)
             stats.addWidget(self.rate_label)
             col = QVBoxLayout()
             col.setSpacing(2)
@@ -318,6 +353,8 @@ class PanelBase(QWidget):
             col.addLayout(stats)
             return col
         bar.addWidget(self.trend_stats, 1)
+        for b in zoom:
+            bar.addWidget(b)
         bar.addWidget(self.rate_label)
         bar.addWidget(self.rec_btn)
         return bar
@@ -348,12 +385,60 @@ class PanelBase(QWidget):
         self._edge = edge
         return edge
 
+    def _trend_rebuilt(self):
+        v = self.trend_view
+        self.scrolling_trend(v.x_box(), *v.boxes.values())
+        if v.x_box() is not None:
+            v.x_box().sigXRangeChanged.connect(self._view_moved)
+        self._dirty = self._stats_due = True
+
+    def _view_moved(self, *_):
+        self._stats_due = True
+
+    def update_stats(self):
+        """Statistics of what the trend shows (a panel with a TrendView)."""
+    def browse_trend(self):
+        """The user moved through time: stop following until Live / Fit."""
+        if self._live:
+            self._dirty = True          # draw all of the buffer, not just the span
+        self._live = False
+        if self.fit_btn is not None:
+            self.fit_btn.setText("▶ Live")
+            set_role(self.fit_btn, "primary")
+
+    def live_trend(self):
+        self._live = True
+        for s in self._steady:
+            s.auto = True
+            s.reset()
+        if self.fit_btn is not None:
+            self.fit_btn.setText("Fit")
+            set_role(self.fit_btn, "")
+        self._dirty = True
+
+    def zoom_time(self, zoom_in: bool):
+        """Live: the next span. Looking back: about the middle of the view."""
+        if self._live:
+            names = list(SPANS)
+            i = names.index(self.span_combo.currentText())
+            i = max(0, i - 1) if zoom_in else min(len(names) - 1, i + 1)
+            self.span_combo.setCurrentIndex(i)
+        elif self._x_plot is not None:
+            self._x_plot.scaleBy(x=0.5 if zoom_in else 2.0)
+
+    def zoom_y(self, factor: float):
+        for s in self._steady:
+            s.auto = False
+        self.trend_view.zoom_y(factor)
+
     def _scroll(self):
         if self._x_plot is None:
             return
         span = self.span()
         edge = self._view_edge()
-        if span and edge is not None:
+        if not self._live:
+            pass
+        elif span and edge is not None:
             self._x_plot.setXRange(max(0.0, edge - span), max(span, edge), padding=0)
         elif not span:
             self._x_plot.enableAutoRange(axis="x")
@@ -368,7 +453,7 @@ class PanelBase(QWidget):
         self._edge = None
         self._lag = None
         self.reset_steady()
-        self._dirty = True
+        self.live_trend()
 
     def _toggle_record(self, on: bool):
         if on:

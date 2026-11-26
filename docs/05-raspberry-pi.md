@@ -138,7 +138,7 @@ What's different from the desktop layout:
 
   ![Capture tab on the touch screen](images/touch-capture.png)
 
-- **Plots don't pan or zoom** under a finger. The **Span** selector sets the time window, and Y always autoscales. Scroll areas scroll by dragging.
+- **Plots don't pan or zoom** under a finger, except the supply's Trend: there a drag scrolls through time (**▶ Live** comes back), a drag on an axis moves that axis, and **T− T+ Y− Y+** zoom. Elsewhere the **Span** selector sets the time window, and Y always autoscales. Scroll areas scroll by dragging.
 - **＋ Add instrument** replaces the connection toolbar. It scans the GPIB bus when it opens and lists what it finds plus the simulators. Pick one (or enter a GPIB address with the keypad, or **Type a resource…** for a LAN or USB instrument such as a function generator), choose the model, then tap **Connect**. For the 3456A, tap the **3456A DMM** model button, because the meter can't identify itself. For a SCPI meter, load, supply or oscilloscope, **Auto-detect** usually finds it; otherwise tap **Meter / load / scope / SCPI…** and pick it from the list.
 
   ![Add instrument](images/touch-connect.png)

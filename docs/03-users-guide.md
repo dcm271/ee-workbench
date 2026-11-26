@@ -108,12 +108,16 @@ The 66321D digitizes the output and averages each reading over *samples × inter
 
 ### Trend tab
 
-Strip charts of voltage, current (with the per-reading **max** as a dotted line when pulse statistics are on) and the DVM.
+Strip charts of voltage, current (with the per-reading **max** as a dotted line when pulse statistics are on), power, output 2 (dashed) and the DVM.
 
+![One chart with an axis each, and the statistics of the time shown](images/touch-trend.png)
+
+- **View ▾** chooses the traces (Voltage, Current, Current peak, Power, Output 2 voltage / current / power, DVM: those there are readings for) and the layout: **a chart for each quantity**, or **one chart, an axis for each**. Power is off until you choose it. The choice is kept with the session.
 - **Span:** 10 s, 30 s, 2 min, 10 min, 1 h, or All. **Freeze** pauses the display (data keeps arriving). **Clear** empties the plots.
-- The stats line above the plot shows average, minimum and maximum current, average voltage, and the **charge** delivered (mAh/Ah) over the span. Use it for battery-life estimates.
-- Drag a plot to pan, use the mouse wheel to zoom, and right-click for export and autoscale options.
-- The trend scrolls smoothly with the clock rather than jumping at each reading. The vertical scale grows as soon as a reading would go off-scale but shrinks only gradually, once the data uses less than half of it. Zooming vertically by hand turns this off; the plot's **A** button turns it back on.
+- **Zoom and scroll.** Over the chart, the mouse wheel zooms time and a drag scrolls through it; over an axis, the wheel and a drag work on that axis alone, so each quantity can be scaled and moved on its own. A finger does the same, and **T− T+** (time) and **Y− Y+** (every axis) zoom without a wheel.
+- Scrolling back stops the chart following the newest reading (readings keep arriving and recording). **▶ Live** goes back to it; when live, the same button is **Fit**, which rescales every axis to its data.
+- **Statistics of what's on screen.** The line above the chart gives the time shown and how many readings it holds, and the table under the chart gives, for each trace shown, the **average, min, max and peak–peak** over exactly that time, plus the **total**: charge (Ah) for a current, energy (Wh) for a power. Zoom or scroll to pick the stretch, e.g. one transmit burst or one sleep cycle. Use it for battery-life estimates.
+- The trend scrolls smoothly with the clock rather than jumping at each reading. The vertical scale grows as soon as a reading would go off-scale but shrinks only gradually, once the data uses less than half of it. Zooming an axis by hand turns this off for that axis; **Fit** turns it back on.
 - **● Record CSV** writes every reading to a file until you press it again. If the file stops being writable (disk full, USB stick removed) recording stops by itself and the status bar says why.
 
 ### Capture tab
@@ -1112,8 +1116,8 @@ On a touch screen (or any display of 1280×800 or smaller) the app uses a touch 
 | Note into the session being recorded | **Ctrl+M** |
 | Full screen on/off | **F11** |
 | Apply a setpoint | **Enter** in the box, or **Set** |
-| Zoom a plot | mouse wheel over the plot |
-| Pan a plot | drag |
+| Zoom a plot | mouse wheel over the plot (supply Trend: time; over an axis: that axis) |
+| Pan a plot | drag (supply Trend: through time; on an axis: that axis) |
 | Autoscale / export a plot | right-click the plot |
 | Close an instrument | **×** on its tab |
 | Reopen an instrument that stopped answering | **⟳ Reconnect** (or **⟳ Retry**) on its tab |
