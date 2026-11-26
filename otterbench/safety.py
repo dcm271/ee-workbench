@@ -87,6 +87,30 @@ def _alive(pid: int) -> bool:
     return True
 
 
+def boot_time() -> float | None:
+    """When the computer started (Linux), else None."""
+    try:
+        with open("/proc/stat", encoding="ascii") as f:
+            for line in f:
+                if line.startswith("btime "):
+                    return float(line.split()[1])
+    except (OSError, ValueError):
+        pass
+    return None
+
+
+def ended_by_restart(d: dict) -> bool:
+    """Did the computer restart after that run started? Then it most likely
+    ended with the shutdown (the desktop closes first, and Qt then exits
+    without a quit), not in a crash."""
+    boot = boot_time()
+    try:
+        started = time.mktime(time.strptime(d.get("started", ""), "%Y-%m-%dT%H:%M:%S"))
+    except (ValueError, TypeError, OverflowError):
+        return False
+    return boot is not None and boot > started
+
+
 def previous_run() -> dict | None:
     """The marker of a run that ended without quitting, else None. A marker
     whose process is still alive (a second copy running) isn't a crash."""
@@ -106,6 +130,7 @@ def previous_run() -> dict | None:
     if pid == os.getpid() or _alive(pid):
         return None
     d["open"] = [x for x in d.get("open", []) if isinstance(x, dict) and x.get("resource")]
+    d["restarted"] = ended_by_restart(d)
     return d
 
 

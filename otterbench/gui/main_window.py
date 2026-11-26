@@ -6,8 +6,8 @@ import sys
 import time
 
 import pyqtgraph as pg
-from PyQt6.QtCore import Qt, QTimer, pyqtSignal
-from PyQt6.QtGui import QKeySequence, QShortcut
+from PyQt6.QtCore import QSize, Qt, QTimer, pyqtSignal
+from PyQt6.QtGui import QIcon, QKeySequence, QShortcut
 from PyQt6.QtWidgets import (QApplication, QComboBox, QFileDialog, QFrame, QHBoxLayout,
                              QInputDialog, QLabel, QMainWindow, QMenu, QMessageBox, QPushButton,
                              QStatusBar, QTabWidget, QToolButton, QVBoxLayout, QWidget)
@@ -33,7 +33,7 @@ from .logic_panel import LogicPanel
 from .ppk2_panel import Ppk2Panel
 from .session_viewer import open_viewer
 from .supply_panel import SupplyPanel
-from .theme import PLOT_BG, set_role
+from .theme import ICONS, PLOT_BG, set_role
 from .widgets import C_MUTED, dark_palette
 
 
@@ -67,7 +67,7 @@ class MainWindow(QMainWindow):
         self.tabs.tabCloseRequested.connect(self.close_tab)
         root.addWidget(self.tabs, 1)
         self.empty = QLabel(
-            "Tap  ＋ Add instrument  to connect.\n\nThe HP 3456A has no ID query, so pick "
+            "Tap  + Add instrument  to connect.\n\nThe HP 3456A has no ID query, so pick "
             "its model.\nSIM::… entries let you explore without hardware."
             if touch.TOUCH else
             "Pick a resource and model above, then Connect.\n\n"
@@ -201,7 +201,7 @@ class MainWindow(QMainWindow):
         w.setObjectName("bar")
         lay = QHBoxLayout(w)
         lay.setContentsMargins(6, 4, 6, 4)
-        add = QPushButton("＋ Add instrument")
+        add = QPushButton("+ Add instrument")
         add.clicked.connect(self.add_dialog)
         set_role(add, "primary")
         lay.addWidget(add)
@@ -223,7 +223,7 @@ class MainWindow(QMainWindow):
         return w
 
     def _build_session_buttons(self, lay, wide: bool):
-        self.sess_btn = QPushButton("⏺ Record")
+        self.sess_btn = QPushButton("● Record")
         self.sess_btn.setCheckable(True)
         self.sess_btn.setToolTip("Record every open instrument, logic capture and note into one "
                                  f"session file ({SUFFIX}), to look through later on one time axis")
@@ -315,7 +315,7 @@ class MainWindow(QMainWindow):
             path = session.path
             err = session.stop()
             self._sess_timer.stop()
-            self.sess_btn.setText("⏺ Record")
+            self.sess_btn.setText("● Record")
             set_role(self.sess_btn, "")
             self.note_btn.setEnabled(False)
             if err:
@@ -567,7 +567,7 @@ class MainWindow(QMainWindow):
 
     def add_note(self):
         if not session.active:
-            self.status.showMessage("Notes go into a session: start ⏺ Record first",
+            self.status.showMessage("Notes go into a session: start ● Record first",
                                     5000)
             return
         t = now()
@@ -590,7 +590,10 @@ class MainWindow(QMainWindow):
             self.close()
 
     def _build_fs_button(self, width: int | None = None):
-        self.fs_btn = QPushButton("⛶")
+        # an icon: no font on the Pi has a full-screen symbol (U+26F6 showed as a box)
+        self.fs_btn = QPushButton()
+        self.fs_btn.setIcon(QIcon(str(ICONS / "fullscreen.png")))
+        self.fs_btn.setIconSize(QSize(20, 20))
         self.fs_btn.setToolTip("Full screen on/off (F11)")
         if width:
             self.fs_btn.setFixedWidth(width)
@@ -603,6 +606,7 @@ class MainWindow(QMainWindow):
         again once it is on screen."""
         self._want_fs = True
         self.set_kiosk(True)
+        self.fs_btn.setIcon(QIcon(str(ICONS / "fullscreen-exit.png")))
         self.showFullScreen()
         QTimer.singleShot(700, lambda: self._want_fs and self.showFullScreen())
 
@@ -617,6 +621,7 @@ class MainWindow(QMainWindow):
             self.showNormal()
             self.showMaximized()
             self.set_kiosk(False)
+            self.fs_btn.setIcon(QIcon(str(ICONS / "fullscreen.png")))
         else:
             self.go_fullscreen()
 
@@ -1038,8 +1043,10 @@ class MainWindow(QMainWindow):
         """The last run ended without quitting."""
         prev = self._prev_run
         tabs = prev.get("open", [])
-        msg = "The last run ended unexpectedly" + (f" (started {prev['started']})"
-                                                   if prev.get("started") else "")
+        since = f" (started {prev['started']})" if prev.get("started") else ""
+        msg = ("The computer shut down or restarted while the last run was open" + since
+               + ", so it didn't quit normally" if prev.get("restarted") else
+               "The last run ended unexpectedly" + since)
         crash.write_log(msg + f"; open then: {', '.join(t['resource'] for t in tabs) or 'none'}")
         if self.safety.off_after_crash and tabs:
             self._off_pending = {t["resource"] for t in tabs}
